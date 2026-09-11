@@ -44,8 +44,10 @@ A bundle is a directory:
 ├── DESIGN.md             MUST exist
 ├── STATE.template.md     MUST exist
 └── lessons/              MUST exist, MUST contain at least one lesson
-    ├── 00-<slug>.md
-    ├── 01-<slug>.md
+    ├── 00-<slug>.md              a lesson as a single file
+    ├── 01-<slug>/                a lesson as a folder, when it has material
+    │   ├── LESSON.md             the lesson itself; MUST be named exactly this
+    │   └── <anything else>       diagrams, data, examples, references
     └── ...
 ```
 
@@ -133,8 +135,17 @@ Every entry MUST resolve to a real file, and every file in `lessons/` MUST appea
 list exactly once. A lesson file that is not listed is invisible to the runner and is
 reported as an error, not silently skipped.
 
-Name lessons by path (`lessons/00-foundations.md`), the same form used by
-`active_lesson`, so every reference to a lesson looks identical everywhere.
+Name lessons by path, the same form used by `active_lesson`, so every reference to a
+lesson looks identical everywhere. An entry always names the Markdown file, whether the
+lesson is a single file or a folder:
+
+```yaml
+lessons:
+  - lessons/00-foundations.md                 # single-file lesson
+  - lessons/01-automaton-machinery/LESSON.md  # foldered lesson
+```
+
+Both forms may appear in the same bundle. Nothing else in the format changes.
 
 **`workspace_kind`** — one of:
 
@@ -297,7 +308,58 @@ anything that was completed, you have written an instance again.
 
 ## 6. Lessons
 
-One file per lesson in `lessons/`. Name them so they sort in order: `00-`, `01-`, `02-`.
+A lesson is **either** a single Markdown file **or** a folder containing `LESSON.md`
+plus supporting material. Name lessons so they sort in order: `00-`, `01-`, `02-`.
+
+```
+lessons/
+├── 00-foundations.md                  single file — use this unless you need material
+└── 08-automaton-machinery/            folder — when the lesson ships material
+    ├── LESSON.md                      required, named exactly this
+    ├── worked-example.md
+    └── assets/dafsa.svg
+```
+
+Both forms are lessons. They are identical in every other respect: same frontmatter,
+same required sections, same treatment by the runner.
+
+### When to use a folder
+
+Use a folder when the lesson ships something alongside the prose — a diagram, a data
+file, a longer worked example, a reference the learner opens on request. Use a single
+file otherwise. A folder holding only `LESSON.md` is pointless; make it a file.
+
+### Loading material — important
+
+`LESSON.md` is the lesson. **Everything else in the folder is loaded only when
+`LESSON.md` explicitly directs it to be.** A tutor does not read a lesson folder
+wholesale, because the entire point of the format is that a tutor holds one lesson in
+context, not a course.
+
+So a folder lesson MUST name its material and say when to use it:
+
+```markdown
+For the state-merging walkthrough, read `worked-example.md`.
+If the learner asks how minimisation differs from a trie, show `assets/dafsa.svg`.
+```
+
+Material that `LESSON.md` never mentions is unreachable. That is not a subtle failure:
+the tutor has no way to know the file exists.
+
+### Naming and ids
+
+The lesson's slug is the file stem (`00-foundations.md` -> `00-foundations`) or the
+folder name (`08-automaton-machinery/` -> `08-automaton-machinery`). The `id` in
+frontmatter MUST equal that slug.
+
+Anything under `lessons/` that is neither a top-level `.md` file nor a folder containing
+`LESSON.md` is not a lesson. A folder directly under `lessons/` without a `LESSON.md` is
+an error — it is either a broken lesson or material filed at the wrong level, and in
+both cases something is silently unreachable.
+
+### Lesson file structure
+
+The same for both forms. A foldered lesson's `LESSON.md` looks exactly like this.
 
 ```markdown
 ---
@@ -353,7 +415,7 @@ Material available if the learner asks. Not required.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `id` | MUST | Unique within the bundle. Match the filename stem. |
+| `id` | MUST | Unique within the bundle. Match the lesson slug (file stem, or folder name). |
 | `title` | MUST | Human-facing lesson name. |
 | `design_refs` | SHOULD | `DESIGN.md` anchors this lesson needs. MUST all resolve. |
 | `validators` | SHOULD | Validator names from `tutorial.yaml`. MUST all be declared. |
@@ -407,6 +469,10 @@ Prefer a small number of good lessons over a large number of thin ones.
 10. **Pasting a learner's current code into the bundle.** Source code belongs in the
    learner's workspace; the bundle describes what to build, not what was built.
 11. **Renaming `id` after publication.** It is the stable identity.
+12. **A lesson folder whose `LESSON.md` never mentions its own material.** The tutor
+    cannot discover files the lesson does not name; they are dead weight.
+13. **Naming a foldered lesson's body anything but `LESSON.md`.** `lesson.md`,
+    `index.md` and `README.md` are not recognised.
 
 ---
 
@@ -418,7 +484,10 @@ Confirm each of these by looking, not by remembering:
 - [ ] `STATE.template.md` exists and describes a learner who has not started
 - [ ] `tutorial.yaml`, `COURSE.md`, `DESIGN.md`, `lessons/` all exist
 - [ ] every `lessons` entry resolves to a file that exists
-- [ ] every file in `lessons/` appears in `lessons` exactly once
+- [ ] every lesson in `lessons/` appears in `lessons` exactly once — counting both
+      top-level `.md` files and folders containing `LESSON.md`
+- [ ] every folder directly under `lessons/` contains a `LESSON.md`
+- [ ] every supporting file in a lesson folder is mentioned by its `LESSON.md`
 - [ ] `STATE.template.md`'s `tutorial_id` equals `tutorial.yaml`'s `id`
 - [ ] `STATE.template.md`'s `active_lesson` equals the first `lessons` entry
 - [ ] every lesson file has `id` and `title` in frontmatter

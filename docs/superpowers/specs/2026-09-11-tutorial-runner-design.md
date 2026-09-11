@@ -180,6 +180,17 @@ validators: [cargo-check, cargo-test]
 ---
 ```
 
+A lesson is **either** `lessons/<slug>.md` or `lessons/<slug>/LESSON.md` — a folder when
+it ships material (diagrams, data, worked examples). Entries in `lessons` always name the
+Markdown file, so every entry is directly readable and `active_lesson` keeps meaning "the
+file to read"; the runner never branches on file-vs-directory.
+
+Material in a lesson folder loads **only when `LESSON.md` names it**, the same
+progressive-disclosure rule skills use. Without that constraint a folder lesson would
+quietly reload a whole course's worth of material and defeat the context budget in §8.
+A folder directly under `lessons/` with no `LESSON.md` is an error rather than an
+ignored directory, so misfiled material cannot go silently unreachable.
+
 A lesson defines purpose, prerequisites, objectives, theory, concepts to teach,
 constraints, suggested progression, completion conditions, and what to persist on
 completion. It is **not** a script of conversational turns — the tutor generates each
@@ -320,7 +331,8 @@ it with zero context.
 1. every `design_refs` entry resolves to a real `DESIGN.md` anchor
 2. every lesson `validators` entry is declared in `tutorial.yaml`
 3. every lesson has `id` + `title` frontmatter
-4. every `lessons` entry resolves; every file in `lessons/` is listed exactly once
+4. every `lessons` entry resolves; every lesson in `lessons/` (top-level `.md` plus
+   folders with `LESSON.md`) is listed exactly once; every lesson folder has a `LESSON.md`
 5. no progress markers anywhere in `COURSE.md` or `lessons/`
 
 **Cheap checks** (free once the script exists):
