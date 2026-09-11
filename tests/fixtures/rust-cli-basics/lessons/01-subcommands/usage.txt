@@ -1,0 +1,8 @@
+tally - count the lines or the words in a text file
+
+usage:
+    tally <command> <file>
+
+commands:
+    lines    print the number of lines in <file>
+    words    print the number of words in <file>

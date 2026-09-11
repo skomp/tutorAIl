@@ -1,0 +1,52 @@
+bundle_format: 1
+id: rust-automaton-db
+title: Learn Rust by Building AutomatonDB
+description: >
+  Project-driven Rust taught by building a serious automaton-native,
+  partitioned database with storage-engine and distributed-systems depth.
+subjects: [rust, databases, distributed-systems, automata, storage-engines]
+aliases: [cassandra-like, key-value-store, kv-store, database-internals, systems-programming]
+level: intermediate-to-advanced
+style: [project-driven, interactive, systems-oriented, long-form]
+
+lessons:
+  - lessons/00-foundations.md
+  - lessons/01-rows-cells-temporal.md
+  - lessons/02-typed-keys-table-hierarchy.md
+  - lessons/03-first-refactor.md
+  - lessons/04-richer-typed-schemas.md
+  - lessons/05-canonical-ordered-keys.md
+  - lessons/06-data-query-algebra.md
+  - lessons/07-ordered-querying.md
+  - lessons/08-automaton-machinery.md
+  - lessons/09-automaton-native-key-queries.md
+  - lessons/10-storage-durability.md
+  - lessons/11-automaton-aware-segments.md
+  - lessons/12-concurrency-async.md
+  - lessons/13-grpc-driver.md
+  - lessons/14-static-cluster-placement.md
+  - lessons/15-eventual-replication.md
+  - lessons/16-general-quorums.md
+  - lessons/17-repair-convergence.md
+  - lessons/18-gossip-membership.md
+  - lessons/19-live-reconfiguration.md
+  - lessons/20-online-schema-evolution.md
+  - lessons/21-strong-consistency.md
+  - lessons/22-hardening-performance.md
+
+workspace_kind: existing-or-new-repository
+tutor_owned: [tutorial/STATE.md, tutorial/DESIGN.md, tutorial/lessons/**]
+learner_owned: [src/**, tests/**, Cargo.toml, Cargo.lock]
+ownership_policy: tutor-must-not-edit-learner-owned
+
+validators:
+  cargo-check: { kind: command, command: [cargo, check] }
+  cargo-test: { kind: command, command: [cargo, test] }
+  cargo-run: { kind: command, command: [cargo, run] }
+  has-lib: { kind: file-exists, path: src/lib.rs }
+  git-diff: { kind: git-diff }
+  manual: { kind: manual }
+
+one_task_at_a_time: true
+solution_code: on-request-only
+advance_on: validated-evidence-only

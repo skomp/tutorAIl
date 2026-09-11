@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="60" role="img">
+  <title>Two prefixes sharing one suffix</title>
+  <circle cx="20" cy="30" r="10" fill="none" stroke="#333"/>
+  <circle cx="110" cy="30" r="10" fill="none" stroke="#333"/>
+  <circle cx="200" cy="30" r="10" fill="none" stroke="#333"/>
+  <line x1="30" y1="30" x2="100" y2="30" stroke="#333"/>
+  <line x1="120" y1="30" x2="190" y2="30" stroke="#333"/>
+</svg>

@@ -377,20 +377,50 @@ it with zero context.
 7. `STATE.template.md` present / `STATE.md` absent — reversed in instance mode
 8. `tutorial.yaml` parses; `bundle_format` known; required fields present
 9. `COURSE.md`, `DESIGN.md` exist; `lessons` is non-empty
-10. `workspace_kind` is a known value; ownership globs non-empty
+10. `workspace_kind` and `ownership_policy` are known values; `tutor_owned` is non-empty;
+    `learner_owned` is non-empty **unless** `workspace_kind: none`, since a course that
+    builds no software owns none of the learner's files
 
 Mode is explicit, never inferred: `validate_bundle.py <path>` checks a bundle,
 `validate_bundle.py --instance <path>` checks an instance. Inferring the mode from which
 state file is present would make check 7 unable to fail, since a mis-shaped bundle would
 simply be validated as the other kind.
 
-Instance mode adds: `STATE.md` frontmatter well-formed, `active_lesson` resolves and is
-listed in `lessons`, `tutorial_id` matches the manifest.
+Two further checks follow from §3 and §5 rather than from the list above:
+
+11. instance mode — `STATE.md` frontmatter well-formed, `active_lesson` resolves and is
+    listed in `lessons`, `tutorial_id` matches the manifest
+12. bundle mode — `STATE.template.md` agrees with the manifest (`tutorial_id` equals
+    `id`, `active_lesson` equals `lessons[0]`, `status` is `not-started`)
+
+The `instance:` stamp is asserted in both directions: absent from a bundle, present in an
+instance.
+
+Exit codes are `0` pass, `1` findings, `2` usage, and **`3` indeterminate** — no findings,
+but some check could not run. A `DESIGN.md` that is not valid UTF-8 reaches this: check 1
+cannot run while nothing else complains, and printing green there would be a false
+oracle.
 
 **Explicitly out of scope**, stated in the docs so a green run is not over-read:
 pedagogical quality, lesson ordering, whether `DESIGN.md` is *accurate*, whether
 completion conditions are checkable, anything about learner code. Green means
 "structurally well-formed and executable by a runner", not "good course".
+
+Two limits are narrower than the rules they serve, and the script says so on every run
+rather than looking stronger than it is:
+
+- **Check 6 verifies that a `LESSON.md` names its material, not that it says *when* to
+  use it.** Intent cannot be distinguished from a filename inside a code fence without
+  crying wolf.
+- **"No learner source code in the bundle" is not checked at all.** It cannot be told
+  apart from a legitimate code example. It stays an author-judgement item on the
+  contract's self-check list.
+
+Progress-marker detection (check 5) is anchored to **structural positions** — headings,
+`Status:`-style labels, ticked checklist boxes, bold labels, table cells, lesson
+frontmatter — and is case-sensitive where the word is a label. An earlier free-text,
+case-insensitive match rejected valid bundles for ordinary prose such as "while the
+refactor is in progress".
 
 ### A check that was removed, and why
 
@@ -602,13 +632,13 @@ catalogue mirrors are documented as future concerns, not solved.
 | `tutorail-bundles` repository | **done** — holds `rust-automaton-db` |
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
-| Validator, as a proven prototype | **done** — 17 failure modes verified firing |
-| Validator, promoted into the repo with fixtures + suite | pending |
-| `SKILL.md` (the runner control plane) | pending |
-| `references/catalogue-format.md` | pending |
-| `references/runner-protocol.md` | pending |
-| `references/state-lifecycle.md` | pending |
-| `catalog/builtin.yaml` | pending |
-| `examples/rust-cli-basics/` example bundle | pending |
-| `.claude-plugin/` + `.codex-plugin/` manifests | pending |
-| `README.md` | pending |
+| Validator (`scripts/validate_bundle.py`) | **done** — 12 checks, restricted YAML reader |
+| Validator test suite | **done** — 138 assertions; every check proven firing |
+| `SKILL.md` (the runner control plane) | **done** |
+| `references/catalogue-format.md` | **done** |
+| `references/runner-protocol.md` | **done** |
+| `references/state-lifecycle.md` | **done** |
+| `catalog/builtin.yaml` | **done** |
+| `examples/rust-cli-basics/` example bundle | **done** |
+| `.claude-plugin/` + `.codex-plugin/` manifests | **done** |
+| `README.md` | **done** |

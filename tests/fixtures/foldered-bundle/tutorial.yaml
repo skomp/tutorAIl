@@ -1,0 +1,28 @@
+bundle_format: 1
+id: foldered-example
+title: A Bundle With A Foldered Lesson
+description: >
+  A small fixture bundle. It exists so the validator's foldered-lesson path
+  is exercised by something other than the 23-lesson course, every lesson of
+  which is a single file.
+subjects: [testing, bundle-format]
+aliases: [folder-lesson, material]
+level: beginner
+style: [fixture]
+
+lessons:
+  - lessons/00-single-file.md
+  - lessons/01-state-merging/LESSON.md
+
+workspace_kind: none
+tutor_owned:   [tutorial/STATE.md, tutorial/DESIGN.md]
+learner_owned: []
+ownership_policy: tutor-must-not-edit-learner-owned
+
+validators:
+  reads-the-example: { kind: file-contains, path: notes.md, pattern: dafsa }
+  judged: { kind: manual }
+
+one_task_at_a_time: true
+solution_code: on-request-only
+advance_on: validated-evidence-only

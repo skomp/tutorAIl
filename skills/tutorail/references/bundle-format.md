@@ -516,8 +516,11 @@ Confirm each of these by looking, not by remembering:
 - [ ] every lesson file has `id` and `title` in frontmatter
 - [ ] every `design_refs` entry resolves to a real anchor in `DESIGN.md`
 - [ ] every lesson `validators` entry is declared in `tutorial.yaml`
-- [ ] neither `COURSE.md` nor any file under `lessons/` contains `Status: Complete`,
-      `In progress`, `Next:`, `current lesson`, or `resume marker`
+- [ ] neither `COURSE.md` nor any file under `lessons/` carries a progress marker in a
+      structural position — a heading annotated with a status, a `Status:` label, a ticked
+      checklist box, a bold `**Next:**` label, a "current lesson" or "resume marker"
+      heading, or a status field in lesson frontmatter. Ordinary prose using those words
+      is fine: "while the refactor is in progress" is teaching, not progress.
 - [ ] every foldered lesson's body is named `LESSON.md` in exact case — confirm with a
       directory listing, because a case-insensitive filesystem will hide a mistake
 - [ ] `workspace_kind` is one of the three permitted values
