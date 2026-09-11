@@ -88,7 +88,10 @@ id: rust-automaton-db
 title: Learn Rust by Building AutomatonDB
 subjects: [rust, databases, distributed-systems]
 level: intermediate-to-advanced
-entry_lesson: lessons/00-foundations.md
+lessons:
+  - lessons/00-foundations.md
+  - lessons/01-rows-cells-temporal.md
+  # ... ordered; lessons[0] is the entry lesson
 
 workspace_kind: existing-or-new-repository   # | new-repository | none
 tutor_owned:    [tutorial/STATE.md, tutorial/DESIGN.md, tutorial/lessons/**]
@@ -181,6 +184,17 @@ A lesson defines purpose, prerequisites, objectives, theory, concepts to teach,
 constraints, suggested progression, completion conditions, and what to persist on
 completion. It is **not** a script of conversational turns — the tutor generates each
 task from objectives + state + workspace + the learner's last response.
+
+**Lesson order is `tutorial.yaml`'s `lessons` list, not filename sort.** The list is the
+single source of truth for both which lesson is first (`lessons[0]`, replacing a separate
+`entry_lesson` field) and what "the next lesson" means on completion. It lives in the
+manifest rather than in `COURSE.md` frontmatter because `COURSE.md` is deliberately not
+loaded in the steady state, and the runner needs the sequence every time it advances.
+
+An earlier draft cross-referenced `COURSE.md` against `lessons/` by scanning its prose
+for lesson paths. That check was **inert** on a real bundle — the course map names
+lessons as prose headings, so the scan matched nothing and reported clean without
+examining anything. An explicit list removes the need to parse prose at all.
 
 `design_refs` is the mechanism for partial `DESIGN.md` loading. `DESIGN.md` uses stable
 section anchors; a lesson declares only the anchors it needs; the tutor reads only
@@ -306,14 +320,14 @@ it with zero context.
 1. every `design_refs` entry resolves to a real `DESIGN.md` anchor
 2. every lesson `validators` entry is declared in `tutorial.yaml`
 3. every lesson has `id` + `title` frontmatter
-4. lessons referenced by `COURSE.md` exist; orphan lesson files flagged
+4. every `lessons` entry resolves; every file in `lessons/` is listed exactly once
 5. no progress markers anywhere in `COURSE.md` or `lessons/`
 
 **Cheap checks** (free once the script exists):
 
 6. `STATE.template.md` present / `STATE.md` absent — reversed in instance mode
 7. `tutorial.yaml` parses; `bundle_format` known; required fields present
-8. `COURSE.md`, `DESIGN.md`, `entry_lesson` resolve
+8. `COURSE.md`, `DESIGN.md` exist; `lessons` is non-empty
 9. `workspace_kind` is a known value; ownership globs non-empty
 
 Mode is explicit, never inferred: `validate_bundle.py <path>` checks a bundle,

@@ -79,7 +79,10 @@ aliases: [cassandra-like, storage-engine]
 level: intermediate-to-advanced
 style: [project-driven, interactive, long-form]
 
-entry_lesson: lessons/00-foundations.md
+lessons:
+  - lessons/00-foundations.md
+  - lessons/01-rows-cells-temporal.md
+  - lessons/02-typed-keys-table-hierarchy.md
 
 workspace_kind: existing-or-new-repository
 tutor_owned:    [tutorial/STATE.md, tutorial/DESIGN.md, tutorial/lessons/**]
@@ -108,7 +111,7 @@ advance_on: validated-evidence-only
 | `aliases` | SHOULD | Extra terms a learner might say instead of a subject. |
 | `level` | MUST | e.g. `beginner`, `intermediate`, `intermediate-to-advanced`. |
 | `style` | SHOULD | e.g. `project-driven`, `interactive`, `exercise-based`. |
-| `entry_lesson` | MUST | Path to the first lesson. MUST resolve to a real file. |
+| `lessons` | MUST | Ordered list of lesson paths. See below. |
 | `workspace_kind` | MUST | See below. |
 | `tutor_owned` | MUST | Globs the tutor may modify. |
 | `learner_owned` | MUST | Globs the tutor must not modify. |
@@ -117,6 +120,21 @@ advance_on: validated-evidence-only
 | `one_task_at_a_time` | SHOULD | Default `true`. |
 | `solution_code` | SHOULD | `on-request-only` or `freely`. |
 | `advance_on` | SHOULD | `validated-evidence-only` or `learner-assertion`. |
+
+**`lessons`** is the authoritative lesson sequence. It defines two things nothing else
+does:
+
+- **which lesson is first** — it is `lessons[0]`. There is no separate `entry_lesson`
+  field; one ordered list is the single source of truth.
+- **what "the next lesson" means** when one completes. Do not rely on filenames sorting
+  correctly; the list is the order.
+
+Every entry MUST resolve to a real file, and every file in `lessons/` MUST appear in the
+list exactly once. A lesson file that is not listed is invisible to the runner and is
+reported as an error, not silently skipped.
+
+Name lessons by path (`lessons/00-foundations.md`), the same form used by
+`active_lesson`, so every reference to a lesson looks identical everywhere.
 
 **`workspace_kind`** — one of:
 
@@ -268,7 +286,7 @@ None.
 Requirements:
 
 - `tutorial_id` MUST equal `id` in `tutorial.yaml`
-- `active_lesson` MUST equal `entry_lesson` in `tutorial.yaml`
+- `active_lesson` MUST equal the first entry of `lessons` in `tutorial.yaml`
 - `status` MUST be `not-started`
 - the section headings above MUST all be present, even if empty
 
@@ -364,8 +382,9 @@ Detailed lesson files are only required for lessons a learner will reach soon. A
 course may keep its later chapters as a high-level map in `COURSE.md` and gain lesson
 files as it goes.
 
-A 22-chapter course does not need 22 detailed lesson files to be valid. It needs
-`entry_lesson` to resolve, and every lesson file that exists to be well-formed.
+A 22-chapter course does not need 22 detailed lesson files to be valid. It needs every
+entry in `lessons` to resolve and every lesson file to be well-formed. Chapters without
+a lesson file yet are simply not listed.
 
 Prefer a small number of good lessons over a large number of thin ones.
 
@@ -378,15 +397,16 @@ Prefer a small number of good lessons over a large number of thin ones.
    Delete them. They describe one learner.
 3. **A `STATE.template.md` that is not empty of progress.** It must describe a learner
    who has not started.
-4. **`design_refs` pointing at anchors that do not exist**, usually after renaming a
+4. **A lesson file that is not listed in `lessons`.** It will never be reached.
+5. **`design_refs` pointing at anchors that do not exist**, usually after renaming a
    `DESIGN.md` heading.
-5. **Lessons referencing validators not declared in `tutorial.yaml`.**
-6. **Accepted warnings in `tutorial.yaml`.** Those belong to a learner's run.
-7. **Lesson files written as dialogue.** Give objectives, not turns.
-8. **Assuming the course builds software.** Set `workspace_kind: none` if it does not.
-9. **Pasting a learner's current code into the bundle.** Source code belongs in the
+6. **Lessons referencing validators not declared in `tutorial.yaml`.**
+7. **Accepted warnings in `tutorial.yaml`.** Those belong to a learner's run.
+8. **Lesson files written as dialogue.** Give objectives, not turns.
+9. **Assuming the course builds software.** Set `workspace_kind: none` if it does not.
+10. **Pasting a learner's current code into the bundle.** Source code belongs in the
    learner's workspace; the bundle describes what to build, not what was built.
-10. **Renaming `id` after publication.** It is the stable identity.
+11. **Renaming `id` after publication.** It is the stable identity.
 
 ---
 
@@ -397,9 +417,10 @@ Confirm each of these by looking, not by remembering:
 - [ ] `STATE.md` does **not** exist anywhere in the bundle
 - [ ] `STATE.template.md` exists and describes a learner who has not started
 - [ ] `tutorial.yaml`, `COURSE.md`, `DESIGN.md`, `lessons/` all exist
-- [ ] `entry_lesson` resolves to a file that exists
+- [ ] every `lessons` entry resolves to a file that exists
+- [ ] every file in `lessons/` appears in `lessons` exactly once
 - [ ] `STATE.template.md`'s `tutorial_id` equals `tutorial.yaml`'s `id`
-- [ ] `STATE.template.md`'s `active_lesson` equals `entry_lesson`
+- [ ] `STATE.template.md`'s `active_lesson` equals the first `lessons` entry
 - [ ] every lesson file has `id` and `title` in frontmatter
 - [ ] every `design_refs` entry resolves to a real anchor in `DESIGN.md`
 - [ ] every lesson `validators` entry is declared in `tutorial.yaml`
@@ -436,7 +457,8 @@ subjects: [rust, cli]
 aliases: [command-line, argv]
 level: beginner
 style: [project-driven, interactive]
-entry_lesson: lessons/00-hello-args.md
+lessons:
+  - lessons/00-hello-args.md
 workspace_kind: new-repository
 tutor_owned:   [tutorial/STATE.md, tutorial/DESIGN.md]
 learner_owned: [src/**, Cargo.toml]
