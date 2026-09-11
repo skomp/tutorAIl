@@ -1,8 +1,8 @@
 # Generic Tutorial Runner + Portable Tutorial Bundles — Design
 
 **Date:** 2026-09-11
-**Status:** Approved design, pending implementation plan
-**Project:** `tutorAIl` (generic runner) — first consumer: AutomatonDB
+**Status:** Design approved. Formats and first bundle implemented; runner in progress.
+**Repositories:** `tutorAIl` (runner), `tutorail-bundles` (courses), `automaton-db` (a learner)
 
 ---
 
@@ -24,7 +24,7 @@ context, not a whole course.** Every structural decision below serves that.
 | Concept | Lives | Mutable | Contains a learner? |
 |---|---|---|---|
 | **Runner** | installed plugin, outside learner repos | no | no |
-| **Bundle** | distributable course package | no | **no** |
+| **Bundle** | a subfolder of `tutorail-bundles` (or any source) | no | **no** |
 | **Instance** | `<workspace>/tutorial/` | yes | **yes, exactly one** |
 | **Workspace** | the learner's own repository/directory | yes | learner-owned |
 
@@ -36,8 +36,8 @@ programming, or compiler construction?* If no, it belongs in the bundle.
 
 ## 3. Bundle vs instance — the mechanical rule
 
-Prose failed to convey this distinction to at least one bundle author. It is therefore
-expressed as mutually exclusive **files**, which a script can check.
+Prose failed to convey this distinction to a bundle author. It is therefore expressed as
+mutually exclusive **files**, which a script can check.
 
 ```
 BUNDLE (distributable)            INSTANCE (<workspace>/tutorial/)
@@ -60,7 +60,7 @@ BUNDLE (distributable)            INSTANCE (<workspace>/tutorial/)
 | `DESIGN.md` | required (seed) | tutor appends durable decisions | author seeds, tutor grows |
 | `STATE.template.md` | **required** | **must be absent** | author |
 | `STATE.md` | **must be absent** | **required** | runner creates, tutor updates |
-| `lessons/*.md` | required | read-only except progress notes | author |
+| `lessons/**` | required | read-only except progress notes | author |
 | learner source | n/a | **learner-owned** | learner |
 
 ### The corollary authors get wrong
@@ -69,18 +69,18 @@ BUNDLE (distributable)            INSTANCE (<workspace>/tutorial/)
 it**. They therefore contain no progress markers — no `Status: Complete`, no
 `In progress`, no `Next`, no "current lesson".
 
-All progress lives in `STATE.md`, in one place. The AutomatonDB source playbook
-violates this in three places simultaneously (a "Current tutorial state" section,
-per-lesson status markers inside the curriculum, and a "Current resume marker"
-section), all of which must agree or the course misleads. Those three collapse into
-`STATE.md`. This is check #5 of the validator (§9).
+All progress lives in `STATE.md`, in one place. The AutomatonDB source playbook violated
+this in three places at once (a "Current tutorial state" section, per-lesson status
+markers inside the curriculum, and a "Current resume marker" section), all of which had
+to agree or the course misled. Those three collapsed into `STATE.md`. The validator
+enforces it (§9, check 5).
 
 ---
 
 ## 4. `tutorial.yaml`
 
-Deliberately shallow — at most one level of nesting — because the author is more
-likely to err than the parser is.
+Deliberately shallow — at most one level of nesting — because the author is more likely
+to err than the parser is.
 
 ```yaml
 bundle_format: 1
@@ -88,9 +88,11 @@ id: rust-automaton-db
 title: Learn Rust by Building AutomatonDB
 subjects: [rust, databases, distributed-systems]
 level: intermediate-to-advanced
+
 lessons:
   - lessons/00-foundations.md
   - lessons/01-rows-cells-temporal.md
+  - lessons/08-automaton-machinery/LESSON.md   # foldered form
   # ... ordered; lessons[0] is the entry lesson
 
 workspace_kind: existing-or-new-repository   # | new-repository | none
@@ -111,15 +113,21 @@ advance_on: validated-evidence-only
 Validator `kind`s, all subject-neutral: `command`, `file-exists`, `file-contains`,
 `git-diff`, `manual`. `cargo check` is a value, never a runner concept.
 
+**`lessons` is the authoritative sequence.** It defines which lesson is first
+(`lessons[0]` — there is no separate `entry_lesson` field) and what "the next lesson"
+means on completion. It lives in the manifest rather than in `COURSE.md` frontmatter
+because `COURSE.md` is deliberately not loaded in the steady state, and the runner needs
+the sequence every time it advances. Filename sort is not the order; the list is.
+
 **Stable vs mutable split.** `tutorial.yaml` declares validator *definitions*. Which
-warnings are currently tolerated is progress, not configuration, and lives in
-`STATE.md` with an expiry:
+warnings are currently tolerated is progress, not configuration, and lives in `STATE.md`
+with an expiry:
 
 ```yaml
 accepted_warnings:
-  - pattern: "never used"
-    reason: "Table/Partition unreachable while main() is empty"
-    until_lesson: lessons/02-first-refactor.md
+  - pattern: "is never used"
+    reason: "Engine unreachable from the binary while main() is empty"
+    until_lesson: lessons/03-first-refactor.md
 ```
 
 The `until_lesson` expiry prevents "expected warnings" becoming permanent cover, which
@@ -134,19 +142,19 @@ Frontmatter is machine-checkable; the body is what the tutor reads.
 ```yaml
 ---
 tutorial_id: rust-automaton-db
-active_lesson: lessons/02-first-refactor.md
+active_lesson: lessons/03-first-refactor.md
 status: in-progress
 updated: 2026-09-11
 ---
 ```
 
-Body sections: last completed task; concepts demonstrated; decisions made in
-discussion; known intentional/incomplete state; accepted warnings; next task;
-explicitly deferred items.
+Body sections: last completed task; concepts demonstrated; decisions made in discussion;
+known intentional/incomplete state; accepted warnings; next task; explicitly deferred
+items.
 
 **`active_lesson` is a path, not a description.** "Chapter 1, lesson 10" would require
-reading `COURSE.md` to resolve, which defeats cold resume. This is the single field
-that makes a fresh agent session work.
+reading `COURSE.md` to resolve, which defeats cold resume. This is the single field that
+makes a fresh agent session work.
 
 `STATE.md` never duplicates learner source code. Source is authoritative for
 implementation state; `STATE.md` is authoritative for progress.
@@ -158,14 +166,13 @@ where the instance came from. It is absent from every bundle:
 
 ```yaml
 instance:
-  materialized_from: local:~/tutorials/rust-automaton-db
+  materialized_from: local:../tutorail-bundles/rust-automaton-db
   materialized_at: 2026-09-11
   runner_version: 1
 ```
 
-It is provenance only. Nothing in the teaching loop reads it; it exists so a learner
-(or a future update mechanism) can tell which bundle and revision an instance came
-from.
+Provenance only. Nothing in the teaching loop reads it; it exists so a learner, or a
+future update mechanism, can tell which bundle an instance came from.
 
 ---
 
@@ -173,44 +180,48 @@ from.
 
 ```yaml
 ---
-id: 02-first-refactor
+id: 03-first-refactor
 title: The first deliberate refactor
-design_refs: [key-ordering, temporal-semantics]
-validators: [cargo-check, cargo-test]
+design_refs: [table-model, row-cell-model]
+validators: [cargo-check, cargo-test, has-lib]
 ---
 ```
 
-A lesson is **either** `lessons/<slug>.md` or `lessons/<slug>/LESSON.md` — a folder when
-it ships material (diagrams, data, worked examples). Entries in `lessons` always name the
-Markdown file, so every entry is directly readable and `active_lesson` keeps meaning "the
-file to read"; the runner never branches on file-vs-directory.
+A lesson is **either** `lessons/<slug>.md` **or** `lessons/<slug>/LESSON.md` — a folder
+when it ships material (diagrams, data, worked examples). Entries in `lessons` always
+name the Markdown file, so every entry is directly readable, `active_lesson` keeps
+meaning "the file to read", and the runner never branches on file-vs-directory. The `id`
+equals the slug: the file stem, or the folder name.
 
-Material in a lesson folder loads **only when `LESSON.md` names it**, the same
-progressive-disclosure rule skills use. Without that constraint a folder lesson would
-quietly reload a whole course's worth of material and defeat the context budget in §8.
-A folder directly under `lessons/` with no `LESSON.md` is an error rather than an
-ignored directory, so misfiled material cannot go silently unreachable.
+**Foldered lessons are budget-positive, not a new risk.** The alternative to a folder is
+material inlined in the lesson body, and the body is always loaded — so a long worked
+example would cost its full length every turn of that lesson. As a sibling file it costs
+nothing until the lesson asks for it. What makes this hold is a hard rule: **material
+loads only when `LESSON.md` names it**, the same progressive-disclosure discipline skills
+use. Two consequences the validator enforces rather than leaves to judgement:
+
+- material a `LESSON.md` never mentions is **unreachable** — the tutor cannot know it
+  exists — so it is dead weight shipped to every learner;
+- a folder directly under `lessons/` with no `LESSON.md` hides its whole contents.
+
+`LESSON.md` must match that name in **exact case**. macOS and Windows resolve `lesson.md`
+case-insensitively, so a mis-cased body passes locally and fails on Linux; the validator
+therefore compares directory entries by exact name rather than testing existence.
 
 A lesson defines purpose, prerequisites, objectives, theory, concepts to teach,
 constraints, suggested progression, completion conditions, and what to persist on
 completion. It is **not** a script of conversational turns — the tutor generates each
 task from objectives + state + workspace + the learner's last response.
 
-**Lesson order is `tutorial.yaml`'s `lessons` list, not filename sort.** The list is the
-single source of truth for both which lesson is first (`lessons[0]`, replacing a separate
-`entry_lesson` field) and what "the next lesson" means on completion. It lives in the
-manifest rather than in `COURSE.md` frontmatter because `COURSE.md` is deliberately not
-loaded in the steady state, and the runner needs the sequence every time it advances.
-
-An earlier draft cross-referenced `COURSE.md` against `lessons/` by scanning its prose
-for lesson paths. That check was **inert** on a real bundle — the course map names
-lessons as prose headings, so the scan matched nothing and reported clean without
-examining anything. An explicit list removes the need to parse prose at all.
-
 `design_refs` is the mechanism for partial `DESIGN.md` loading. `DESIGN.md` uses stable
-section anchors; a lesson declares only the anchors it needs; the tutor reads only
-those. A `lib.rs` refactor lesson structurally cannot pull in WAL recovery or quorum
-design.
+section anchors; a lesson declares only the anchors it needs; the tutor reads only those.
+A `lib.rs` refactor lesson structurally cannot pull in WAL recovery or quorum design.
+
+> **A rejected design, recorded so it is not retried.** An earlier draft made `COURSE.md`
+> the lesson index and cross-referenced it against `lessons/` by scanning its prose for
+> lesson paths. On a real bundle that check was **inert**: the course map names lessons as
+> prose headings, so the scan matched nothing and reported clean without examining
+> anything. An explicit list in the manifest removes the need to parse prose at all.
 
 ---
 
@@ -227,31 +238,30 @@ tutorials:
   - id: rust-automaton-db
     title: Learn Rust by Building AutomatonDB
     description: >
-      Project-driven Rust taught by building a masterless, partitioned,
-      automaton-indexed database from scratch.
-    subjects: [rust, databases, distributed-systems]
-    aliases: [cassandra-like, storage-engine, lsm]
+      Project-driven Rust taught by building a serious automaton-native,
+      partitioned database with storage-engine and distributed-systems depth.
+    subjects: [rust, databases, distributed-systems, automata, storage-engines]
+    aliases: [cassandra-like, key-value-store, database-internals]
     level: intermediate-to-advanced
     style: [project-driven, interactive, long-form]
-    scope: "22 chapters; months of work"
+    scope: "23 lessons; months of work"
     workspace_kind: existing-or-new-repository
     source:
       type: local            # | git | archive
-      path: ~/tutorials/rust-automaton-db
+      path: ~/src/github.com/skomp/tutorail-bundles/rust-automaton-db
 ```
 
-**`source` is the entire provider boundary.** An online catalogue later returns the
-same entry shape and differs only inside `source` (`type: git`, `url`, `revision`).
-Matching, choice, materialization, state lifecycle and teaching are written against the
-entry and never against its origin. Adding `OnlineCatalogProvider` means implementing
-one new `source.type` in the resolve step and touching nothing else. `git` and
-`archive` are declared but unimplemented in v1, and fail explicitly rather than
-silently.
+**`source` is the entire provider boundary.** An online catalogue later returns the same
+entry shape and differs only inside `source` (`type: git`, `url`, `revision`). Matching,
+choice, materialization, state lifecycle and teaching are written against the entry and
+never against its origin. Adding `OnlineCatalogProvider` means implementing one new
+`source.type` in the resolve step and touching nothing else. `git` and `archive` are
+declared but unimplemented in v1, and fail explicitly rather than silently.
 
 ### Matching
 
-Agent judgement against `subjects`/`aliases`/`title`/`description`/`level`/`style` —
-not a scoring function. Rules:
+Agent judgement against `subjects`/`aliases`/`title`/`description`/`level`/`style` — not
+a scoring function. Rules:
 
 - Never silently choose when more than one entry plausibly matches.
 - A single match is offered, never auto-started.
@@ -259,9 +269,8 @@ not a scoring function. Rules:
 - Show title, description, level, scope, `workspace_kind` — not the lesson list.
 - Do not discard weak-but-valid alternatives; rank them lower.
 
-**Discovery loads metadata only.** The runner must not read anything under
-`source.path` until the learner has chosen. This is what makes a remote catalogue
-viable later.
+**Discovery loads metadata only.** The runner must not read anything under `source.path`
+until the learner has chosen. This is what makes a remote catalogue viable later.
 
 ---
 
@@ -296,16 +305,16 @@ ORIENT
 | `SKILL.md` | `COURSE.md` |
 | `tutorial.yaml` | `DESIGN.md` in full (only declared anchors) |
 | `STATE.md` | any other lesson |
-| **one** lesson file | any completed lesson |
-| learner files relevant to the task | course history |
+| **one** lesson body | any completed lesson |
+| learner files relevant to the task | lesson-folder material not named by `LESSON.md` |
 
 ### Teaching contract (bundle-overridable defaults)
 
 - Exactly one actionable task per turn. A conceptual question is answered and does
   **not** advance the task.
 - The learner writes the code. No solution code unless explicitly requested.
-- Validate against declared completion conditions before advancing. "Looks plausible"
-  is not evidence.
+- Validate against declared completion conditions before advancing. "Looks plausible" is
+  not evidence.
 - On failure: decide whether it is the intended lesson, explain the concept, hand back
   one correction. Do not repair the learner's work.
 - **Update `STATE.md` only after demonstrated progress**, never to record intent.
@@ -322,50 +331,66 @@ warning` / `known accepted warning` (matched against `STATE.md`'s `accepted_warn
 learner's path; running a tutorial does not invoke it.
 
 Its justification is the same as the runner's: **checking a bundle must not require
-reading the bundle into context.** For a 22-chapter course, verifying every lesson's
-`design_refs` by agent means loading 22 lesson files plus `DESIGN.md`. A script answers
+reading the bundle into context.** For a 23-lesson course, verifying every lesson's
+`design_refs` by agent means loading 23 lesson files plus `DESIGN.md`. A script answers
 it with zero context.
 
 **Checks that need a script** (cross-file, all-lessons):
 
 1. every `design_refs` entry resolves to a real `DESIGN.md` anchor
 2. every lesson `validators` entry is declared in `tutorial.yaml`
-3. every lesson has `id` + `title` frontmatter
+3. every lesson has `id` + `title` frontmatter, and `id` equals its slug
 4. every `lessons` entry resolves; every lesson in `lessons/` (top-level `.md` plus
-   folders with `LESSON.md`) is listed exactly once; every lesson folder has a `LESSON.md`
+   folders with `LESSON.md`) is listed exactly once; every lesson folder has a
+   `LESSON.md` named in exact case
 5. no progress markers anywhere in `COURSE.md` or `lessons/`
+6. every file in a lesson folder is mentioned by that folder's `LESSON.md`
 
 **Cheap checks** (free once the script exists):
 
-6. `STATE.template.md` present / `STATE.md` absent — reversed in instance mode
-7. `tutorial.yaml` parses; `bundle_format` known; required fields present
-8. `COURSE.md`, `DESIGN.md` exist; `lessons` is non-empty
-9. `workspace_kind` is a known value; ownership globs non-empty
+7. `STATE.template.md` present / `STATE.md` absent — reversed in instance mode
+8. `tutorial.yaml` parses; `bundle_format` known; required fields present
+9. `COURSE.md`, `DESIGN.md` exist; `lessons` is non-empty
+10. `workspace_kind` is a known value; ownership globs non-empty
 
 Mode is explicit, never inferred: `validate_bundle.py <path>` checks a bundle,
-`validate_bundle.py --instance <path>` checks an instance. Inferring the mode from
-which state file is present would make check #6 unable to fail, since a mis-shaped
-bundle would simply be validated as the other kind.
+`validate_bundle.py --instance <path>` checks an instance. Inferring the mode from which
+state file is present would make check 7 unable to fail, since a mis-shaped bundle would
+simply be validated as the other kind.
 
-Instance mode adds: `STATE.md` frontmatter well-formed, `active_lesson` resolves,
-`tutorial_id` matches the manifest.
+Instance mode adds: `STATE.md` frontmatter well-formed, `active_lesson` resolves and is
+listed in `lessons`, `tutorial_id` matches the manifest.
 
 **Explicitly out of scope**, stated in the docs so a green run is not over-read:
 pedagogical quality, lesson ordering, whether `DESIGN.md` is *accurate*, whether
 completion conditions are checkable, anything about learner code. Green means
 "structurally well-formed and executable by a runner", not "good course".
 
+### A check that was removed, and why
+
+A reverse material check — "`LESSON.md` references a file that does not exist" — was
+implemented and then deleted. It cannot distinguish a material reference from an ordinary
+prose mention: it immediately flagged `DESIGN.md` and `STATE.md` because a lesson says
+"record those in `DESIGN.md`", and lesson 03 alone mentions `src/lib.rs`, `main.rs` and
+`Cargo.toml`. The exclusion list is unbounded. **A validator that cries wolf gets
+ignored, which is worse than not having the check.** The forward direction (check 6)
+survives because it walks files that actually exist.
+
 ### Test strategy
 
 Every check gets a deliberately broken fixture, and the suite asserts **that specific
 error fires**. A validator that can only be shown passing is a false oracle. The suite
-must demonstrate each check reporting a positive before any bundle is called clean.
-The parser reports which checks ran; it never silently skips a check and prints green.
+must demonstrate each check reporting a positive before any bundle is called clean. The
+parser reports which checks ran; it never silently skips a check and prints green.
+
+Fixtures must not rely on filesystem behaviour that differs by platform. A fixture that
+renamed `LESSON.md` to `lesson.md` silently tested nothing on macOS, because the rename
+was a no-op on a case-insensitive filesystem.
 
 **Parsing.** YAML, chosen for its two real readers — the author and the agent. The only
 mechanical consumer is this script. It uses PyYAML when present and a restricted reader
 when not; the restricted reader **rejects** constructs outside its subset rather than
-guessing. (Verified on this machine: Python 3.11.9, no PyYAML, no `yq`.)
+guessing. (Verified: Python 3.11.9, no PyYAML, no `yq`.)
 
 ---
 
@@ -400,67 +425,89 @@ Codex:        codex plugin marketplace add <repo> ; codex plugin add tutorail
 
 - Frontmatter: `name` + `description` only. Both hosts accept this; anything more is
   host-specific enrichment.
-- **The skill body names no host-specific tool.** Describe actions ("read the file",
-  "run the configured command"), never `Read`, `Bash`, `Task`, `apply_patch`. This one
-  rule makes the body portable, and it is the same rule that keeps bundles portable.
+- **The skill body names no host-specific tool.** Describe actions ("read the file", "run
+  the configured command"), never `Read`, `Bash`, `Task`, `apply_patch`. This one rule
+  makes the body portable, and it is the same rule that keeps bundles portable.
 - **No `${CLAUDE_PLUGIN_ROOT}`** — Claude-only. Both hosts resolve skill-body paths
   relative to the skill directory, so everything needed at runtime lives under
   `skills/tutorail/` and is referenced relatively.
-- **Trigger words go at the front of `description`** — Codex truncates descriptions
-  under a 2%-of-context / 8,000-char budget, shortest-first, and a truncated
-  description stops triggering.
-- **No file-backed slash command on Codex.** Invocation there is `$tutorail` or
-  implicit description match. The runner must be discoverable by description, not by
-  command name.
+- **Trigger words go at the front of `description`** — Codex truncates descriptions under
+  a 2%-of-context / 8,000-char budget, shortest-first, and a truncated description stops
+  triggering.
+- **No file-backed slash command on Codex.** Invocation there is `$tutorail` or implicit
+  description match. The runner must be discoverable by description, not by command name.
 
 ---
 
-## 11. AutomatonDB scope
+## 11. Repositories and current state
 
-AutomatonDB is **not shipped** with the plugin. Its bundle is authored separately from
-the full course history; this project delivers the contract that bundle must satisfy.
+Three repositories, deliberately separate.
 
-**Delivered here:** `automaton-db/tutorial/STATE.md` only.
+### `tutorAIl` — the runner
 
-Written from the actual repository source, not from the playbook's resume marker, which
-is stale. The marker claims the next task is "introduce a provisional scalar `Key`" and
-describes `Database { entries: BTreeMap<String, Row> }`. The real `src/main.rs` (362
-lines) has moved well past that:
+The plugin. Contains no course content. Ships the skill, the reference documents, the
+validator, and a small example bundle.
+
+### `tutorail-bundles` — the courses
+
+Each subfolder is one self-contained bundle. Not shipped with the plugin; registered in a
+user's catalogue. Currently holds `rust-automaton-db/`.
+
+That bundle was authored separately from the full course history and imported verbatim,
+then corrected in three ways: an ordered `lessons` list replacing `entry_lesson`;
+`workspace_kind` from `new-repository` to `existing-or-new-repository`, because the course
+resumes in a repository that already exists; and `ownership_policy` from `on-request` to
+`tutor-must-not-edit-learner-owned`, because the looser value would permit a tutor to
+perform the pending refactor on the learner's behalf.
+
+Its lesson numbering differs from the original playbook: what older notes call "Chapter 2,
+the first refactor" is `lessons/03-first-refactor.md`, because the original Chapter 1 was
+split into `01-rows-cells-temporal` and `02-typed-keys-table-hierarchy`.
+
+### `automaton-db` — a learner workspace
+
+Holds the Rust implementation and one instance at `tutorial/`, materialized from the
+bundle. **Uncommitted** — the repository has no commits at all, and making its first one
+would necessarily include `main.rs`, `Cargo.toml` and the two legacy `TUTORIAL*.md` files.
+That is the owner's decision (§15).
+
+Its `STATE.md` was written from `src/main.rs` and from measured build output, not from the
+playbook's resume marker, which was stale: the marker named "introduce a provisional
+scalar `Key`" as the next task and described `Database { entries: BTreeMap<String, Row> }`.
+The actual source had moved well past that:
 
 ```
 KeyValue{Utf8,Int64}  KeyType  KeyColumn  PartitionKey  ClusteringKey
 Cell{value,valid_from,expires_at}  Row{cells,expires_at}
 Partition{rows}  Table{partition_key_columns,clustering_key_columns,partitions}
 TableError{InvalidPartitionKey,InvalidClusteringKey}
-Table::put -> Result<Option<String>, TableError>   (validates count then type)
+Table::put -> Result<Option<String>, TableError>   (validates count, then type)
 5 tests inline in `mod tests`; main() empty; Table::get commented out
 ```
 
-So the learner has completed the provisional-key step, composite keys, and typed-schema
-validation. The pending task is the **Chapter 2 refactor: `main.rs` → `lib.rs`**, which
-is now overdue — real structural pressure has emerged. `STATE.md` records this as the
-next task, undone.
+Measured 2026-09-11: `cargo test` passes 5/5; `cargo check` emits 17 warnings, of which
+16 are dead-code consequences of `main()` being empty (accepted, expiring at
+`lessons/03-first-refactor.md`) and one is a genuine unused-imports cleanup, explicitly
+not accepted.
 
-**The tutor must not perform that refactor.** It is the learner's exercise.
-
-Until the bundle is materialized around it, the instance is incomplete and
-`validate_bundle.py --instance` will correctly fail on the missing `tutorial.yaml`.
-`STATE.md` says so in a note, so a fresh session does not try to "fix" it.
+**The pending task is lesson `03-first-refactor`: `main.rs` → `lib.rs`. It has not been
+started, and the tutor must not perform it.** `src/lib.rs` does not exist. This is the
+single most important fact for any session picking the work up.
 
 ---
 
 ## 12. Scenarios
 
 - **A — discovery with choice.** `"I want to learn Rust"` → catalogue metadata read →
-  candidates presented with match reasons → learner chooses. Out of the box exactly one
-  tutorial ships, so two matches require the user's catalogue to register a second;
+  candidates presented with match reasons → learner chooses. Only one tutorial ships with
+  the plugin, so two matches require the user's catalogue to register a second;
   documentation states this rather than implying the shipped state demonstrates it.
 - **B — start.** Resolve definition → resolve/create workspace → materialize instance →
-  `STATE.template.md` becomes `STATE.md` → load entry lesson → exactly one task.
-- **C — resume.** Active instance detected; no selection; `STATE.md` read;
-  `active_lesson` loaded; pending task presented.
-- **D — validation.** Tutor inspects diff/source, runs configured commands, classifies
-  the outcome, does not rewrite source; success advances state, failure is explained.
+  `STATE.template.md` becomes `STATE.md` → load `lessons[0]` → exactly one task.
+- **C — resume.** Active instance detected; no selection; `STATE.md` read; `active_lesson`
+  loaded; pending task presented.
+- **D — validation.** Tutor inspects diff/source, runs configured commands, classifies the
+  outcome, does not rewrite source; success advances state, failure is explained.
 - **E — cold thread.** New conversation, no chat history: `tutorial.yaml` + `STATE.md` +
   one lesson is sufficient. This is what `active_lesson`-as-path buys.
 
@@ -488,6 +535,7 @@ should not re-derive these.
 | Claude Code plugin manifest | `.claude-plugin/plugin.json`; `skills/` auto-discovered |
 | Path resolution in skill body | relative to skill directory, **both hosts** |
 | `project_doc_fallback_filenames` | real, but ambient-instructions only — **not** a skills mechanism |
+| Local filesystem | case-insensitive; `lesson.md` resolves as `LESSON.md` |
 | Local toolchain | Python 3.11.9 (no PyYAML), `jq` 1.8.2, no `yq`, cargo/rustc 1.98.0 |
 
 ---
@@ -495,8 +543,8 @@ should not re-derive these.
 ## 14. Non-goals (v1)
 
 Standalone UI; web/desktop app; hosted backend; any model API client; accounts; cloud
-state; marketplace; recommendation ML; embedding search; ratings; payments; a full
-remote catalogue service; autonomous coding mode; a workflow engine; a custom DSL.
+state; marketplace; recommendation ML; embedding search; ratings; payments; a full remote
+catalogue service; autonomous coding mode; a workflow engine; a custom DSL.
 
 Remote trust, signing, bundle updates after a learner has started, offline caching and
 catalogue mirrors are documented as future concerns, not solved.
@@ -505,12 +553,36 @@ catalogue mirrors are documented as future concerns, not solved.
 
 ## 15. Open decisions
 
-1. **`automaton-db` has zero commits.** Adding `tutorial/STATE.md` and committing would
-   create the repo's first commit, necessarily including `main.rs`, `Cargo.toml` and
-   both `TUTORIAL*.md` files. Left uncommitted; the owner decides.
-2. **Fate of `TUTORIAL.md` / `TUTORIAL.updated.md`** once the bundle exists — keep as
+1. **`automaton-db` has zero commits.** Adding `tutorial/` and committing would create the
+   repository's first commit, necessarily including `main.rs`, `Cargo.toml` and both
+   `TUTORIAL*.md` files. Left uncommitted; the owner decides.
+2. **Fate of `TUTORIAL.md` / `TUTORIAL.updated.md`** now that the bundle exists — keep as
    historical source, or remove. Not decided.
 3. **Bundle update after a learner has started.** A bundle revision while an instance is
    live has no reconciliation story. Deferred, documented.
 4. **Multiple concurrent tutorials in one workspace.** Not supported; `tutorial/` is
    singular. Deferred.
+5. **Remote repositories.** Both `tutorAIl` and `tutorail-bundles` are local-only. Nothing
+   has been created on GitHub.
+
+---
+
+## 16. Implementation status
+
+| Deliverable | State |
+|---|---|
+| Bundle format contract (`references/bundle-format.md`) | **done** |
+| Design spec (this document) | **done** |
+| `tutorail-bundles` repository | **done** — holds `rust-automaton-db` |
+| `rust-automaton-db` bundle | **done** — imported, corrected, verified |
+| `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
+| Validator, as a proven prototype | **done** — 17 failure modes verified firing |
+| Validator, promoted into the repo with fixtures + suite | pending |
+| `SKILL.md` (the runner control plane) | pending |
+| `references/catalogue-format.md` | pending |
+| `references/runner-protocol.md` | pending |
+| `references/state-lifecycle.md` | pending |
+| `catalog/builtin.yaml` | pending |
+| `examples/rust-cli-basics/` example bundle | pending |
+| `.claude-plugin/` + `.codex-plugin/` manifests | pending |
+| `README.md` | pending |
