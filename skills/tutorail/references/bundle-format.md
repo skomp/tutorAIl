@@ -46,7 +46,7 @@ A bundle is a directory:
 └── lessons/              MUST exist, MUST contain at least one lesson
     ├── 00-<slug>.md              a lesson as a single file
     ├── 01-<slug>/                a lesson as a folder, when it has material
-    │   ├── LESSON.md             the lesson itself; MUST be named exactly this
+    │   ├── LESSON.md             the lesson itself; exact name, exact case
     │   └── <anything else>       diagrams, data, examples, references
     └── ...
 ```
@@ -315,7 +315,7 @@ plus supporting material. Name lessons so they sort in order: `00-`, `01-`, `02-
 lessons/
 ├── 00-foundations.md                  single file — use this unless you need material
 └── 08-automaton-machinery/            folder — when the lesson ships material
-    ├── LESSON.md                      required, named exactly this
+    ├── LESSON.md                      required; exact name, exact case
     ├── worked-example.md
     └── assets/dafsa.svg
 ```
@@ -471,8 +471,10 @@ Prefer a small number of good lessons over a large number of thin ones.
 11. **Renaming `id` after publication.** It is the stable identity.
 12. **A lesson folder whose `LESSON.md` never mentions its own material.** The tutor
     cannot discover files the lesson does not name; they are dead weight.
-13. **Naming a foldered lesson's body anything but `LESSON.md`.** `lesson.md`,
-    `index.md` and `README.md` are not recognised.
+13. **Naming a foldered lesson's body anything but `LESSON.md`.** `index.md` and
+    `README.md` are not recognised. `lesson.md` is worse than not recognised: macOS and
+    Windows filesystems are case-insensitive, so it appears to work locally and then
+    fails on Linux. Match the case exactly.
 
 ---
 
