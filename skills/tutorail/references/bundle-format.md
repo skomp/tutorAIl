@@ -7,7 +7,7 @@ This document is self-contained. You need nothing else to author a bundle.
 
 ---
 
-## 0. Read this part first
+## 0. Start here
 
 A **bundle** is a course. It is written once and used by many learners.
 
@@ -29,7 +29,7 @@ must be left out of what you write.
 | What the learner's code looks like now | **not the bundle** |
 | Which tests currently pass | **not the bundle** |
 
-A bundle is used by a learner who has not started yet. Write it for them.
+A bundle is used by a learner who has not started yet. Author it for them.
 
 ---
 
@@ -62,6 +62,10 @@ delete it, and move anything in it that describes *the course* (not the learner)
 `COURSE.md`, `DESIGN.md`, or a lesson.
 
 There is no exception. A bundle containing `STATE.md` is rejected.
+
+A second directory is instance-only in exactly the same way: `lessons.generated/`, where a
+tutor writes lessons during a course. A bundle MUST NOT contain one. Section 8 says what
+to do when you find one, and how to promote a lesson out of it properly.
 
 ---
 
@@ -176,7 +180,9 @@ them for the workspace the course will be taken in.
 `tutor_owned` should stay small. `tutorial/STATE.md` and `tutorial/DESIGN.md` are the
 normal contents. **Do not add `tutorial/lessons/**`**: lesson copies are read-only in an
 instance, because all progress belongs in `STATE.md` and a lesson carrying progress is
-rejected by the same rule as section 3.
+rejected by the same rule as section 3. **Do not add `tutorial/lessons.generated/**`**
+either: that directory belongs to an instance you cannot see from here, and the runner
+treats it as tutor-owned without being told (section 8).
 
 **`validators`** — a map of name to definition. Valid `kind` values:
 
@@ -264,7 +270,7 @@ Include deliberately unresolved decisions, marked as such. They are useful conte
 a later lesson may be where they get resolved.
 
 `DESIGN.md` is seeded by you and **grows during the course**: the tutor appends
-decisions the learner makes. Write the starting state.
+decisions the learner makes. Seed the starting state.
 
 ---
 
@@ -317,7 +323,7 @@ Requirements:
 - `status` MUST be `not-started`
 - the section headings above MUST all be present, even if empty
 
-Write it for a learner who has not started. If your `STATE.template.md` mentions
+Author it for a learner who has not started. If your `STATE.template.md` mentions
 anything that was completed, you have written an instance again.
 
 ---
@@ -469,11 +475,111 @@ A twenty-chapter course does not need twenty detailed lesson files to be valid. 
 every entry in `lessons` to resolve and every listed lesson to be well-formed. Chapters
 without a lesson file yet are simply not listed, and are added to `lessons` when written.
 
+Know what this costs at teaching time. A tutor that reaches a chapter `COURSE.md` maps and
+`lessons` does not carry may draft one into the learner's instance — a *main-path draft*,
+section 8. That draft is one learner's, written against one learner's code, and it is not
+your lesson until you promote it.
+
 Prefer a small number of good lessons over a large number of thin ones.
 
 ---
 
-## 8. Common mistakes
+## 8. Generated lessons, and how to promote one
+
+Something happens in an **instance** that you need to know about, because two parts of it
+are yours.
+
+During a course, a tutor may write a lesson into the instance's
+`tutorial/lessons.generated/` — either a **side lesson**, a compact detour for a concept
+the main path does not reach, or a **main-path draft**, a chapter `COURSE.md` maps that has
+no lesson file yet. Those files are tutor-owned, they belong to one learner, and they carry
+provenance frontmatter recording when they were written and why.
+
+### A bundle MUST NOT contain `lessons.generated/`
+
+> A bundle **MUST NOT** contain a `lessons.generated/` directory, at any level.
+
+This is the same class of error as shipping a `STATE.md`, and it means the same thing: you
+have written an instance. The files in it describe what one learner needed, on one day,
+about code that only they wrote.
+
+Delete the directory. Anything in it that belongs to the *course* enters `lessons/` by the
+promotion procedure below — which is more than a copy, because a generated lesson is
+written for one learner and a bundle lesson is written for all of them.
+
+For the same reason, do not list `tutorial/lessons.generated/**` in `tutor_owned`. That
+directory belongs to an instance which does not exist while you are authoring, and the
+runner owns it there without being told.
+
+### Promotion
+
+**Nothing flows from an instance into a bundle automatically.** Promotion is a deliberate
+authoring act that you perform, on the bundle, using a generated lesson as source material.
+
+1. **Copy the file into `lessons/`** — from the instance's
+   `tutorial/lessons.generated/<slug>.md` — renamed to this course's numbering convention,
+   for example `lessons/04-lifetimes-and-borrows.md`. Copy it; do not move it. The
+   learner's instance keeps its own.
+2. **Set `id` to the new slug.** The rename changed the slug, and `id` MUST equal it
+   (section 6). Generated lessons carry no number prefix, so this step applies every time
+   and is the easiest one to forget.
+3. **Strip the provenance frontmatter**: `generated`, `generated_at`, `kind`, `reason` and
+   `after`. All five. Each one describes one learner's run, and any one left behind puts
+   progress into a bundle.
+4. **Rewrite it for a learner who has not started.** It was written against one learner's
+   code and it will name their types, their file, their error message. Generalise those.
+   Section 0 is the test, and it is the same test that rejects a pasted snapshot of
+   anybody's source.
+5. **Check that `design_refs` still resolve.** This one is neither optional nor obvious:
+   the instance's `DESIGN.md` **grows during a course**, so a generated lesson may point at
+   an anchor the tutor appended, which your bundle's `DESIGN.md` has never had. For each
+   anchor, either add the section to `DESIGN.md` or remove the reference.
+6. **Check that every `validators` name is declared** in your `tutorial.yaml`.
+7. **Add the path to `lessons`, at the right position.** For a side lesson that is normally
+   directly after the lesson its `after:` named. For a main-path draft it is the position
+   `COURSE.md` already maps. The list is the order; the filename prefix is a convention
+   that follows the list, not the other way round.
+8. **Update `COURSE.md`** when the course now covers a chapter its map did not mention.
+9. **Say what happens to the learner's copy.** Promotion is a bundle-side act, so the
+   instance that produced the draft still holds it, and the promoted lesson and the draft
+   now share a slug. That is only a problem once that learner takes a revision of the
+   bundle: at re-materialization the draft becomes a duplicate of an authored lesson and
+   is reported. The tutor deletes the draft at that point. Until then the learner keeps
+   working from their copy and nothing breaks.
+10. **Re-run the self-check in section 10, and the validator.** A promoted lesson is a new
+   lesson, and every rule in this document applies to it.
+
+A learner who is already partway through the previous revision does not receive the new
+lesson. Revising a bundle while an instance is live has no reconciliation story yet.
+Promotion improves the course for the learners who come after.
+
+### Generated lessons are this course's quality signal
+
+They are the only feedback the format gives you from real use, and it is good feedback,
+because each one is a recorded moment where the course did not carry what a learner needed.
+
+**Three learners all needing the same detour after the same lesson is not three side
+lessons. It is a missing lesson, and the generated files are the evidence.**
+
+Compare `kind`, `after:` and `reason:` across the instances you can see:
+
+- **the same `after:`, from different learners** — the course has a hole immediately after
+  that lesson. Promote the best of the drafts, or fold the material into the lesson before
+  it.
+- **the same concept at scattered points** — a prerequisite is missing, earlier than any of
+  the detours.
+- **repeated `main-path-draft`s after one chapter** — section 7 lets a course keep a later
+  chapter as a map with no lesson file, and this is what that costs: every learner's tutor
+  drafts it again, differently. Author the lesson.
+- **one `side-lesson`, once** — usually one learner's background rather than a gap in the
+  course. Evidence of nothing. Leave it.
+
+`reason:` is the field that carries this signal, which is why the format requires it and
+why it is written for you rather than for the learner.
+
+---
+
+## 9. Common mistakes
 
 1. **Writing `STATE.md` into the bundle.** The most common. Delete it.
 2. **Progress markers in `COURSE.md` or lessons.** `Complete`, `In progress`, `Next`.
@@ -492,18 +598,28 @@ Prefer a small number of good lessons over a large number of thin ones.
 11. **Renaming `id` after publication.** It is the stable identity.
 12. **A lesson folder whose `LESSON.md` never mentions its own material.** The tutor
     cannot discover files the lesson does not name; they are dead weight.
-13. **Naming a foldered lesson's body anything but `LESSON.md`.** `index.md` and
+13. **Shipping a `lessons.generated/` directory.** An instance was mixed into the bundle.
+    Delete it, and promote what belongs to the course by section 8.
+14. **Promoting a generated lesson with its provenance frontmatter still attached.**
+    `generated`, `generated_at`, `kind`, `reason` and `after` all describe one learner's
+    run. Strip all five.
+15. **Promoting a generated lesson without re-checking `design_refs`.** The instance's
+    `DESIGN.md` grew during the course; your bundle's did not.
+16. **Naming a foldered lesson's body anything but `LESSON.md`.** `index.md` and
     `README.md` are not recognised. `lesson.md` is worse than not recognised: macOS and
     Windows filesystems are case-insensitive, so it appears to work locally and then
     fails on Linux. Match the case exactly.
 
 ---
 
-## 9. Self-check before you deliver
+## 10. Self-check before you deliver
 
 Confirm each of these by looking, not by remembering:
 
 - [ ] `STATE.md` does **not** exist anywhere in the bundle
+- [ ] `lessons.generated/` does **not** exist anywhere in the bundle
+- [ ] no promoted lesson still carries `generated`, `generated_at`, `kind`, `reason` or
+      `after` in its frontmatter
 - [ ] `STATE.template.md` exists and describes a learner who has not started
 - [ ] `tutorial.yaml`, `COURSE.md`, `DESIGN.md`, `lessons/` all exist
 - [ ] every `lessons` entry resolves to a file that exists
@@ -531,7 +647,7 @@ good — that is your judgement, not the format's.
 
 ---
 
-## 10. Minimal complete example
+## 11. Minimal complete example
 
 This is the smallest thing that is still a valid bundle. (The bundle shipped with the
 runner at `examples/rust-cli-basics/` is a fuller worked example; this one is trimmed to
@@ -600,7 +716,7 @@ Get a Rust binary reading its own arguments, so later lessons have input to work
 ## Learning objectives
 
 - Run a binary with `cargo run`
-- Read arguments from the environment
+- Obtain the arguments from the environment
 - Recognise that the first argument is the program name
 
 ## Completion conditions

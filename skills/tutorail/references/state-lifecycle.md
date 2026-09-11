@@ -64,7 +64,8 @@ updated: 2026-09-11
 | Field | Meaning | Constraint |
 |---|---|---|
 | `tutorial_id` | which course this instance is | MUST equal `id` in the instance `tutorial.yaml` |
-| `active_lesson` | the lesson file to load now | MUST be a path, and MUST appear in the manifest's `lessons` list |
+| `active_lesson` | the lesson file to load now | MUST be a path, and MUST appear in the manifest's `lessons` list — unless it names a generated lesson, section 8 |
+| `resume_after` | where to return when a detour finishes | present **only** while `active_lesson` names a file under `lessons.generated/`; see section 8.3 |
 | `status` | `not-started`, `in-progress`, `complete` | set by the runner |
 | `updated` | date of the last change | update whenever you change the file |
 
@@ -75,7 +76,8 @@ work.
 
 ### Body sections
 
-All seven headings are always present, even when a section says "None".
+All seven headings are always present, even when a section says "None". An eighth,
+*Generated lessons*, appears only once the instance has one — section 8.5.
 
 | Section | Holds | Does not hold |
 |---|---|---|
@@ -195,7 +197,9 @@ in `runner-protocol.md` section 6.
 3. **Advance `active_lesson`.** Find the current value in the manifest's `lessons` list
    and take the **next entry in that list**. The list is the order. Filename sort is not
    the order, lesson `id` is not the order, and the number prefix is a convention rather
-   than a rule.
+   than a rule. When the instance has a `lessons.generated/` directory, an incomplete
+   generated lesson whose `after:` is the lesson just finished comes first instead —
+   section 8, and `runner-protocol.md` section 7.3.
 4. **Reset the body for the new lesson.** *Last completed task* becomes the lesson
    completion. *Next task* becomes the first task of the new lesson. *Concepts
    demonstrated* and *Decisions made in discussion* accumulate across lessons — do not
@@ -263,10 +267,211 @@ started lets the tutor assume it exists.
 
 ### Inconsistencies to report rather than repair
 
-- `active_lesson` names a path that is not in the manifest's `lessons` list;
+- `active_lesson` names a path that is neither in the manifest's `lessons` list nor a
+  file under `lessons.generated/` (section 8.3 permits the second, and only with
+  `resume_after` set);
+- `active_lesson` names a generated lesson that is not there, or names one while
+  `resume_after` is absent or is not an entry in `lessons`;
+- a file under `lessons.generated/` whose `after:` is not an entry in `lessons`, or which
+  is missing any of the five provenance fields;
 - `tutorial_id` does not match the manifest's `id`;
 - `STATE.template.md` is present in the instance;
 - the manifest names a lesson file that does not exist.
 
 These are structural defects, not stale progress. Guessing at the intent will lose the
 learner's place. Say what is wrong and let the learner decide.
+
+---
+
+## 8. Generated lessons
+
+A tutor may write a lesson **during** a course, into `tutorial/lessons.generated/`. This
+section is the mechanics. Whether to write one at all is the harder half, and it is in
+`runner-protocol.md` section 7 — settle that question there before creating any file here.
+
+### 8.1 Where they live
+
+```
+tutorial/
+├── tutorial.yaml
+├── COURSE.md
+├── DESIGN.md
+├── STATE.md
+├── lessons/              the author's lessons, copied at materialization, read-only
+└── lessons.generated/    lessons the tutor wrote during this course, tutor-owned
+```
+
+`lessons.generated/` exists **only in an instance**. It is never part of a bundle, it is
+never created by materialization, and it does not exist until the first generated lesson
+needs it.
+
+It is tutor-owned in every instance, whether or not the manifest's `tutor_owned` lists it.
+A bundle cannot list a directory that belongs to an instance it has never seen, so
+ownership of this one path is settled by the runner and not by the manifest.
+
+### 8.2 Creating one
+
+1. **Settle the case for generating at all** — `runner-protocol.md` section 7.2. A defect
+   in the bundle is reported, never drafted over.
+2. **Create `tutorial/lessons.generated/`** if it is not already there.
+3. **Choose a slug that names the concept** — `lifetimes-and-borrows`, not `03b` or
+   `extra-lesson`. It SHOULD NOT reuse the `id` of a lesson in `lessons/`: the format
+   permits the overlap, but two lessons with one `id` make the record in section 8.5 and
+   any later promotion ambiguous. Give it no number prefix — position comes from `after:`,
+   never from the name.
+4. **Create `tutorial/lessons.generated/<slug>.md` with the ordinary lesson structure** —
+   purpose, prerequisites, learning objectives, theory, concepts to teach, constraints,
+   suggested progression, completion conditions, on completion persist.
+   `bundle-format.md` section 6 defines that shape and a generated lesson does not get a
+   lighter one. A lesson with no completion conditions is a lesson you cannot decide to
+   leave.
+5. **Add the provenance frontmatter** below, alongside the ordinary lesson fields.
+6. **Say what you wrote and why, before teaching it.** A lesson that appears in the
+   learner's workspace unannounced is indistinguishable from the course changing
+   underneath them.
+
+A generated lesson SHOULD be a single file. It MAY be a folder containing `LESSON.md` when
+it genuinely ships material, and every folder rule then applies unchanged: exact case, and
+material is invisible until the body names it.
+
+#### Provenance frontmatter
+
+```yaml
+---
+id: lifetimes-and-borrows
+title: Lifetimes, just enough to unblock the borrow
+generated: true
+generated_at: 2026-09-11
+kind: side-lesson            # | main-path-draft
+reason: "The borrow in Table::get_cell_at cannot be explained without lifetimes"
+after: lessons/03-first-refactor.md
+design_refs: [row-cell-model]
+validators: [cargo-check]
+---
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | MUST | The slug: file stem, or folder name. Unique across `lessons/` and `lessons.generated/`. |
+| `title` | MUST | Human-facing lesson name. |
+| `generated` | MUST | Always `true`. Marks the file as an overlay rather than an authored lesson. |
+| `generated_at` | MUST | The date it was written. Orders two detours that share one `after:`. |
+| `kind` | MUST | `side-lesson` or `main-path-draft`. |
+| `reason` | MUST | One sentence, written for a bundle author who was not in the room. This is the evidence section 8.6 depends on. |
+| `after` | MUST | The lesson this one follows. MUST be an entry in the manifest's `lessons` list — an authored lesson, never another generated one. |
+| `design_refs` | SHOULD | Anchors that already exist in the instance's `DESIGN.md`. |
+| `validators` | SHOULD | Names already declared in the manifest's `validators` map. |
+
+Never invent a validator name or a `DESIGN.md` anchor for a generated lesson. Either one
+manufactures exactly the defect `runner-protocol.md` section 7.2 tells you to report, and
+it would then be your own defect.
+
+### 8.3 `active_lesson` may point into `lessons.generated/`
+
+While a detour is active, `STATE.md` looks like this:
+
+```yaml
+---
+tutorial_id: rust-automaton-db
+active_lesson: lessons.generated/lifetimes-and-borrows.md
+resume_after: lessons/04-storage-engine.md
+status: in-progress
+updated: 2026-09-11
+---
+```
+
+| Field | Meaning | Constraint |
+|---|---|---|
+| `resume_after` | the `lessons` entry to return to when the detour finishes | present exactly while `active_lesson` names a generated lesson; absent otherwise |
+
+**This is the one exception to "`active_lesson` MUST appear in the manifest's `lessons`
+list".** A path under `lessons.generated/` is deliberately not in the list, and the
+presence of `resume_after` is what says so. Everything else about the field is unchanged:
+it is a path, it is the file a cold session opens, and it is still the single field that
+makes a conversation with no history work.
+
+Set `resume_after` when the detour becomes active, not when it finishes. Its value is the
+entry that would have become active had the detour not existed — the entry after the
+detour's `after:` in `lessons`. It MUST itself be an entry in `lessons`: a detour returns
+to the main path, never to another detour. Computing it once, at the moment you know it,
+is what stops a later session guessing.
+
+When `after:` names the **last** entry in `lessons` there is nothing further to return to.
+Set `resume_after` to that last entry anyway, so the field stays a real lesson path, and
+when the detour completes set `active_lesson` to it with `status: complete` — the course
+is finished, per section 5, "Reaching the end". Do not re-teach it.
+
+### 8.4 Completing a generated lesson
+
+A detour completes like any other lesson, and then hands the learner back:
+
+1. **Check the completion conditions you wrote**, individually and with evidence, per
+   `runner-protocol.md` section 6. They bind because they are completion conditions, not
+   because of who wrote them.
+2. **Persist what the lesson's *On completion, persist* section names** into the
+   instance's `DESIGN.md`, under an anchor that exists.
+3. **Record the lesson complete** in `STATE.md`, per section 8.5. This is what lets a
+   cold session answer "is this generated lesson incomplete?" without reading every file.
+4. **Return to the main path.** Set `active_lesson` to `resume_after` and remove the
+   `resume_after` field. One exception: when another incomplete generated lesson shares
+   this detour's `after:` value, that one becomes `active_lesson` instead — oldest
+   `generated_at` first — and `resume_after` carries over unchanged, because both detours
+   return to the same place.
+5. **Reset the body for the new lesson**, per section 5 step 4. *Concepts demonstrated*
+   accumulates as usual; what the detour taught stays recorded.
+6. **`updated`** — set to today.
+
+**Never delete a generated lesson when it completes.** It stays in the instance as both
+the record of what this learner needed and the evidence a bundle author acts on —
+`bundle-format.md` section 8.
+
+### 8.5 What `STATE.md` records
+
+One extra body section, present only in an instance that has generated lessons. A fresh
+instance does not have it, and `STATE.template.md` never does:
+
+```markdown
+## Generated lessons
+
+- `lessons.generated/lifetimes-and-borrows.md` — side-lesson, after
+  `lessons/03-first-refactor.md` — complete
+- `lessons.generated/wal-recovery-draft.md` — main-path-draft, after
+  `lessons/07-storage-engine.md` — pending
+```
+
+Each entry carries the path, the `kind`, the `after:` value, and `complete` or `pending`.
+Nothing else: the reason lives in the lesson's own frontmatter, and a second copy here
+would be a second thing to keep true.
+
+This section exists because the advancement rule turns on the word *incomplete*
+(`runner-protocol.md` section 7.3), and the lesson files deliberately carry no progress —
+progress belongs in `STATE.md`, in one place, and a lesson that carries progress cannot be
+promoted into a bundle.
+
+### 8.6 The manifest's `lessons` list is NEVER mutated
+
+When you write a generated lesson, do not add it to `lessons` in the instance's
+`tutorial.yaml`. Do not reorder the list, do not remove an entry, and do not "fix" a path
+in it. The temptation is real, and the damage arrives later, when nobody remembers.
+
+`lessons` is the authored course. It stays identical for every learner who takes the
+bundle, and that buys three things:
+
+- **a later bundle revision stays reconcilable.** The instance's list and the bundle's
+  list can be compared directly. Once a learner's list holds a private entry, nothing can
+  tell an author's change from a tutor's;
+- **two learners' courses do not diverge structurally.** They can take different detours
+  and still be provably on the same course, because the overlay carries the difference and
+  the list does not;
+- **the overlay stays legible as an overlay.** A generated lesson merged into `lessons` is
+  indistinguishable from an authored one within a session, and then nobody can tell what
+  the course contains from what one tutor improvised.
+
+The same holds for the rest of what the bundle wrote. In an instance, `COURSE.md` and
+everything under `lessons/` are read-only. `DESIGN.md` is the one exception the format
+already grants, and the tutor appends to it rather than rewriting it.
+
+"Never mutated" includes the bundle source. Materialization copies once and teaching never
+reaches back (section 3). Moving a generated lesson into a bundle is a separate,
+deliberate authoring act with its own procedure — `bundle-format.md` section 8 — and
+nothing in the teaching loop performs it.

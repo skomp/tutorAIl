@@ -60,12 +60,24 @@ BASELINES = {
     "foldered": FIXTURES / "foldered-bundle",
 }
 
+# Baselines that are already INSTANCES and must not be run through
+# to_instance(). lessons.generated/ cannot appear in a bundle at all (check
+# 13), so the generated-lesson feature is only expressible here.
+INSTANCE_BASELINES = {
+    # An instance of rust-cli-basics carrying two generated lessons: a
+    # single-file side-lesson, which STATE.md is sitting on, and a foldered
+    # main-path-draft with one material file.
+    "generated": FIXTURES / "generated-instance",
+}
+
+ALL_BASELINES = {**BASELINES, **INSTANCE_BASELINES}
+
 Mutator = Callable[[Path], None]
 
 
 def fresh(baseline: str, tmp: Path) -> Path:
     root = tmp / "target"
-    shutil.copytree(BASELINES[baseline], root)
+    shutil.copytree(ALL_BASELINES[baseline], root)
     return root
 
 
@@ -679,6 +691,287 @@ def m_template_no_frontmatter(root: Path) -> None:
     path.write_text(rest)
 
 
+# -- generated lessons: shared paths
+#
+# The "generated" baseline is an instance of rust-cli-basics carrying:
+#   lessons.generated/lifetimes-and-borrows.md            side-lesson
+#   lessons.generated/03-reading-files-draft/LESSON.md     main-path-draft
+#   lessons.generated/03-reading-files-draft/worked-example.rs
+# and a STATE.md whose active_lesson is the side-lesson.
+
+SIDE = "lessons.generated/lifetimes-and-borrows.md"
+DRAFT_DIR = "lessons.generated/03-reading-files-draft"
+DRAFT = f"{DRAFT_DIR}/LESSON.md"
+
+
+# -- check 13: a bundle must not carry lessons.generated/
+
+
+def m_bundle_has_generated_dir(root: Path) -> None:
+    folder = root / "lessons.generated"
+    folder.mkdir()
+    (folder / "lifetimes.md").write_text(
+        "---\nid: lifetimes\ntitle: Lifetimes\ngenerated: true\n"
+        "generated_at: 2026-09-11\nkind: side-lesson\n"
+        'reason: "the learner asked"\nafter: lessons/00-hello-args.md\n---\n\n'
+        "## Purpose\n\nA detour.\n"
+    )
+    assert "lessons.generated" in os.listdir(root)
+
+
+def m_bundle_has_miscased_generated_dir(root: Path) -> None:
+    """A bundle carrying `Lessons.Generated/` is the same error, spelt oddly.
+
+    Without the case-folded comparison this is invisible: the entry name
+    differs, so `"lessons.generated" in os.listdir(root)` is False.
+    """
+    folder = root / "Lessons.Generated"
+    folder.mkdir()
+    (folder / "notes.md").write_text("---\nid: notes\ntitle: Notes\n---\n\nx\n")
+    names = os.listdir(root)
+    assert "Lessons.Generated" in names and "lessons.generated" not in names, names
+
+
+# -- check 14: provenance frontmatter
+
+
+def m_generated_no_kind(root: Path) -> None:
+    edit(root / SIDE, "kind: side-lesson\n", "")
+
+
+def m_generated_unknown_kind(root: Path) -> None:
+    edit(root / SIDE, "kind: side-lesson", "kind: side-quest")
+
+
+def m_generated_not_marked_generated(root: Path) -> None:
+    edit(root / DRAFT, "generated: true\n", "")
+
+
+def m_generated_marked_false(root: Path) -> None:
+    edit(root / DRAFT, "generated: true", "generated: false")
+
+
+def m_generated_no_reason(root: Path) -> None:
+    edit(
+        root / SIDE,
+        'reason: "The learner cannot explain why count_lines takes &str '
+        'rather than String"\n',
+        "",
+    )
+
+
+def m_generated_empty_generated_at(root: Path) -> None:
+    edit(root / SIDE, "generated_at: 2026-09-11", 'generated_at: ""')
+
+
+def m_generated_no_frontmatter(root: Path) -> None:
+    path = root / SIDE
+    text = path.read_text()
+    assert text.startswith("---\n")
+    _, _, rest = text[4:].partition("\n---\n")
+    assert rest, "expected a closing frontmatter fence to strip"
+    path.write_text(rest)
+
+
+def m_generated_dir_miscased(root: Path) -> None:
+    """Rename lessons.generated/ to lessons.Generated/ - a no-op rename trap.
+
+    A plain rename does nothing on a case-insensitive filesystem, so this
+    moves via a temporary name and then verifies the listing.
+    """
+    old = root / "lessons.generated"
+    tmp = root / "lessons.generated.tmp"
+    old.rename(tmp)
+    tmp.rename(root / "lessons.Generated")
+
+
+def m_generated_dir_is_a_file(root: Path) -> None:
+    """`lessons.generated` present, but as a file.
+
+    Without an explicit guard this is SILENTLY clean: the entry name matches
+    exactly, the walk finds no lessons, and every generated check reports
+    "0 of them" and passes.
+    """
+    folder = root / "lessons.generated"
+    shutil.rmtree(folder)
+    folder.write_text("I meant to make a directory.\n")
+    assert "lessons.generated" in os.listdir(root) and folder.is_file()
+
+
+def v_generated_dir_miscased(root: Path) -> None:
+    names = os.listdir(root)
+    assert "lessons.Generated" in names, f"fixture did not take effect: {names}"
+    assert "lessons.generated" not in names, (
+        f"the directory still has an exact-case lessons.generated, so this "
+        f"fixture tests nothing: {names}"
+    )
+
+
+# -- check 15: 'after' resolution
+
+
+def m_generated_after_not_a_lesson(root: Path) -> None:
+    edit(root / SIDE, "after: lessons/01-subcommands/LESSON.md", "after: lessons/99-nope.md")
+
+
+def m_generated_after_names_a_generated_lesson(root: Path) -> None:
+    """`after` must reach the MAIN path, not another generated lesson.
+
+    The path exists on disk, so a bare existence test would pass this.
+    """
+    edit(root / DRAFT, "after: lessons/02-errors-and-tests.md", f"after: {SIDE}")
+    assert (root / SIDE).is_file(), "the target of 'after' must really exist"
+
+
+def m_generated_after_is_material(root: Path) -> None:
+    """`after` points at a real file under lessons/ that is not a lesson."""
+    edit(
+        root / SIDE,
+        "after: lessons/01-subcommands/LESSON.md",
+        "after: lessons/01-subcommands/usage.txt",
+    )
+    assert (root / "lessons/01-subcommands/usage.txt").is_file()
+
+
+# -- check 16: the manifest must not list a generated lesson
+
+
+def m_manifest_lists_generated_lesson(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "  - lessons/02-errors-and-tests.md\n",
+        f"  - lessons/02-errors-and-tests.md\n  - {SIDE}\n",
+    )
+
+
+def m_bundle_manifest_lists_generated_lesson(root: Path) -> None:
+    """The same mistake in a bundle, where the directory does not even exist.
+
+    Check 4 deliberately stays quiet about lessons.generated/ entries, so if
+    check 16 did not run in bundle mode this would pass silently.
+    """
+    edit(
+        root / "tutorial.yaml",
+        "  - lessons/02-errors-and-tests.md\n",
+        "  - lessons/02-errors-and-tests.md\n  - lessons.generated/detour.md\n",
+    )
+    assert "lessons.generated" not in os.listdir(root)
+
+
+# -- check 17: resume_after
+
+
+def m_generated_active_without_resume(root: Path) -> None:
+    edit(root / "STATE.md", "resume_after: lessons/01-subcommands/LESSON.md\n", "")
+
+
+def m_generated_resume_unlisted(root: Path) -> None:
+    edit(
+        root / "STATE.md",
+        "resume_after: lessons/01-subcommands/LESSON.md",
+        f"resume_after: {SIDE}",
+    )
+
+
+def m_generated_resume_not_a_path(root: Path) -> None:
+    edit(
+        root / "STATE.md",
+        "resume_after: lessons/01-subcommands/LESSON.md",
+        "resume_after: 2",
+    )
+
+
+# -- check 11, in the presence of generated lessons
+
+
+def m_active_lesson_resolves_to_neither(root: Path) -> None:
+    """The relaxation must not become "anything that resolves is fine".
+
+    COURSE.md exists and resolves. It is not a lesson of either kind.
+    """
+    edit(root / "STATE.md", f"active_lesson: {SIDE}", "active_lesson: COURSE.md")
+    edit(root / "STATE.md", "resume_after: lessons/01-subcommands/LESSON.md\n", "")
+    assert (root / "COURSE.md").is_file()
+
+
+def m_active_lesson_generated_but_absent(root: Path) -> None:
+    edit(
+        root / "STATE.md",
+        f"active_lesson: {SIDE}",
+        "active_lesson: lessons.generated/never-written.md",
+    )
+
+
+# -- ordinary lesson rules still apply to a generated lesson
+
+
+def m_generated_id_not_slug(root: Path) -> None:
+    edit(root / DRAFT, "id: 03-reading-files-draft", "id: LESSON")
+
+
+def m_generated_bad_design_ref(root: Path) -> None:
+    edit(root / SIDE, "design_refs: [io-boundary,", "design_refs: [io-boundry,")
+
+
+def m_generated_undeclared_validator(root: Path) -> None:
+    edit(root / SIDE, "validators: [cargo-check,", "validators: [cargo-clippy,")
+
+
+def m_generated_miscased_lesson_md(root: Path) -> None:
+    folder = root / DRAFT_DIR
+    body = (folder / "LESSON.md").read_text()
+    (folder / "LESSON.md").unlink()
+    (folder / "Lesson.md").write_text(body)
+
+
+def v_generated_miscased_lesson_md(root: Path) -> None:
+    names = os.listdir(root / DRAFT_DIR)
+    assert "Lesson.md" in names, f"fixture did not take effect: {names}"
+    assert "LESSON.md" not in names, (
+        f"the directory still has an exact-case LESSON.md, so this fixture "
+        f"tests nothing: {names}"
+    )
+
+
+def m_generated_unnamed_material(root: Path) -> None:
+    target = root / DRAFT_DIR / "spare-notes.md"
+    target.write_text("# Notes\n\nNothing in LESSON.md names this file.\n")
+    assert target.is_file()
+
+
+def m_generated_progress_marker(root: Path) -> None:
+    append(root / SIDE, "\n## Where we are\n\nStatus: In progress\n")
+
+
+def m_generated_duplicate_slug(root: Path) -> None:
+    body = (root / SIDE).read_text()
+    target = root / "lessons.generated" / "03-reading-files-draft.md"
+    target.write_text(body.replace("id: lifetimes-and-borrows", "id: 03-reading-files-draft"))
+    assert target.is_file()
+
+
+def m_generated_shadows_an_authored_slug(root: Path) -> None:
+    """A generated lesson claiming an AUTHORED lesson's slug.
+
+    The paths differ, so a per-directory uniqueness check would miss it, but
+    the two files then answer to the same id.
+    """
+    body = (root / SIDE).read_text()
+    target = root / "lessons.generated" / "00-hello-args.md"
+    target.write_text(body.replace("id: lifetimes-and-borrows", "id: 00-hello-args"))
+    assert (root / "lessons" / "00-hello-args.md").is_file()
+    assert target.is_file()
+
+
+def m_stale_resume_after(root: Path) -> None:
+    """The detour finished, active_lesson moved back, resume_after stayed."""
+    edit(
+        root / "STATE.md",
+        f"active_lesson: {SIDE}",
+        "active_lesson: lessons/02-errors-and-tests.md",
+    )
+
+
 # -- indeterminate: a check cannot run, yet nothing is wrong on its face
 
 
@@ -689,6 +982,21 @@ def m_design_md_not_utf8(root: Path) -> None:
 # --------------------------------------------------------------------------
 # The case table
 # --------------------------------------------------------------------------
+
+
+# Mutators that build their own instance, so run_case must not call
+# to_instance() over the top of them.
+SELF_MATERIALIZING = {
+    m_instance_missing_state,
+    m_instance_has_template,
+    m_instance_missing_stamp,
+    m_instance_id_mismatch,
+    m_instance_active_lesson_unlisted,
+    m_instance_active_lesson_unresolved,
+    m_instance_active_lesson_is_prose,
+    m_instance_no_frontmatter,
+    m_instance_missing_status,
+}
 
 
 @dataclass
@@ -836,7 +1144,7 @@ CASES: list[Case] = [
          "this instance does not belong to this manifest"),
     Case("11: active_lesson is not in the lessons list", 11, "automaton",
          "instance", m_instance_active_lesson_unlisted,
-         "is not in tutorial.yaml's 'lessons' list"),
+         "neither an entry in tutorial.yaml's 'lessons' list nor a lesson in"),
     Case("11: active_lesson does not resolve", 11, "automaton", "instance",
          m_instance_active_lesson_unresolved,
          "active_lesson 'lessons/00-foundatoins.md' does not resolve"),
@@ -857,6 +1165,97 @@ CASES: list[Case] = [
          m_template_missing_section, "'## Accepted warnings' is missing"),
     Case("12: template has no frontmatter", 12, "automaton", "bundle",
          m_template_no_frontmatter, "there is no YAML frontmatter"),
+    # ---- check 13: lessons.generated/ in a bundle
+    Case("13: a bundle carries lessons.generated/", 13, "cli", "bundle",
+         m_bundle_has_generated_dir, "a bundle must not contain lessons.generated/"),
+    Case("13: a bundle carries a mis-cased Lessons.Generated/", 13, "cli",
+         "bundle", m_bundle_has_miscased_generated_dir,
+         "Lessons.Generated/: a bundle must not contain"),
+    # ---- check 14: provenance frontmatter
+    Case("14: a generated lesson has no 'kind'", 14, "generated", "instance",
+         m_generated_no_kind, "the provenance field 'kind' is missing"),
+    Case("14: a generated lesson declares an unknown kind", 14, "generated",
+         "instance", m_generated_unknown_kind, "kind is 'side-quest'"),
+    Case("14: a generated lesson omits 'generated: true'", 14, "generated",
+         "instance", m_generated_not_marked_generated,
+         "the provenance field 'generated' is missing"),
+    Case("14: a generated lesson declares 'generated: false'", 14, "generated",
+         "instance", m_generated_marked_false, "generated is False"),
+    Case("14: a generated lesson has no 'reason'", 14, "generated", "instance",
+         m_generated_no_reason, "the provenance field 'reason' is missing"),
+    Case("14: a generated lesson has an empty 'generated_at'", 14, "generated",
+         "instance", m_generated_empty_generated_at,
+         "the provenance field 'generated_at' is empty"),
+    Case("14: a generated lesson has no frontmatter at all", 14, "generated",
+         "instance", m_generated_no_frontmatter,
+         "the provenance cannot be read"),
+    Case("14: lessons.generated is a file, not a directory", 14, "generated",
+         "instance", m_generated_dir_is_a_file, "is a file, not a directory"),
+    Case("14: the directory is named lessons.Generated/", 14, "generated",
+         "instance", m_generated_dir_miscased,
+         "the directory is named 'lessons.Generated', not 'lessons.generated'",
+         verify=v_generated_dir_miscased),
+    # ---- check 15: 'after'
+    Case("15: 'after' names a path the manifest does not list", 15, "generated",
+         "instance", m_generated_after_not_a_lesson,
+         "after names 'lessons/99-nope.md'"),
+    Case("15: 'after' names another generated lesson", 15, "generated",
+         "instance", m_generated_after_names_a_generated_lesson,
+         "not another generated one"),
+    Case("15: 'after' names a real file that is not a listed lesson", 15,
+         "generated", "instance", m_generated_after_is_material,
+         "after names 'lessons/01-subcommands/usage.txt'"),
+    # ---- check 16: the manifest lessons list
+    Case("16: an instance manifest lists a generated lesson", 16, "generated",
+         "instance", m_manifest_lists_generated_lesson,
+         "names a generated lesson"),
+    Case("16: a bundle manifest lists a generated lesson", 16, "cli", "bundle",
+         m_bundle_manifest_lists_generated_lesson,
+         "'lessons.generated/detour.md' names a generated lesson"),
+    # ---- check 17: resume_after
+    Case("17: active_lesson is generated and resume_after is absent", 17,
+         "generated", "instance", m_generated_active_without_resume,
+         "must also carry 'resume_after'"),
+    Case("17: resume_after names a generated lesson, not the main path", 17,
+         "generated", "instance", m_generated_resume_unlisted,
+         "which is not an entry in tutorial.yaml's 'lessons' list"),
+    Case("17: resume_after is not a path", 17, "generated", "instance",
+         m_generated_resume_not_a_path, "resume_after must be a lesson path"),
+    Case("17: resume_after is left behind after the detour finished", 17,
+         "generated", "instance", m_stale_resume_after,
+         "is not a lesson in lessons.generated/"),
+    # ---- check 11: the relaxation must not become a hole
+    Case("11: active_lesson resolves, but to neither kind of lesson", 11,
+         "generated", "instance", m_active_lesson_resolves_to_neither,
+         "neither an entry in tutorial.yaml's 'lessons' list nor a lesson in"),
+    Case("11: active_lesson names a generated lesson that was never written",
+         11, "generated", "instance", m_active_lesson_generated_but_absent,
+         "'lessons.generated/never-written.md' does not resolve"),
+    # ---- the ordinary lesson rules, applied to a generated lesson
+    Case("3: a generated lesson's id does not equal its slug", 3, "generated",
+         "instance", m_generated_id_not_slug,
+         "id is 'LESSON' but the lesson slug is '03-reading-files-draft'"),
+    Case("1: a generated lesson names a design_ref that does not exist", 1,
+         "generated", "instance", m_generated_bad_design_ref,
+         "'io-boundry', which is not an anchor"),
+    Case("2: a generated lesson names an undeclared validator", 2, "generated",
+         "instance", m_generated_undeclared_validator,
+         "'cargo-clippy', which is not declared"),
+    Case("4: a foldered generated lesson's body is Lesson.md", 4, "generated",
+         "instance", m_generated_miscased_lesson_md,
+         "must be named exactly 'LESSON.md'",
+         verify=v_generated_miscased_lesson_md),
+    Case("4: two generated lessons claim the same slug", 4, "generated",
+         "instance", m_generated_duplicate_slug,
+         "the slug '03-reading-files-draft' is used by more than one"),
+    Case("4: a generated lesson shadows an authored lesson's slug", 4,
+         "generated", "instance", m_generated_shadows_an_authored_slug,
+         "(lessons.generated/00-hello-args.md, lessons/00-hello-args.md)"),
+    Case("6: a generated lesson folder carries material nothing names", 6,
+         "generated", "instance", m_generated_unnamed_material,
+         "'spare-notes.md' is never named by LESSON.md"),
+    Case("5: a generated lesson carries a progress marker", 5, "generated",
+         "instance", m_generated_progress_marker, "a Status: label"),
     # ---- the indeterminate path: check 1 cannot run, nothing else complains
     Case("exit 3: DESIGN.md is unreadable, so check 1 cannot run", 1,
          "automaton", "bundle", m_design_md_not_utf8, kind="indeterminate"),
@@ -894,16 +1293,10 @@ def run_case(case: Case) -> None:
         tmp = Path(tmpdir)
         try:
             root = fresh(case.baseline, tmp)
-            if case.mode == "instance" and case.mutate not in (
-                m_instance_missing_state,
-                m_instance_has_template,
-                m_instance_missing_stamp,
-                m_instance_id_mismatch,
-                m_instance_active_lesson_unlisted,
-                m_instance_active_lesson_unresolved,
-                m_instance_active_lesson_is_prose,
-                m_instance_no_frontmatter,
-                m_instance_missing_status,
+            if (
+                case.mode == "instance"
+                and case.baseline not in INSTANCE_BASELINES
+                and case.mutate not in SELF_MATERIALIZING
             ):
                 to_instance(root)
             case.mutate(root)
@@ -1030,6 +1423,95 @@ def test_baselines_pass() -> None:
                 "; ".join(str(f) for f in report.findings)
                 or f"blocked = {report.blocked_checks}",
             )
+
+
+def test_generated_baseline_is_expressible() -> None:
+    """The POSITIVE control for generated lessons.
+
+    Without this the new checks prove only that they can reject. It has to be
+    possible to express a valid instance WITH generated lessons, or the
+    feature is unusable however good the rejections are.
+    """
+    print("\na valid instance carrying generated lessons:")
+    root = INSTANCE_BASELINES["generated"]
+    report = vb.validate(root, "instance")
+    record(
+        report.exit_code() == 0,
+        "the generated-lesson instance validates clean",
+        "; ".join(str(f) for f in report.findings)
+        or f"blocked = {report.blocked_checks}",
+    )
+    applicable = [c for c in vb.CHECKS if c not in vb.BUNDLE_ONLY]
+    missing = [c for c in applicable if c not in report.status]
+    record(
+        not missing,
+        "every instance-mode check reported a status on it",
+        f"no status for checks {missing}",
+    )
+    for number in (14, 15, 17):
+        state, _ = report.status.get(number, ("missing", ""))
+        record(
+            state == vb.RAN,
+            f"check {number} actually RAN on it, rather than being skipped",
+            f"status was {state!r}; an 'n/a' here would mean the positive "
+            f"control proves nothing about this check",
+        )
+
+    # The fixture's own properties, verified by listing rather than by
+    # exists(), because this filesystem is case-insensitive.
+    generated = root / "lessons.generated"
+    names = sorted(os.listdir(generated))
+    record(
+        "lifetimes-and-borrows.md" in names
+        and "03-reading-files-draft" in names,
+        "the fixture holds one single-file and one foldered generated lesson",
+        f"entries = {names}",
+    )
+    record(
+        "LESSON.md" in os.listdir(generated / "03-reading-files-draft"),
+        "the foldered generated lesson's body is an exact-case LESSON.md",
+        f"entries = {sorted(os.listdir(generated / '03-reading-files-draft'))}",
+    )
+    kinds = sorted(
+        line.split(":", 1)[1].strip()
+        for path in (
+            generated / "lifetimes-and-borrows.md",
+            generated / "03-reading-files-draft" / "LESSON.md",
+        )
+        for line in path.read_text().splitlines()
+        if line.startswith("kind:")
+    )
+    record(
+        kinds == ["main-path-draft", "side-lesson"],
+        "both permitted kinds are exercised by the fixture",
+        f"kinds = {kinds}",
+    )
+    state_fm, _ = vb.split_frontmatter((root / "STATE.md").read_text())
+    assert state_fm is not None
+    front = vb._RestrictedYaml(state_fm, "STATE.md").parse()
+    record(
+        front["active_lesson"].startswith("lessons.generated/")
+        and front["resume_after"] in ["lessons/01-subcommands/LESSON.md"],
+        "STATE.md sits ON a generated lesson and records where to resume",
+        repr(front),
+    )
+    listed = vb._RestrictedYaml(
+        (root / "tutorial.yaml").read_text(), "tutorial.yaml"
+    ).parse()["lessons"]
+    record(
+        not any(str(e).startswith("lessons.generated") for e in listed),
+        "the manifest lessons list was not mutated to mention them",
+        repr(listed),
+    )
+
+    # And it must still be rejected as a BUNDLE, on check 13.
+    report = vb.validate(root, "bundle")
+    hits = [f for f in report.findings if f.check == 13]
+    record(
+        bool(hits) and report.exit_code() == 1,
+        "the same directory checked as a bundle fails check 13",
+        f"findings = {[str(f) for f in report.findings]}",
+    )
 
 
 def test_real_repositories() -> None:
@@ -1348,6 +1830,7 @@ def main() -> int:
         run_case(case)
 
     test_baselines_pass()
+    test_generated_baseline_is_expressible()
     test_real_repositories()
     test_mode_is_never_inferred()
     test_cli()

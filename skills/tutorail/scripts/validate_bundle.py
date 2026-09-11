@@ -563,7 +563,8 @@ CHECKS: dict[int, str] = {
     3: "every lesson has id + title frontmatter, and id equals its slug",
     4: "lessons entries resolve; every lesson is listed exactly once; "
     "every lesson folder has an exact-case LESSON.md",
-    5: "no progress markers in structural positions in COURSE.md or lessons/",
+    5: "no progress markers in structural positions in COURSE.md, lessons/ or "
+    "lessons.generated/",
     6: "every file in a lesson folder is named by that folder's LESSON.md",
     7: "state-file shape: STATE.template.md / STATE.md, and the instance stamp",
     8: "tutorial.yaml parses; bundle_format known; required fields present",
@@ -571,10 +572,16 @@ CHECKS: dict[int, str] = {
     10: "workspace_kind and ownership_policy are known; ownership globs non-empty",
     11: "[instance] STATE.md frontmatter well-formed and consistent with the manifest",
     12: "[bundle] STATE.template.md is consistent with the manifest",
+    13: "[bundle] lessons.generated/ is absent - it exists only in an instance",
+    14: "[instance] every generated lesson declares its provenance, with a known kind",
+    15: "[instance] every generated lesson's 'after' names a lesson in the manifest list",
+    16: "the manifest's lessons list names no generated lesson",
+    17: "[instance] resume_after is present exactly while active_lesson is "
+    "generated, and names a manifest lesson",
 }
 
-BUNDLE_ONLY = {12}
-INSTANCE_ONLY = {11}
+BUNDLE_ONLY = {12, 13}
+INSTANCE_ONLY = {11, 14, 15, 17}
 
 RAN = "ran"
 NOT_APPLICABLE = "n/a"
@@ -610,6 +617,19 @@ REQUIRED_MANIFEST_FIELDS = (
 )
 
 KNOWN_BUNDLE_FORMATS = (1,)
+
+# Generated lessons (checks 13-17).
+#
+# A tutor may write a lesson during a course. It lands in this directory, which
+# is tutor-owned and exists ONLY in an instance. The manifest's `lessons` list
+# is never mutated to mention it: a generated lesson is a learner-specific
+# overlay, discovered by listing the directory and placed by reading `after:`.
+GENERATED_DIR = "lessons.generated"
+GENERATED_KINDS = ("side-lesson", "main-path-draft")
+# `generated_at` is deliberately not format-checked: PyYAML parses an unquoted
+# 2026-09-11 into a datetime.date while the restricted reader returns a string,
+# so a type or pattern assertion here would depend on which reader is installed.
+GENERATED_REQUIRED_FIELDS = ("generated", "generated_at", "kind", "reason", "after")
 
 # Progress markers (check 5).
 #
@@ -766,7 +786,24 @@ LIMITATIONS = """What a pass does and does not mean
 
   There is deliberately no reverse material check ("LESSON.md names a file
   that does not exist"). It cannot tell a material reference from an
-  ordinary prose mention of DESIGN.md, src/lib.rs or Cargo.toml."""
+  ordinary prose mention of DESIGN.md, src/lib.rs or Cargo.toml.
+
+  Generated lessons (lessons.generated/, instance only):
+    the ABSENCE of the directory is normal and is never reported. Checks 14,
+      15 and 17 report "n/a" when there is nothing to check, which is not the
+      same as passing.
+    check 14 does not check the FORMAT of generated_at, because PyYAML reads
+      an unquoted date as a datetime.date and the restricted reader reads it
+      as a string, so any pattern assertion would depend on which reader is
+      installed.
+    nothing checks whether `reason` is a real reason, whether a side-lesson
+      was warranted, or whether a main-path-draft matches the chapter
+      COURSE.md maps. Those are judgement, and this validator makes none.
+    check 15 resolves `after` against the manifest's lessons list, not
+      against the disk. That is the stronger test - the list is what the
+      runner walks - but it means a generated lesson placed after a file
+      that exists and is simply unlisted reads as the same error as one
+      placed after a path that is not there at all."""
 
 
 @dataclass(frozen=True)
@@ -881,15 +918,23 @@ class Lesson:
     slug: str
     path: Path
     folder: Path | None  # the lesson folder, for foldered lessons
+    generated: bool = False  # discovered under lessons.generated/
 
 
-def discover_lessons(root: Path, report: Report) -> tuple[list[Lesson], bool]:
-    """Walk lessons/ and return the lessons it actually contains.
+def discover_lessons(
+    root: Path, report: Report, subdir: str = "lessons"
+) -> tuple[list[Lesson], bool]:
+    """Walk `subdir` and return the lessons it actually contains.
+
+    `subdir` is "lessons" for the authored course and GENERATED_DIR for the
+    tutor-written overlay. The two directories hold the same kind of file and
+    obey the same shape rules, so one walk serves both.
 
     Also reports check-4 findings for folders without an exact-case LESSON.md.
-    The second return value says whether lessons/ is a directory at all.
+    The second return value says whether `subdir` is a directory at all.
     """
-    lessons_dir = root / "lessons"
+    generated = subdir == GENERATED_DIR
+    lessons_dir = root / subdir
     if not lessons_dir.is_dir():
         return [], False
     found: list[Lesson] = []
@@ -900,7 +945,7 @@ def discover_lessons(root: Path, report: Report) -> tuple[list[Lesson], bool]:
         if child.is_file():
             if name.endswith(".md"):
                 found.append(
-                    Lesson(f"lessons/{name}", name[:-3], child, None)
+                    Lesson(f"{subdir}/{name}", name[:-3], child, None, generated)
                 )
             continue
         if child.is_dir():
@@ -908,10 +953,11 @@ def discover_lessons(root: Path, report: Report) -> tuple[list[Lesson], bool]:
             if "LESSON.md" in entries:
                 found.append(
                     Lesson(
-                        f"lessons/{name}/LESSON.md",
+                        f"{subdir}/{name}/LESSON.md",
                         name,
                         child / "LESSON.md",
                         child,
+                        generated,
                     )
                 )
                 continue
@@ -919,7 +965,7 @@ def discover_lessons(root: Path, report: Report) -> tuple[list[Lesson], bool]:
             if miscased:
                 report.add(
                     4,
-                    f"lessons/{name}/{miscased[0]}",
+                    f"{subdir}/{name}/{miscased[0]}",
                     f"a lesson folder's body must be named exactly 'LESSON.md'; "
                     f"this one is {miscased[0]!r}. The local filesystem is "
                     f"case-insensitive so it resolves here and fails on Linux. "
@@ -929,11 +975,11 @@ def discover_lessons(root: Path, report: Report) -> tuple[list[Lesson], bool]:
             else:
                 report.add(
                     4,
-                    f"lessons/{name}/",
-                    "a folder directly under lessons/ has no LESSON.md, so it is "
-                    "not a lesson and everything in it is unreachable. Add a "
-                    "LESSON.md, or move the files into the lesson folder they "
-                    "belong to.",
+                    f"{subdir}/{name}/",
+                    f"a folder directly under {subdir}/ has no LESSON.md, so it "
+                    f"is not a lesson and everything in it is unreachable. Add a "
+                    f"LESSON.md, or move the files into the lesson folder they "
+                    f"belong to.",
                 )
     return found, True
 
@@ -1136,6 +1182,28 @@ def check_workspace_and_ownership(manifest: Any, report: Report) -> None:
     report.ran(10, f"workspace_kind={kind!r}")
 
 
+def check_unique_slugs(lessons: list[Lesson], report: Report) -> None:
+    """Check 4 - no two lessons may claim the same id.
+
+    The id namespace is the whole instance, not one directory: a generated
+    lesson that shadows an authored lesson's slug makes `after:` and
+    `active_lesson` ambiguous to a reader even though the paths differ.
+    """
+    slugs: dict[str, list[str]] = {}
+    for lesson in lessons:
+        slugs.setdefault(lesson.slug, []).append(lesson.rel)
+    for slug, paths in sorted(slugs.items()):
+        if len(paths) > 1:
+            dirs = sorted({path.split("/", 1)[0] + "/" for path in paths})
+            report.add(
+                4,
+                ", ".join(dirs),
+                f"the slug {slug!r} is used by more than one lesson "
+                f"({', '.join(sorted(paths))}); a lesson id must be unique "
+                f"across lessons/ and {GENERATED_DIR}/",
+            )
+
+
 def check_lesson_list(
     root: Path,
     manifest: Any,
@@ -1177,6 +1245,11 @@ def check_lesson_list(
 
     by_rel = {lesson.rel: lesson for lesson in discovered}
     for entry in listed:
+        if entry == GENERATED_DIR or entry.startswith(GENERATED_DIR + "/"):
+            # Check 16 owns this. Reporting it here as well would describe a
+            # generated lesson as "not a lesson", which is both wrong and
+            # useless to the author.
+            continue
         resolved, reason = resolve_exact(root, entry)
         if resolved is None:
             report.add(
@@ -1206,18 +1279,6 @@ def check_lesson_list(
                     "runner reaches lessons only through that list, so it is "
                     "invisible.",
                 )
-
-    slugs: dict[str, list[str]] = {}
-    for lesson in discovered:
-        slugs.setdefault(lesson.slug, []).append(lesson.rel)
-    for slug, paths in slugs.items():
-        if len(paths) > 1:
-            report.add(
-                4,
-                "lessons/",
-                f"the slug {slug!r} is used by more than one lesson "
-                f"({', '.join(paths)}); a lesson id must be unique",
-            )
 
     report.ran(4, f"{len(listed)} listed / {len(discovered)} found")
     # Load every lesson we can see, whether listed or not: a lesson with a
@@ -1321,7 +1382,12 @@ def check_lesson_frontmatter(
                             f"in tutorial.yaml's 'validators' map.",
                         )
 
-    report.ran(3, f"{len(lessons)} lessons")
+    n_generated = sum(1 for lesson in lessons if lesson.generated)
+    report.ran(
+        3,
+        f"{len(lessons)} lessons"
+        + (f", {n_generated} of them generated" if n_generated else ""),
+    )
     if anchors is None:
         report.blocked(1, "DESIGN.md is missing or unreadable, so anchors are unknown")
     else:
@@ -1338,20 +1404,28 @@ def check_lesson_frontmatter(
         )
 
 
-def check_progress_markers(root: Path, report: Report) -> None:
+def check_progress_markers(
+    root: Path, report: Report, subdirs: tuple[str, ...] = ("lessons",)
+) -> None:
     """Check 5."""
     targets: list[tuple[str, Path]] = []
     course = root / "COURSE.md"
     if course.is_file():
         targets.append(("COURSE.md", course))
-    lessons_dir = root / "lessons"
-    if lessons_dir.is_dir():
+    for subdir in subdirs:
+        lessons_dir = root / subdir
+        if not lessons_dir.is_dir():
+            continue
         for path in sorted(lessons_dir.rglob("*")):
             if not path.is_file() or path.name.startswith("."):
                 continue
             targets.append((str(path.relative_to(root)), path))
     if not targets:
-        report.na(5, "neither COURSE.md nor any file under lessons/ was found")
+        report.na(
+            5,
+            f"neither COURSE.md nor any file under "
+            f"{', '.join(s + '/' for s in subdirs)} was found",
+        )
         return
     scanned = 0
     for rel, path in targets:
@@ -1364,13 +1438,23 @@ def check_progress_markers(root: Path, report: Report) -> None:
                 match = pattern.search(line)
                 if not match:
                     continue
+                if rel.startswith(GENERATED_DIR + "/"):
+                    why = (
+                        "a generated lesson is still a lesson: it teaches, and it "
+                        "records no progress. Where the learner has got to lives "
+                        "in STATE.md, so that one file is the only thing to read "
+                        "to answer that question."
+                    )
+                else:
+                    why = (
+                        "COURSE.md and lessons/ describe the course for every "
+                        "learner who will ever take it, so they carry no "
+                        "progress; all progress lives in STATE.md."
+                    )
                 report.add(
                     5,
                     f"{rel}:{lineno}",
-                    f"{label} appears here: {match.group(0).strip()!r}. COURSE.md "
-                    f"and lessons/ describe the course for every learner who will "
-                    f"ever take it, so they carry no progress; all progress lives "
-                    f"in STATE.md.",
+                    f"{label} appears here: {match.group(0).strip()!r}. {why}",
                 )
                 # One finding per line. Several patterns can describe the same
                 # marker, and repeating it once per pattern buries the rest of
@@ -1527,16 +1611,22 @@ def check_state_template(
     report.ran(12)
 
 
-def check_instance_state(root: Path, manifest: Any, report: Report) -> None:
-    """Check 11 - instance mode."""
+def check_instance_state(
+    root: Path, manifest: Any, generated: list[Lesson], report: Report
+) -> dict | None:
+    """Check 11 - instance mode.
+
+    Returns the parsed STATE.md frontmatter, or None when it could not be
+    read, so check 17 does not have to parse the file a second time.
+    """
     if "STATE.md" not in list_dir(root):
         report.blocked(11, "STATE.md is missing (see check 7)")
-        return
+        return None
     text = read_text(root / "STATE.md")
     if text is None:
         report.add(11, "STATE.md", "the file could not be read as UTF-8 text")
         report.blocked(11, "STATE.md could not be read")
-        return
+        return None
     fm_text, _ = split_frontmatter(text)
     if fm_text is None:
         report.add(
@@ -1546,17 +1636,17 @@ def check_instance_state(root: Path, manifest: Any, report: Report) -> None:
             "active_lesson, status and updated.",
         )
         report.ran(11)
-        return
+        return None
     try:
         fm = load_yaml(fm_text, "STATE.md frontmatter")
     except YamlError as exc:
         report.add(11, "STATE.md", f"the frontmatter does not parse: {exc}")
         report.ran(11)
-        return
+        return None
     if not isinstance(fm, dict):
         report.add(11, "STATE.md", "the frontmatter is not a mapping")
         report.ran(11)
-        return
+        return None
 
     for name in ("tutorial_id", "active_lesson", "status", "updated"):
         if name not in fm:
@@ -1590,14 +1680,291 @@ def check_instance_state(root: Path, manifest: Any, report: Report) -> None:
                 f"active_lesson {active!r} does not resolve: {reason}",
             )
         listed = as_list(manifest.get("lessons")) if isinstance(manifest, dict) else None
-        if listed is not None and active not in listed:
+        # An instance may sit on a generated lesson, which is deliberately NOT
+        # in the manifest list. So the target may be either - and nothing else.
+        # A path that resolves to some other file (COURSE.md, a material file,
+        # an unlisted lesson) is still a finding: it leaves the runner with no
+        # way to say what comes next.
+        generated_rels = {lesson.rel for lesson in generated}
+        if (
+            listed is not None
+            and active not in listed
+            and active not in generated_rels
+        ):
             report.add(
                 11,
                 "STATE.md",
-                f"active_lesson {active!r} is not in tutorial.yaml's 'lessons' "
-                f"list, so the runner cannot tell which lesson comes next.",
+                f"active_lesson {active!r} is neither an entry in tutorial.yaml's "
+                f"'lessons' list nor a lesson in {GENERATED_DIR}/, so the runner "
+                f"cannot tell which lesson comes next.",
             )
     report.ran(11)
+    return fm
+
+
+def generated_dir_state(root: Path) -> tuple[bool, list[str]]:
+    """Return (an exact-case lessons.generated/ exists, near-miss entry names).
+
+    The local filesystem is case-insensitive, so `Lessons.Generated/` would
+    answer an exists() test while being a different name on Linux. Compare
+    directory entries instead, and report the near miss rather than silently
+    ignoring a directory the author plainly meant as the generated one.
+    """
+    entries = list_dir(root)
+    exact = GENERATED_DIR in entries
+    near = [
+        name
+        for name in entries
+        if name != GENERATED_DIR and name.lower() == GENERATED_DIR.lower()
+    ]
+    return exact, near
+
+
+def check_no_generated_dir(root: Path, report: Report) -> None:
+    """Check 13 - bundle mode. lessons.generated/ belongs only to an instance."""
+    exact, near = generated_dir_state(root)
+    for name in ([GENERATED_DIR] if exact else []) + near:
+        report.add(
+            13,
+            f"{name}/",
+            f"a bundle must not contain {GENERATED_DIR}/. That directory holds "
+            f"lessons one tutor wrote for one learner during one course, so a "
+            f"bundle carrying it is an instance by mistake - the same error as "
+            f"a bundle carrying STATE.md. Delete it, or, if a generated lesson "
+            f"has proved worth keeping, promote it: move it into lessons/, "
+            f"strip its generated/generated_at/kind/reason/after frontmatter, "
+            f"and add it to the 'lessons' list.",
+        )
+    report.ran(13)
+
+
+def check_generated_lessons(
+    root: Path,
+    manifest: Any,
+    generated: list[Lesson],
+    exact: bool,
+    near: list[str],
+    report: Report,
+) -> None:
+    """Checks 14 and 15 - instance mode.
+
+    The ABSENCE of lessons.generated/ is normal, not a finding: most instances
+    never need one.
+    """
+    for name in near:
+        report.add(
+            14,
+            f"{name}/",
+            f"the directory is named {name!r}, not {GENERATED_DIR!r}. The local "
+            f"filesystem is case-insensitive so it resolves here and is invisible "
+            f"to the runner on Linux. Rename it (via a temporary name, because a "
+            f"plain rename is a no-op on this filesystem).",
+        )
+    if not exact:
+        if near:
+            report.ran(14, "the directory name is mis-cased")
+        else:
+            report.na(
+                14,
+                f"{GENERATED_DIR}/ does not exist, which is the normal case",
+            )
+        report.na(15, "there are no generated lessons")
+        return
+
+    if not (root / GENERATED_DIR).is_dir():
+        # Without this the run is silently clean: the entry name matches, the
+        # walk finds no lessons, and every generated check reports "0 of them".
+        report.add(
+            14,
+            GENERATED_DIR,
+            f"{GENERATED_DIR} is a file, not a directory. It holds the lessons "
+            f"the tutor wrote during this course, so it must be a directory of "
+            f"lesson files.",
+        )
+        report.ran(14, "the entry is not a directory")
+        report.na(15, "there are no generated lessons")
+        return
+
+    listed = as_list(manifest.get("lessons")) if isinstance(manifest, dict) else None
+    checked_after = 0
+
+    for lesson in generated:
+        text = read_text(lesson.path)
+        fm: Any = None
+        if text is not None:
+            fm_text, _ = split_frontmatter(text)
+            if fm_text is not None:
+                try:
+                    fm = load_yaml(fm_text, lesson.rel + " frontmatter")
+                except YamlError:
+                    fm = None
+        if not isinstance(fm, dict):
+            report.add(
+                14,
+                lesson.rel,
+                f"the frontmatter is missing or does not parse, so the "
+                f"provenance cannot be read. A generated lesson must declare "
+                f"{', '.join(GENERATED_REQUIRED_FIELDS)} on top of the ordinary "
+                f"lesson fields. See check 3 for the underlying error.",
+            )
+            continue
+
+        for name in GENERATED_REQUIRED_FIELDS:
+            if name not in fm:
+                report.add(
+                    14,
+                    lesson.rel,
+                    f"the provenance field {name!r} is missing. A lesson under "
+                    f"{GENERATED_DIR}/ was written during a course, and the "
+                    f"record of why, when and where it belongs is what makes it "
+                    f"promotable later instead of unexplained.",
+                )
+            elif name != "generated" and (
+                fm[name] is None
+                or (isinstance(fm[name], str) and fm[name].strip() == "")
+            ):
+                report.add(
+                    14, lesson.rel, f"the provenance field {name!r} is empty"
+                )
+
+        if "generated" in fm and fm["generated"] is not True:
+            report.add(
+                14,
+                lesson.rel,
+                f"generated is {fm['generated']!r}; a lesson in {GENERATED_DIR}/ "
+                f"must declare 'generated: true'. Anything else says the file is "
+                f"authored, and an authored lesson belongs in lessons/.",
+            )
+
+        kind = fm.get("kind")
+        if "kind" in fm and kind not in GENERATED_KINDS:
+            report.add(
+                14,
+                lesson.rel,
+                f"kind is {kind!r}; it must be one of "
+                f"{', '.join(GENERATED_KINDS)}. A side-lesson is a detour the "
+                f"course never planned; a main-path-draft fills a chapter "
+                f"COURSE.md maps and the bundle has no file for.",
+            )
+
+        after = fm.get("after")
+        if after is None:
+            continue  # already reported as missing or empty
+        if not isinstance(after, str):
+            report.add(
+                15,
+                lesson.rel,
+                f"after must be the path of the lesson this one follows, not "
+                f"{type(after).__name__}.",
+            )
+            continue
+        if listed is None:
+            continue
+        checked_after += 1
+        if after not in listed:
+            report.add(
+                15,
+                lesson.rel,
+                f"after names {after!r}, which is not an entry in tutorial.yaml's "
+                f"'lessons' list. A generated lesson is placed by the main-path "
+                f"lesson it follows, so 'after' must name an authored lesson - "
+                f"not another generated one, and not a path that is merely on "
+                f"disk.",
+            )
+
+    report.ran(14, f"{len(generated)} generated lessons")
+    if listed is None:
+        report.blocked(
+            15, "tutorial.yaml has no usable 'lessons' list to resolve 'after' against"
+        )
+    else:
+        report.ran(15, f"{checked_after} 'after' values against {len(listed)} lessons")
+
+
+def check_manifest_lists_no_generated(manifest: Any, report: Report) -> None:
+    """Check 16 - both modes.
+
+    The manifest's `lessons` list is the authored course and is identical for
+    every learner. Adding a generated lesson to it makes two learners' courses
+    diverge structurally and stops a later bundle revision reconciling.
+    """
+    listed = as_list(manifest.get("lessons")) if isinstance(manifest, dict) else None
+    if listed is None:
+        report.blocked(16, "tutorial.yaml has no usable 'lessons' list")
+        return
+    for entry in listed:
+        if not isinstance(entry, str):
+            continue
+        if entry == GENERATED_DIR or entry.startswith(GENERATED_DIR + "/"):
+            report.add(
+                16,
+                "tutorial.yaml",
+                f"the lessons entry {entry!r} names a generated lesson. The "
+                f"'lessons' list is the authored course and is never mutated: a "
+                f"generated lesson is a learner-specific overlay, found by "
+                f"listing {GENERATED_DIR}/ and placed by its 'after' field. "
+                f"Remove the entry. To make the lesson part of the course for "
+                f"everyone, promote it into lessons/ first.",
+            )
+    report.ran(16, f"{len(listed)} entries")
+
+
+def check_generated_resume(
+    fm: dict | None, manifest: Any, generated: list[Lesson], report: Report
+) -> None:
+    """Check 17 - instance mode.
+
+    Only applies while the learner is ON a generated lesson. A detour that does
+    not record where it came from leaves the runner guessing which main-path
+    lesson to resume, and guessing is what `resume_after` exists to prevent.
+    """
+    if fm is None:
+        report.blocked(17, "STATE.md frontmatter is missing or did not parse")
+        return
+    active = fm.get("active_lesson")
+    generated_rels = {lesson.rel for lesson in generated}
+    listed = as_list(manifest.get("lessons")) if isinstance(manifest, dict) else None
+    resume = fm.get("resume_after")
+    if not isinstance(active, str) or active not in generated_rels:
+        # `resume_after` is present EXACTLY while a detour is active. Left
+        # behind after one finished, it points a cold session at a lesson the
+        # learner has already been through, with nothing to say it is stale.
+        if resume is not None:
+            report.add(
+                17,
+                "STATE.md",
+                f"resume_after is {resume!r}, but active_lesson "
+                f"{active!r} is not a lesson in {GENERATED_DIR}/. The field "
+                f"records where an active detour returns to, so it belongs in "
+                f"STATE.md only while one is active. Remove it.",
+            )
+            report.ran(17, "active_lesson is not a generated lesson")
+        else:
+            report.na(17, "active_lesson is not a generated lesson")
+        return
+    if "resume_after" not in fm or resume is None:
+        report.add(
+            17,
+            "STATE.md",
+            f"active_lesson {active!r} is a generated lesson, so STATE.md must "
+            f"also carry 'resume_after' naming the main-path lesson to return to "
+            f"when the detour ends.",
+        )
+    elif not isinstance(resume, str):
+        report.add(
+            17,
+            "STATE.md",
+            f"resume_after must be a lesson path, not {type(resume).__name__}.",
+        )
+    elif listed is not None and resume not in listed:
+        report.add(
+            17,
+            "STATE.md",
+            f"resume_after is {resume!r}, which is not an entry in "
+            f"tutorial.yaml's 'lessons' list. The detour has to return to the "
+            f"main path, so it must name an authored lesson.",
+        )
+    report.ran(17, f"active_lesson is {active!r}")
 
 
 # --------------------------------------------------------------------------
@@ -1661,6 +2028,14 @@ def validate(target: Path, mode: str) -> Report:
 
     lessons, lessons_dir_exists = discover_lessons(target, report)
 
+    # Generated lessons. They exist only in an instance; in bundle mode check
+    # 13 reports the directory instead of walking it, so that a bundle carrying
+    # one produces ONE clear finding rather than a shower of derived ones.
+    generated_exact, generated_near = generated_dir_state(target)
+    generated: list[Lesson] = []
+    if mode == "instance" and generated_exact:
+        generated, _ = discover_lessons(target, report, GENERATED_DIR)
+
     check_state_files(target, mode, manifest, report)
     if manifest_error is not None and manifest is None:
         report.blocked(8, f"tutorial.yaml is unusable: {manifest_error}")
@@ -1671,13 +2046,27 @@ def validate(target: Path, mode: str) -> Report:
     lessons = check_lesson_list(
         target, manifest_dict, lessons_dir_exists, lessons, report
     )
-    check_lesson_frontmatter(lessons, anchors, declared, report)
-    check_progress_markers(target, report)
-    check_material_reachable(lessons, report)
+    # Checks 1, 2, 3 and 6 apply to a generated lesson exactly as they do to an
+    # authored one: it is an ordinary lesson with extra frontmatter.
+    all_lessons = lessons + generated
+    check_unique_slugs(all_lessons, report)
+    check_lesson_frontmatter(all_lessons, anchors, declared, report)
+    check_progress_markers(
+        target,
+        report,
+        ("lessons", GENERATED_DIR) if mode == "instance" else ("lessons",),
+    )
+    check_material_reachable(all_lessons, report)
+    check_manifest_lists_no_generated(manifest_dict, report)
     if mode == "bundle":
+        check_no_generated_dir(target, report)
         check_state_template(target, manifest_dict, report)
     else:
-        check_instance_state(target, manifest_dict, report)
+        check_generated_lessons(
+            target, manifest_dict, generated, generated_exact, generated_near, report
+        )
+        state_fm = check_instance_state(target, manifest_dict, generated, report)
+        check_generated_resume(state_fm, manifest_dict, generated, report)
 
     return report
 

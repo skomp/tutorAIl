@@ -223,6 +223,112 @@ task from objectives + state + workspace + the learner's last response.
 section anchors; a lesson declares only the anchors it needs; the tutor reads only those.
 A `lib.rs` refactor lesson structurally cannot pull in WAL recovery or quorum design.
 
+### Generated lessons
+
+A tutor may write a lesson **during** a course. Two situations call for it, and they
+produce the same artifact:
+
+- **A side lesson.** The learner hits a concept the main path does not reach — lifetimes,
+  trait objects, interior mutability — and needs a compact detour before continuing. The
+  AutomatonDB course rules explicitly ask for this.
+- **A main-path draft.** `COURSE.md` maps a chapter that has no lesson file yet. Rather
+  than stopping, the tutor drafts it on arrival, informed by what the learner actually
+  built.
+
+Generated lessons live in **`tutorial/lessons.generated/`**, which is tutor-owned and
+**exists only in an instance — never in a bundle.** They follow the ordinary lesson format
+and add required provenance frontmatter:
+
+```yaml
+---
+id: lifetimes-and-borrows
+title: Lifetimes, just enough to unblock the borrow
+generated: true
+generated_at: 2026-09-11
+kind: side-lesson            # | main-path-draft
+reason: "The borrow in Table::get_cell_at cannot be explained without lifetimes"
+after: lessons/03-first-refactor.md
+---
+```
+
+**The manifest's `lessons` list is never mutated.** It is the authored course, identical
+for every learner; a generated lesson is a learner-specific overlay discovered by listing
+`lessons.generated/` and reading `after:` to place it. This keeps a later bundle revision
+reconcilable, and stops two learners' courses diverging structurally.
+
+`STATE.md`'s `active_lesson` may point into `lessons.generated/`. When it does, a
+`resume_after:` field records where to return, so completing a detour resumes the main
+path rather than guessing.
+
+**Ownership is a runner rule, not a manifest field.** `tutorial/lessons.generated/` is
+tutor-owned in **every** instance, whatever the manifest says. It cannot be a `tutor_owned`
+entry: every bundle authored before this feature existed omits it, and under
+`tutor-must-not-edit-learner-owned` the default for an unlisted path is learner-owned — so
+the tutor would be unable to write the directory the feature requires. `tutorial/lessons/`
+is correspondingly read-only in every instance regardless of the manifest.
+
+**Completion is tracked in `STATE.md`, not in the lesson file.** The provenance frontmatter
+records where a generated lesson came from, never how far the learner got — progress never
+lives in a lesson. An instance that has generated at least one lesson therefore gains an
+eighth `STATE.md` body section:
+
+```markdown
+## Generated lessons
+
+```yaml
+- path: lessons.generated/lifetimes-and-borrows.md
+  kind: side-lesson
+  after: lessons/03-first-refactor.md
+  status: pending        # | complete
+```
+```
+
+The section is absent until an instance has one, which is why `STATE.template.md` does not
+carry it.
+
+**Advancement** on completing a lesson: if a generated lesson is `pending` and declares
+`after:` equal to the lesson just finished, it becomes active next; otherwise the next entry
+in `lessons`.
+
+**`active_lesson` may name a generated lesson** — it resolves either to an entry in
+`lessons` or to a file under `lessons.generated/`. It must resolve to one of the two; a path
+resolving to neither is a finding.
+
+**A detour off the final lesson** sets `resume_after` to that final entry. Completing the
+detour returns there, finds it already complete, and completes the course. `resume_after` is
+therefore always present and always names an authored lesson, which keeps the rule uniform
+rather than adding an optional-field case.
+
+**`after:` names an authored lesson, never another generated one.** Detours do not nest.
+
+**Promotion is a deliberate authoring act, not automatic.** Nothing flows from an instance
+back into a bundle on its own. Promoting one means:
+
+1. copy the file into the bundle's `lessons/`, renaming it to the numbered slug convention
+   of its neighbours;
+2. **reset `id` to the new slug** — generated slugs carry no number prefix, and `id` must
+   equal the slug, so promotion without a rename silently breaks that check;
+3. strip **all five** provenance fields: `generated`, `generated_at`, `kind`, `reason`,
+   `after`;
+4. add it to `lessons` at the right position;
+5. **re-check `design_refs`.** This is the step authoring alone never needs: an instance's
+   `DESIGN.md` grows during a course, so a generated lesson may cite an anchor that exists
+   in that learner's instance and has never existed in the bundle.
+
+Promotion leaves the originating instance holding its draft, so the two share a slug. This
+surfaces only when that learner takes a bundle revision: at re-materialization the draft is
+a duplicate of an authored lesson and is reported, and the tutor deletes it then. Until
+then the learner works from their copy and nothing breaks.
+
+This is also the course's only quality signal from real use. Three learners all needing a
+lifetimes detour after lesson 03 is not three side lessons; it is a missing lesson, and the
+generated files are the evidence.
+
+**Improvising around a broken bundle remains forbidden.** A missing lesson file that
+`lessons` *does* list, an undeclared validator, a dangling `design_ref` — these are defects
+to report, not to paper over. Generation is a recorded, provenanced act for a course that
+is working as intended.
+
 > **A rejected design, recorded so it is not retried.** An earlier draft made `COURSE.md`
 > the lesson index and cross-referenced it against `lessons/` by scanning its prose for
 > lesson paths. On a real bundle that check was **inert**: the course map names lessons as
@@ -388,8 +494,10 @@ simply be validated as the other kind.
 
 Two further checks follow from §3 and §5 rather than from the list above:
 
-11. instance mode — `STATE.md` frontmatter well-formed, `active_lesson` resolves and is
-    listed in `lessons`, `tutorial_id` matches the manifest
+11. instance mode — `STATE.md` frontmatter well-formed, `tutorial_id` matches the
+    manifest, and `active_lesson` resolves **either** to an entry in `lessons` **or** to a
+    file under `lessons.generated/` (see "Generated lessons" in §6); a path resolving to
+    neither is a finding
 12. bundle mode — `STATE.template.md` agrees with the manifest (`tutorial_id` equals
     `id`, `active_lesson` equals `lessons[0]`, `status` is `not-started`)
 
@@ -623,7 +731,48 @@ catalogue mirrors are documented as future concerns, not solved.
 
 ---
 
-## 16. Implementation status
+## 16. Deferred: telemetry feedback
+
+Generated lessons are the course's only quality signal from real use. A later version
+should be able to emit them, **optionally and opt-in**, to a webhook so a course author
+sees where learners actually stall.
+
+Not built, and no backend exists. Recorded because one decision has to be made now and is
+expensive to retrofit.
+
+**Nothing needs to be built to start collecting.** Generated lessons are already files on
+disk in each learner's workspace, with structured provenance. The signal accrues whether
+or not anything transmits it, so a webhook added later works against accumulated history
+rather than starting from zero. Collect locally, transmit later.
+
+**The decision to make now: separate the signal from the content.** A generated lesson's
+`reason` field, and its body, can contain the learner's code, their misunderstanding, and
+the shape of the system they are building. Transmitting that is a disclosure, and a course
+author usually does not need it. The two layers:
+
+| Layer | Example | Sensitivity |
+|---|---|---|
+| **Signal** | `after: lessons/03-first-refactor.md`, `kind: side-lesson`, `id`, `generated_at` | low — no learner content |
+| **Content** | `reason` prose, the lesson body, any material | high — learner code and context |
+
+The provenance frontmatter already isolates the signal layer, which is what makes an
+"anonymous signal only" opt-in cheap later. Keep it that way: **do not move learner context
+into a frontmatter field**, and do not add frontmatter that quotes learner code. If
+`reason` needs to stay human-readable, that is fine — it simply belongs to the content
+layer and is not transmitted by default.
+
+Other signals worth emitting eventually, all already present or derivable in `STATE.md`:
+which lesson a learner stalls on, repeated validation failures per lesson, elapsed time
+per lesson, and the lesson at which a course is abandoned. Abandonment is probably the
+single most valuable number and nothing currently records it.
+
+Open questions, none urgent: consent and its revocation; whether an instance carries a
+stable anonymous id or is unlinkable between reports; whether a self-hosted receiver is
+supported; and what happens when transmission fails (it must never block a lesson).
+
+---
+
+## 17. Implementation status
 
 | Deliverable | State |
 |---|---|

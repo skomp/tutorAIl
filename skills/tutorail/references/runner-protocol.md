@@ -20,7 +20,8 @@ Load, every turn:
 - the instance `tutorial.yaml` — the manifest, including `lessons`, `validators`,
   `learner_owned`, `tutor_owned`, `ownership_policy`, and the teaching switches;
 - `tutorial/STATE.md` — where the learner is;
-- the single lesson file named by `STATE.md`'s `active_lesson`;
+- the single lesson file named by `STATE.md`'s `active_lesson` — which is normally an
+  entry in `lessons`, and may be a file under `tutorial/lessons.generated/` (section 7);
 - only the `DESIGN.md` sections whose anchors are listed in that lesson's `design_refs`;
 - the learner's workspace files that the current task actually concerns.
 
@@ -213,9 +214,18 @@ every session. Do not carry an assumption from a different tutorial.
 Before any change to a file, ask: does this path match a `learner_owned` glob? If it
 does, and the policy does not permit it, you may read it and you may not change it.
 
-`tutor_owned` — typically `tutorial/STATE.md`, `tutorial/DESIGN.md` and the instance's
-lesson copies — is yours. Everything in the workspace that is neither listed is the
-learner's by default. When in doubt, treat a path as learner-owned.
+`tutor_owned` — typically `tutorial/STATE.md` and `tutorial/DESIGN.md` — is yours.
+Everything in the workspace that is neither listed is the learner's by default. When in
+doubt, treat a path as learner-owned.
+
+Two paths are settled by the runner rather than by the manifest, because a bundle cannot
+describe an instance that does not exist yet:
+
+- `tutorial/lessons.generated/**` is **tutor-owned in every instance**, whether or not
+  `tutor_owned` lists it. It holds only lessons you wrote (section 7);
+- `tutorial/lessons/**` is **read-only in every instance**, whether or not `tutor_owned`
+  lists it. Those are the author's lessons, copied in at materialization. Correct a
+  defective one by reporting it, never by editing the copy.
 
 ### What "not editing" actually means
 
@@ -277,18 +287,130 @@ Then, in order:
 3. **Expire acceptances.** Any `accepted_warnings` entry whose `until_lesson` is the
    lesson now being left, or the lesson now being entered, is void. Remove it and say so.
 4. **Advance.** Find the current `active_lesson` in the manifest's `lessons` list and
-   take the next entry. The list is the order; filename sort is not. Update `STATE.md`
-   per `state-lifecycle.md`.
+   take the next entry. The list is the order; filename sort is not. When the instance has
+   a `lessons.generated/` directory, apply section 7.3 first: an incomplete generated
+   lesson whose `after:` is the lesson just finished takes precedence over the next entry.
+   Update `STATE.md` per `state-lifecycle.md`.
 5. **Load the new lesson and nothing else.** Discard the previous lesson from working
    context. Do not summarise it into `STATE.md` beyond the concepts it demonstrated.
 
-If `active_lesson` is the last entry in `lessons`, the course is finished. Set `status` to
-`complete`, say what the learner built and which concepts they demonstrated, and stop.
-Do not invent a further lesson.
+If `active_lesson` is the last entry in `lessons` and no incomplete generated lesson
+claims it, the course is finished. Set `status` to `complete`, say what the learner built
+and which concepts they demonstrated, and stop. Do not invent a further lesson — writing
+one here would be exactly the improvisation section 7.2 refuses.
 
 ---
 
-## 7. Failure modes to refuse
+## 7. Generated lessons
+
+A course can be entirely sound and still not carry what this learner needs next. Two
+situations produce the same artifact:
+
+- **A side lesson.** The learner meets a concept the main path never reaches — lifetimes,
+  trait objects, interior mutability — and cannot continue without it. A compact detour,
+  then back to the main path.
+- **A main-path draft.** `COURSE.md` maps a chapter that has no lesson file yet, so
+  `lessons` does not list one. Rather than stopping, draft it on arrival, informed by what
+  the learner has actually built.
+
+Both live in `tutorial/lessons.generated/`, which is tutor-owned, exists only in an
+instance, and never appears in a bundle. The mechanics — the file, the required provenance
+frontmatter, what `STATE.md` records — are in `state-lifecycle.md` section 8. Load it
+before creating anything.
+
+### 7.1 When generation is warranted
+
+Generating a lesson is legitimate when the **course is working as intended** and the
+learner needs something it does not cover. All of these must hold:
+
+- every `lessons` entry resolves, every validator a lesson names is declared in the
+  manifest, and every `design_refs` anchor exists. The bundle does what it says it does;
+- the gap is real and it is now — the learner is blocked on a concept the course never
+  teaches, or has arrived at a chapter `COURSE.md` maps and no lesson file covers;
+- an answer in conversation is not enough. The material needs objectives, constraints and
+  completion conditions of its own;
+- you can state `reason:` in one sentence that a bundle author who was not here can act
+  on.
+
+Generation is a recorded, provenanced act, not an improvisation. If you cannot write the
+reason down, you do not have one.
+
+### 7.2 When generation is NOT warranted
+
+**Improvising around a broken bundle remains forbidden, and this is not a way around it.**
+The distinction carries the whole feature:
+
+| What you found | What it is | What to do |
+|---|---|---|
+| `lessons` names a lesson file that is not there | a defect | stop; report the path |
+| a lesson names a validator the manifest does not declare | a defect | stop; report the name |
+| a lesson's `design_refs` names an anchor `DESIGN.md` does not have | a defect | stop; report the anchor |
+| `active_lesson` names a path in neither `lessons` nor `lessons.generated/` | a defect | stop; report it |
+| a lesson folder has no `LESSON.md`, or names material that is not there | a defect | stop; report it |
+| `COURSE.md` maps a chapter, `lessons` claims no lesson for it | a gap | a main-path draft is warranted |
+| the learner is blocked on a concept the course never teaches | a gap | a side lesson is warranted |
+
+A **defect** is the bundle contradicting itself: it promises something it does not
+contain. Drafting a lesson over a defect hides the contradiction from the only person who
+can fix it, and quietly gives this learner a different course from every other learner.
+Report it and let the learner decide.
+
+A **gap** is the bundle being honest about its own edge. Nothing is broken; the course
+simply does not reach where this learner now is.
+
+These are also not reasons to generate:
+
+- **the learner is stuck.** That is a teaching problem. Escalate the help, per section 5;
+- the lesson turned out harder than you expected, or you would rather teach something
+  else;
+- a topic seems missing to you while nothing is blocked — record it as a deferred item in
+  `STATE.md` instead, and say it is a suggestion for the course author;
+- to move past a lesson quickly, or to cover a lesson you have not opened.
+
+**Never generate a lesson that replaces one the bundle has.** A generated lesson adds to
+the course for one learner. It never overrides an authored lesson, and it never edits one:
+the instance's `lessons/` copies stay read-only.
+
+A generated lesson is held to the same rules as an authored one. It may name only
+validators the manifest declares and only `DESIGN.md` anchors that exist — inventing
+either would manufacture the very defect this section tells you to report.
+
+### 7.3 Advancing when generated lessons exist
+
+The manifest's `lessons` list is **never** modified — not to add a generated lesson, not
+for any other reason. `state-lifecycle.md` section 8 says why. Generated lessons are an
+overlay, positioned by their `after:` field and discovered by listing the directory.
+
+A generated lesson's `after:` always names an **authored** lesson — an entry in `lessons`,
+never another generated lesson. So there are two cases, and after the steps in section 6:
+
+**On completing an authored lesson L**
+
+1. list `tutorial/lessons.generated/`. If it does not exist, there is no overlay and
+   nothing changes;
+2. if an **incomplete** generated lesson declares `after: L`, it becomes `active_lesson`,
+   and `resume_after` records the entry that follows L in `lessons`;
+3. otherwise take the next entry in `lessons`, exactly as section 6 step 4 says.
+
+**On completing a generated lesson whose `after:` is L**
+
+1. if another incomplete generated lesson also declares `after: L`, it becomes
+   `active_lesson` and `resume_after` is left as it is — both detours return to the same
+   place;
+2. otherwise `active_lesson` becomes `resume_after`, and the `resume_after` field is
+   removed.
+
+A generated lesson is incomplete until `STATE.md` records it as finished, in the
+*Generated lessons* section (`state-lifecycle.md` section 8.5). The lesson files carry no
+progress themselves, deliberately. When several incomplete generated lessons share one
+`after:`, take them oldest `generated_at` first, and only then the main path.
+
+A generated lesson's completion conditions bind exactly like an authored lesson's. You
+wrote them; do not wave them through because you wrote them.
+
+---
+
+## 8. Failure modes to refuse
 
 - **Advancing on assertion.** When `advance_on` is `validated-evidence-only`, "it works
   now" is not evidence. Run the validators.
@@ -302,3 +424,9 @@ Do not invent a further lesson.
   through it and let them decide; the completion conditions still apply.
 - **Improvising around a broken bundle.** A missing lesson file, an undeclared validator
   or an unresolvable `active_lesson` is a defect to report, not a gap to fill.
+- **Generating a lesson over a defect.** Section 7 permits writing a lesson when the
+  course works and the learner needs something it does not cover. It permits nothing when
+  the course is broken: a drafted lesson there conceals the defect and gives this learner
+  a course nobody else is taking. Section 7.2 is the test.
+- **Editing the manifest's `lessons` list.** It is the authored course. A generated lesson
+  is an overlay; the list stays byte-identical to the bundle's.

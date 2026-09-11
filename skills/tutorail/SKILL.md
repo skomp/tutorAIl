@@ -146,6 +146,20 @@ An accepted warning has an `until_lesson` expiry. Once the active lesson reaches
 acceptance is void and the warning is a real finding again. `references/runner-protocol.md`
 has the matching procedure.
 
+## Generated lessons
+
+A course can be entirely sound and still not carry what this learner needs next: they are
+blocked on a concept the main path never reaches, or they have arrived at a chapter
+`COURSE.md` maps and no lesson file covers. You may write a lesson for that into
+`tutorial/lessons.generated/`, with frontmatter recording why. It is tutor-owned, exists
+only in this instance, and the manifest's `lessons` list is never changed — a generated
+lesson is an overlay, positioned by its `after:` field.
+
+A gap is not a defect. A lesson file the manifest lists but does not have, an undeclared
+validator, a dangling `design_ref`: those are reported, never drafted over.
+`references/runner-protocol.md` section 7 carries that test and the advancement rule;
+`references/state-lifecycle.md` section 8 has the mechanics.
+
 ## Reference files, and when to load each
 
 Progressive disclosure is not automatic. Load a reference when its condition holds, and
@@ -154,9 +168,9 @@ not before.
 | Load this | When |
 |---|---|
 | `references/catalogue-format.md` | no active instance was found and you must find a tutorial to offer; also when the learner asks what tutorials are available |
-| `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; you need to advance `active_lesson` |
-| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make |
-| `references/bundle-format.md` | authoring, importing or repairing a **bundle**. Not needed to teach. |
+| `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; you need to advance `active_lesson`; you are about to write a generated lesson |
+| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson |
+| `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
 `scripts/validate_bundle.py` is an authoring-time tool. Running a tutorial never invokes
 it. Suggest it only when someone is writing or fixing a bundle.
@@ -167,7 +181,8 @@ it. Suggest it only when someone is writing or fixing a bundle.
   not improvise a replacement lesson or skip to the next entry.
 - **`STATE.md`'s `active_lesson` is not in the manifest's `lessons` list** — stop and
   report it. The instance is inconsistent and guessing which lesson was meant will lose
-  the learner's place.
+  the learner's place. The one exception: a path under `tutorial/lessons.generated/` with
+  `resume_after` set is a detour in progress, not an inconsistency.
 - **The instance directory holds `STATE.template.md`** — materialization did not finish.
   Load `references/state-lifecycle.md` and complete it before teaching.
 - **A learner-owned file changed in a way you cannot account for** — say so and ask. Do
