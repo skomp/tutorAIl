@@ -131,9 +131,13 @@ does:
 - **what "the next lesson" means** when one completes. Do not rely on filenames sorting
   correctly; the list is the order.
 
-Every entry MUST resolve to a real file, and every file in `lessons/` MUST appear in the
-list exactly once. A lesson file that is not listed is invisible to the runner and is
+Every entry MUST resolve to a real file, and every **lesson** in `lessons/` MUST appear
+in the list exactly once. A lesson that is not listed is invisible to the runner and is
 reported as an error, not silently skipped.
+
+"Every lesson" means every top-level `.md` file plus every folder containing a
+`LESSON.md`. Supporting files inside a lesson folder are material, not lessons, and MUST
+NOT appear in the list.
 
 Name lessons by path, the same form used by `active_lesson`, so every reference to a
 lesson looks identical everywhere. An entry always names the Markdown file, whether the
@@ -444,9 +448,9 @@ Detailed lesson files are only required for lessons a learner will reach soon. A
 course may keep its later chapters as a high-level map in `COURSE.md` and gain lesson
 files as it goes.
 
-A 22-chapter course does not need 22 detailed lesson files to be valid. It needs every
-entry in `lessons` to resolve and every lesson file to be well-formed. Chapters without
-a lesson file yet are simply not listed.
+A twenty-chapter course does not need twenty detailed lesson files to be valid. It needs
+every entry in `lessons` to resolve and every listed lesson to be well-formed. Chapters
+without a lesson file yet are simply not listed, and are added to `lessons` when written.
 
 Prefer a small number of good lessons over a large number of thin ones.
 
@@ -495,8 +499,10 @@ Confirm each of these by looking, not by remembering:
 - [ ] every lesson file has `id` and `title` in frontmatter
 - [ ] every `design_refs` entry resolves to a real anchor in `DESIGN.md`
 - [ ] every lesson `validators` entry is declared in `tutorial.yaml`
-- [ ] no file under `lessons/` and not `COURSE.md` contains `Status: Complete`,
+- [ ] neither `COURSE.md` nor any file under `lessons/` contains `Status: Complete`,
       `In progress`, `Next:`, `current lesson`, or `resume marker`
+- [ ] every foldered lesson's body is named `LESSON.md` in exact case — confirm with a
+      directory listing, because a case-insensitive filesystem will hide a mistake
 - [ ] `workspace_kind` is one of the three permitted values
 - [ ] no learner's source code appears anywhere in the bundle
 
@@ -507,8 +513,12 @@ good — that is your judgement, not the format's.
 
 ## 10. Minimal complete example
 
+This is the smallest thing that is still a valid bundle. (The bundle shipped with the
+runner at `examples/rust-cli-basics/` is a fuller worked example; this one is trimmed to
+the bare minimum so the required shape is visible at a glance.)
+
 ```
-rust-cli-basics/
+tiny-cli-course/
 ├── tutorial.yaml
 ├── COURSE.md
 ├── DESIGN.md
@@ -521,8 +531,8 @@ rust-cli-basics/
 
 ```yaml
 bundle_format: 1
-id: rust-cli-basics
-title: Rust Fundamentals Through a CLI
+id: tiny-cli-course
+title: A Tiny CLI Course
 description: Learn core Rust by building a small command-line tool.
 subjects: [rust, cli]
 aliases: [command-line, argv]
@@ -579,4 +589,24 @@ Get a Rust binary reading its own arguments, so later lessons have input to work
 excluding the program name.
 ```
 
+`STATE.template.md` is required too, exactly as shown in section 5, with
+`tutorial_id: tiny-cli-course` and `active_lesson: lessons/00-hello-args.md`.
+
 That is a complete, valid bundle.
+
+To make `00-hello-args` a foldered lesson instead, the only changes are:
+
+```
+lessons/
+└── 00-hello-args/
+    ├── LESSON.md          the same file, renamed
+    └── sample-output.txt  material, mentioned by LESSON.md
+```
+
+```yaml
+lessons:
+  - lessons/00-hello-args/LESSON.md
+```
+
+The `id` stays `00-hello-args`, because the slug is now the folder name. Nothing else
+changes.
