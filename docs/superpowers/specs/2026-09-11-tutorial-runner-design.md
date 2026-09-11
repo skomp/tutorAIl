@@ -60,7 +60,7 @@ BUNDLE (distributable)            INSTANCE (<workspace>/tutorial/)
 | `DESIGN.md` | required (seed) | tutor appends durable decisions | author seeds, tutor grows |
 | `STATE.template.md` | **required** | **must be absent** | author |
 | `STATE.md` | **must be absent** | **required** | runner creates, tutor updates |
-| `lessons/**` | required | read-only except progress notes | author |
+| `lessons/**` | required | **read-only** | author |
 | learner source | n/a | **learner-owned** | learner |
 
 ### The corollary authors get wrong
@@ -96,7 +96,7 @@ lessons:
   # ... ordered; lessons[0] is the entry lesson
 
 workspace_kind: existing-or-new-repository   # | new-repository | none
-tutor_owned:    [tutorial/STATE.md, tutorial/DESIGN.md, tutorial/lessons/**]
+tutor_owned:    [tutorial/STATE.md, tutorial/DESIGN.md]
 learner_owned:  [src/**, tests/**, Cargo.toml]
 ownership_policy: tutor-must-not-edit-learner-owned   # | on-request | unrestricted
 
@@ -132,6 +132,12 @@ accepted_warnings:
 
 The `until_lesson` expiry prevents "expected warnings" becoming permanent cover, which
 would otherwise make the no-dead-code rule unenforceable.
+
+**The expiry is exclusive**: acceptance is void once `active_lesson` reaches
+`until_lesson`, not after it completes. The AutomatonDB case shows why — its dead-code
+warnings expire at `lessons/03-first-refactor.md`, the lesson whose entire purpose is to
+remove their cause. Holding acceptance *through* that lesson would suppress the warnings
+exactly when they are the lesson's subject.
 
 ---
 
@@ -271,6 +277,26 @@ a scoring function. Rules:
 
 **Discovery loads metadata only.** The runner must not read anything under `source.path`
 until the learner has chosen. This is what makes a remote catalogue viable later.
+
+Registration is the one deliberate exception: adding a course to a catalogue requires
+reading its `tutorial.yaml` to build the entry. The learner is pointing at that specific
+bundle, so no provider boundary is crossed.
+
+### Precedence and authority
+
+Both catalogue files are read and merged. **The user's file wins on an `id` collision**,
+because the user controls their own file — but the runner must say that a shipped entry
+was overridden, since silently substituting a different `source.path` is exactly the kind
+of hidden choice the matching rules otherwise forbid.
+
+Catalogue entries duplicate manifest metadata (`title`, `subjects`, `level`,
+`workspace_kind`, …) by necessity, because discovery must not open the bundle. The copy
+can therefore drift. **The bundle's `tutorial.yaml` is authoritative once resolved**; the
+catalogue entry is a discovery-time hint. If they disagree after resolution, the runner
+uses the manifest and should say so.
+
+`scope` is the exception: it exists only in the catalogue, has no manifest field, and is
+derived at registration time from the length of the `lessons` list.
 
 ---
 

@@ -1,0 +1,29 @@
+# Tutorials that ship with the tutorAIl plugin.
+#
+# This file lists only bundles that are part of the plugin itself. A user registers
+# their own tutorials in ~/.config/tutorail/catalog.yaml, which the runner creates on
+# first use; entries there have the same shape as the entries here.
+#
+# `source.path` is relative to the skill directory (the directory that holds SKILL.md),
+# because that is how both supported hosts resolve a path named in a skill.
+#
+# Only one tutorial ships. Discovery therefore offers a choice between two Rust courses
+# only after the user has registered a second one of their own.
+
+catalog_version: 1
+tutorials:
+  - id: rust-cli-basics
+    title: Rust Fundamentals Through a Command-Line Tool
+    description: >
+      Core Rust taught by building a small command-line tool that counts the lines or
+      the words in a text file: arguments, one command dispatch, errors with Result,
+      and unit tests. No external crates.
+    subjects: [rust, cli, command-line, error-handling, testing]
+    aliases: [argv, subcommand, rust-basics, first-rust-program, beginner-rust]
+    level: beginner
+    style: [project-driven, interactive, short-form]
+    scope: "3 lessons; a few hours"
+    workspace_kind: new-repository
+    source:
+      type: local
+      path: examples/rust-cli-basics

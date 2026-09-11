@@ -87,7 +87,7 @@ lessons:
   - lessons/02-typed-keys-table-hierarchy.md
 
 workspace_kind: existing-or-new-repository
-tutor_owned:    [tutorial/STATE.md, tutorial/DESIGN.md, tutorial/lessons/**]
+tutor_owned:    [tutorial/STATE.md, tutorial/DESIGN.md]
 learner_owned:  [src/**, tests/**, Cargo.toml]
 ownership_policy: tutor-must-not-edit-learner-owned
 
@@ -165,6 +165,18 @@ Not every tutorial builds software. If yours does not, use `none` and leave
 - `tutor-must-not-edit-learner-owned` — the normal choice for a course where the learner writes the code
 - `on-request` — the tutor may edit learner files when explicitly asked
 - `unrestricted` — the tutor may edit freely (rare; use only for courses where the learner is not writing the artifact)
+
+**Ownership globs are relative to the learner's workspace, not to the bundle.** They
+describe the world *after* materialization, when the bundle has been copied into
+`<workspace>/tutorial/` and sits beside the learner's own files. So `tutorial/STATE.md`
+is the instance's state file, and `src/**` is the learner's source. Neither path exists
+inside the bundle you are writing, which is why you cannot verify them by looking — write
+them for the workspace the course will be taken in.
+
+`tutor_owned` should stay small. `tutorial/STATE.md` and `tutorial/DESIGN.md` are the
+normal contents. **Do not add `tutorial/lessons/**`**: lesson copies are read-only in an
+instance, because all progress belongs in `STATE.md` and a lesson carrying progress is
+rejected by the same rule as section 3.
 
 **`validators`** — a map of name to definition. Valid `kind` values:
 
@@ -325,7 +337,12 @@ lessons/
 ```
 
 Both forms are lessons. They are identical in every other respect: same frontmatter,
-same required sections, same treatment by the runner.
+same sections, same treatment by the runner.
+
+Only `id` and `title` in frontmatter are strictly REQUIRED. The section list in
+"Lesson file structure" below is the expected shape, and a lesson missing
+"Completion conditions" is a lesson the tutor cannot decide when to leave — so write
+them all unless you have a reason not to.
 
 ### When to use a folder
 
