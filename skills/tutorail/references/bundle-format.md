@@ -380,6 +380,16 @@ spends its first lesson on toil. `supplies` is the alternative: you declare wher
 lives in the bundle and where it belongs in the workspace, the runner puts it there and
 says so, and the lesson gets on with the subject.
 
+**A `supplies` entry MUST NOT hand the learner what a lesson asks them to write.** That
+is the author's half of this key and it is the one limit nothing else enforces. Removing
+toil is the whole of the remit: fixtures, assets, data, a scaffold the course is not
+teaching. `from: assets/solution/` with `to: src/` breaks no rule stated below — at
+course start no target exists, so nothing is overwritten, and every path is declared, so
+the ownership exemption covers all of it — and it quietly hands the tutor the learner's
+code to write, with `ownership_policy` untouched and every guarantee apparently intact.
+The exemption is drawn narrowly on the tutor's side precisely so that the declaration
+list cannot be made to do what the policy was stopped from doing.
+
 ```yaml
 supplies:
   - from: assets/models/Duck.glb
@@ -397,7 +407,7 @@ always a misspelling of one of the three.
 | Field | Required | Meaning |
 |---|---|---|
 | `from` | MUST | The source, **relative to the bundle root**. A trailing `/` means the *contents* of that directory, recursively; without one it names a single file. It MUST resolve to something the bundle actually contains, and MUST NOT point inside `lessons.generated/`, which exists only in an instance. |
-| `to` | MUST | The destination, relative to the **learner's workspace** root. It MUST be relative, MUST NOT contain `..`, and MUST NOT begin with `tutorial/`. Separate components with `/`. |
+| `to` | MUST | The destination, relative to the **learner's workspace** root. It MUST be relative, MUST NOT contain `..`, and MUST NOT begin with `tutorial/`. Separate components with `/`. A `to` of `.` is the workspace root itself and is legal; with a directory `from` it scatters a whole tree across the learner's own files, which is the most collision-prone destination a bundle can choose. |
 | `describe` | MUST | One non-empty line, in your words, naming what these files are. The runner says it to the learner, which is the only reason the field exists. |
 
 **`from` is bundle-root-relative in both scopes** — one rule, and no scope-dependent
@@ -468,12 +478,22 @@ glob, and MAY **never modify** one that does. Declaring a path in `supplies` buy
 permission and nothing else. An undeclared path gets no exemption of any kind: the policy
 applies to it exactly as it did before this key existed.
 
+**`on-request` gets the same exemption, and needs it for the same reason.** That policy
+lets the tutor edit learner files when it is asked, and placing a declared supply is not
+the tutor being asked — without the exemption a course using it would have to interrupt
+the learner for permission to unpack its own fixtures. `unrestricted` needs no exemption
+at all. Under every policy it is the create half that the declaration grants: **placement
+never rewrites a file that is already there**, whatever the policy would otherwise allow.
+
 The narrowness is the point, and it is worth one sentence of history. A generated course
 met this exact problem — a starter file under `src/**` that the tutor was forbidden to put
 there — and "fixed" it by setting `ownership_policy: unrestricted`, trading away the
 guarantee that the tutor will not write the learner's code across all eighteen of its
 lessons in exchange for one bootstrap. One `supplies` entry was the whole fix. A reader
 who takes the exemption to be broader than create-only will make that trade again.
+
+The author-side limit at the top of this section is what keeps the other door shut: a
+declaration list that may hand over anything is `unrestricted` by another name.
 
 #### Older runners
 
@@ -492,6 +512,11 @@ material to be named by its `LESSON.md`, because a file the lesson never mention
 unreachable. A supplies entry says strictly more than a prose mention does: it names the
 file, says where it goes, says what it is, and the runner acts on it. Every other file in
 the folder still needs naming in the body.
+
+**Any declaration clears it, not only the owning lesson's.** A lesson folder's material
+may be supplied by a manifest entry, or by another lesson's entry, and it is covered
+either way — a file is discoverable because it is declared somewhere, not because the
+folder it sits in declared it.
 
 #### When a target already exists
 
@@ -745,7 +770,8 @@ file otherwise. A folder holding only `LESSON.md` is pointless; make it a file.
 wholesale, because the entire point of the format is that a tutor holds one lesson in
 context, not a course.
 
-So a folder lesson MUST name its material and say when to use it:
+So a folder lesson MUST name its material and say when to use it, with the one exception
+stated below:
 
 ```markdown
 For the state-merging walkthrough, read `worked-example.md`.
@@ -754,6 +780,13 @@ If the learner asks how minimisation differs from a trie, show `assets/dafsa.svg
 
 Material that `LESSON.md` never mentions is unreachable. That is not a subtle failure:
 the tutor has no way to know the file exists.
+
+**The exception is material the bundle supplies.** A file a `supplies` entry covers —
+named directly by a `from`, or lying under a directory `from` — is declared, placed and
+described to the learner without the lesson body saying anything, so the naming rule does
+not apply to it and the validator does not ask for it. Section 2, **Supplied files**,
+says why: a declaration states strictly more than a prose mention does. Every other file
+in the folder still MUST be named.
 
 ### Naming and ids
 
@@ -829,6 +862,7 @@ Material available if the learner asks. Not required.
 | `design_refs` | SHOULD | `DESIGN.md` anchors this lesson needs. MUST all resolve. |
 | `validators` | SHOULD | Validator names from `tutorial.yaml`. MUST all be declared. |
 | `optional` | MUST on an optional lesson | `true`, on every lesson listed in `optional_lessons` and on no other. |
+| `supplies` | MAY | Files this lesson hands the learner's workspace when it opens, in the same three-field form the manifest key uses. See section 2, **Supplied files**. |
 
 `design_refs` is how a lesson stays cheap. A lesson about splitting a file into a
 library declares only the anchors it truly needs. It does not pull in storage,
@@ -1046,7 +1080,9 @@ why it is written for you rather than for the learner.
    learner's workspace; the bundle describes what to build, not what was built.
 11. **Renaming `id` after publication.** It is the stable identity.
 12. **A lesson folder whose `LESSON.md` never mentions its own material.** The tutor
-    cannot discover files the lesson does not name; they are dead weight.
+    cannot discover files the lesson does not name; they are dead weight. Material a
+    `supplies` entry covers is the exception: it is declared, so it is discoverable
+    without a mention (section 2).
 13. **Shipping a `lessons.generated/` directory.** An instance was mixed into the bundle.
     Delete it, and promote what belongs to the course by section 8.
 14. **Promoting a generated lesson with its provenance frontmatter still attached.**
@@ -1090,7 +1126,8 @@ Confirm each of these by looking, not by remembering:
       `optional_lessons`, never in both — counting both top-level `.md` files and
       folders containing `LESSON.md`
 - [ ] every folder directly under `lessons/` contains a `LESSON.md`
-- [ ] every supporting file in a lesson folder is mentioned by its `LESSON.md`
+- [ ] every supporting file in a lesson folder is mentioned by its `LESSON.md`, unless a
+      `supplies` entry covers it
 - [ ] `STATE.template.md`'s `tutorial_id` equals `tutorial.yaml`'s `id`
 - [ ] `STATE.template.md`'s `active_lesson` equals the first `lessons` entry
 - [ ] every lesson file has `id` and `title` in frontmatter
@@ -1328,9 +1365,9 @@ Reach for the gate only when the blocked lesson genuinely cannot be finished.
 ## 13. Older runners, and bundles that predate this
 
 `bundle_format` stays `1`. `optional_lessons`, `failure_modes` and `supplies` are
-additive: a bundle
-written before this section existed is valid exactly as it stands, nothing in this
-document changes what it means, and no edit is implied. Run the validator over it and see.
+additive: a bundle written before this section existed is valid exactly as it stands,
+nothing in this document changes what it means, and no edit is implied. Run the
+validator over it and see.
 
 The other direction is the one to understand before you ship a course that uses the
 feature. A runner that predates it reads `tutorial.yaml`, does not recognise the new
@@ -1343,8 +1380,10 @@ keys, and ignores them. The effect on a learner is precise, and worth stating pl
 - **no supplied file is placed.** The learner is told to put it there by hand, or the
   lesson fails to find it — which is the position every course that predates `supplies`
   is in already;
-- **nothing is taught wrongly.** The main path is untouched, because an optional lesson is
-  never in it.
+- **nothing is taught wrongly.** The main path is untouched by `optional_lessons`, because
+  an optional lesson is never in it. An unplaced supply is not the same case — a
+  manifest-scope entry IS on the main path — but it costs the learner the toil the key
+  removes, not a wrong lesson, and it fails where they can see it rather than silently.
 
 So the invariant that makes this safe is one you hold, and no validator can check it:
 
