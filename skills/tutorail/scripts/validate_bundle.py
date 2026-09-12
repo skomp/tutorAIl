@@ -78,8 +78,9 @@ CHECKS: dict[int, str] = {
     1: "every design_refs entry resolves to a DESIGN.md anchor",
     2: "every lesson validators entry is declared in tutorial.yaml",
     3: "every lesson has id + title frontmatter, and id equals its slug",
-    4: "lessons entries resolve; every lesson is listed exactly once; "
-    "every lesson folder has an exact-case LESSON.md",
+    4: "lessons entries resolve; every lesson is listed exactly once, in "
+    "'lessons' or 'optional_lessons'; every lesson folder has an exact-case "
+    "LESSON.md",
     5: "no progress markers in structural positions in COURSE.md, lessons/ or "
     "lessons.generated/",
     6: "every file in a lesson folder is named by that folder's LESSON.md",
@@ -94,11 +95,17 @@ CHECKS: dict[int, str] = {
     15: "[instance] every generated lesson's 'after' names a lesson in the manifest list",
     16: "the manifest's lessons list names no generated lesson",
     17: "[instance] resume_at is present exactly while active_lesson is "
-    "generated, and names a manifest lesson",
+    "generated or optional, and names a manifest lesson",
+    18: "optional_lessons is well-formed: every key is a lesson, every offer "
+    "resolves, every gate has something to gate on",
+    19: "failure_modes is well-formed, and every declared mode is anticipated",
+    20: "'optional: true' frontmatter agrees with the optional_lessons list",
+    21: "[instance] STATE.md's '## Optional lessons' record is well-formed and "
+    "agrees with active_lesson",
 }
 
 BUNDLE_ONLY = {12, 13}
-INSTANCE_ONLY = {11, 14, 15, 17}
+INSTANCE_ONLY = {11, 14, 15, 17, 21}
 
 RAN = "ran"
 NOT_APPLICABLE = "n/a"
@@ -147,6 +154,32 @@ GENERATED_KINDS = ("side-lesson", "main-path-draft")
 # 2026-09-11 into a datetime.date while the restricted reader returns a string,
 # so a type or pattern assertion here would depend on which reader is installed.
 GENERATED_REQUIRED_FIELDS = ("generated", "generated_at", "kind", "reason", "after")
+
+# Optional lessons (checks 18-21).
+#
+# An optional lesson is an ordinary authored lesson under lessons/ that the
+# tutor OFFERS rather than sequences. It is listed in `optional_lessons`
+# instead of `lessons`, and it may ANTICIPATE named failure modes, so that a
+# lesson the learner deferred can be offered again when the failure it warned
+# about actually arrives.
+#
+# `optional_lessons` and `failure_modes` are both optional keys. Their ABSENCE
+# is the normal case and is never reported - see LIMITATIONS.
+OPTIONAL_KEY = "optional_lessons"
+FAILURE_MODES_KEY = "failure_modes"
+OPTIONAL_REQUIRED_FIELDS = ("offer_at", "offer_because")
+# The states one learner's decision about one optional lesson can be in. There
+# is deliberately NO "not-offered": not yet offered is the ABSENCE of a record,
+# so a record claiming it is a contradiction and is reported.
+OPTIONAL_STATES = ("offered", "deferred", "in-progress", "complete")
+OPTIONAL_SECTION = "Optional lessons"
+_FAILURE_MODE_ID_RE = re.compile(r"[a-z0-9-]+")
+# `- `path` — state — anything else`. Strict about the path and the state,
+# tolerant about the trailing clause, which is free text an author may wrap.
+_OPTIONAL_RECORD_RE = re.compile(
+    r"^[-*+][ \t]+`(?P<path>[^`]+)`[ \t]*[—–-][ \t]*"
+    r"(?P<state>[A-Za-z][A-Za-z-]*)"
+)
 
 # Progress markers (check 5).
 #
@@ -326,7 +359,32 @@ LIMITATIONS = """What a pass does and does not mean
       course, `resume_at` is the lesson to make active when the detour ends,
       and a detour taken part-way through a lesson returns INTO that lesson.
       Check 17 asserts only that `resume_at` is a path naming an entry in
-      `lessons`, and that it is present exactly while a detour is active."""
+      `lessons`, and that it is present exactly while a detour is active.
+
+  Optional lessons (optional_lessons / failure_modes):
+    the ABSENCE of both keys is normal and is never reported. A bundle that
+      declares neither is valid exactly as it was before the keys existed.
+      Checks 18, 19 and 21 report "n/a" when there is nothing to check, which
+      is not the same as passing.
+    nothing checks whether a failure mode is REAL, whether its `signals` are
+      the right evidence for it, whether `offer_because` tells the learner
+      anything useful, or whether an optional lesson is worth taking. Those
+      are judgement, and this validator makes none.
+    NOTHING CAN CHECK THE INVARIANT THAT MATTERS MOST: that the course can be
+      finished by a learner who declines every offer. Section 13 of
+      bundle-format.md makes that an authoring obligation, and it is not
+      mechanically decidable - a green run does not certify it. A
+      `required_for` gate is the one declared exception, and the validator
+      cannot tell a gate you meant from a prerequisite you hid.
+    nothing checks `repair_in` against the instance's `resume_at`, for the
+      same reason nothing checks `after:` against it. `repair_in` is in the
+      manifest and answers "whose work is now wrong"; `resume_at` is in the
+      instance and answers "where does the learner stand". They differ
+      whenever a failure surfaces later than the code that caused it, which
+      is the ordinary case for an anticipated failure.
+    check 21 validates the SHAPE of STATE.md's `## Optional lessons` record,
+      not its truth. It cannot tell whether the learner was really offered
+      anything, really deferred it, or really finished it."""
 
 
 @dataclass(frozen=True)
@@ -435,6 +493,18 @@ def split_frontmatter(text: str) -> tuple[str | None, str]:
 
 def as_list(value: Any) -> list | None:
     return value if isinstance(value, list) else None
+
+
+def _is_text(value: Any) -> bool:
+    return isinstance(value, str) and value.strip() != ""
+
+
+def _is_text_list(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(_is_text(item) for item in value)
+    )
 
 
 # -- lesson discovery -------------------------------------------------------
@@ -737,9 +807,19 @@ def check_lesson_list(
     manifest: Any,
     lessons_dir_exists: bool,
     discovered: list[Lesson],
+    optional_keys: set[str],
     report: Report,
 ) -> list[Lesson]:
-    """Check 4 - resolution, exactly-once listing. Returns the lessons to load."""
+    """Check 4 - resolution, exactly-once listing. Returns the lessons to load.
+
+    A lesson is reachable through EITHER list: `lessons` walks the main path in
+    order, `optional_lessons` holds the ones the tutor offers. A lesson in
+    neither is invisible to the runner, which is what this reports.
+
+    A lesson in BOTH belongs to check 18, not here. Reporting it twice would
+    describe one mistake as two, and the useful message - "nothing can be both
+    walked and offered" - is the one check 18 gives.
+    """
     listed_raw = as_list(manifest.get("lessons")) if isinstance(manifest, dict) else None
     if listed_raw is None:
         report.blocked(
@@ -797,18 +877,25 @@ def check_lesson_list(
             )
 
     if lessons_dir_exists:
-        listed_set = set(listed)
+        reachable = set(listed) | optional_keys
         for lesson in discovered:
-            if lesson.rel not in listed_set:
+            if lesson.rel not in reachable:
                 report.add(
                     4,
                     lesson.rel,
-                    "this lesson is not listed in tutorial.yaml's 'lessons'. The "
-                    "runner reaches lessons only through that list, so it is "
-                    "invisible.",
+                    "this lesson is not listed in tutorial.yaml's 'lessons', and "
+                    "not in 'optional_lessons' either. The runner reaches a "
+                    "lesson only through one of those two lists - 'lessons' is "
+                    "the main path it walks, 'optional_lessons' is what it "
+                    "offers - so this file is invisible. Add it to whichever one "
+                    "it belongs in, or delete it.",
                 )
 
-    report.ran(4, f"{len(listed)} listed / {len(discovered)} found")
+    report.ran(
+        4,
+        f"{len(listed)} listed / {len(optional_keys)} optional / "
+        f"{len(discovered)} found",
+    )
     # Load every lesson we can see, whether listed or not: a lesson with a
     # broken design_ref is worth reporting even while it is unlisted.
     return discovered
@@ -1068,6 +1155,626 @@ def check_material_reachable(lessons: list[Lesson], report: Report) -> None:
     )
 
 
+def optional_lesson_keys(manifest: Any) -> set[str]:
+    """The paths declared in `optional_lessons`, for the checks that need them.
+
+    A malformed `optional_lessons` yields an empty set rather than raising.
+    Check 18 reports the malformation; every other check then behaves exactly
+    as it would for a bundle that declared none, which is the safe direction.
+    """
+    if not isinstance(manifest, dict):
+        return set()
+    raw = manifest.get(OPTIONAL_KEY)
+    if not isinstance(raw, dict):
+        return set()
+    return {str(key) for key in raw}
+
+
+def anticipated_failure_modes(manifest: Any) -> set[str]:
+    """Every failure-mode id named by some optional lesson's `anticipates`."""
+    if not isinstance(manifest, dict):
+        return set()
+    raw = manifest.get(OPTIONAL_KEY)
+    if not isinstance(raw, dict):
+        return set()
+    named: set[str] = set()
+    for entry in raw.values():
+        if not isinstance(entry, dict):
+            continue
+        ids = as_list(entry.get("anticipates"))
+        if ids is None:
+            continue
+        named.update(str(item) for item in ids)
+    return named
+
+
+def check_optional_lessons(
+    root: Path, manifest: Any, discovered: list[Lesson], report: Report
+) -> None:
+    """Check 18 - both modes.
+
+    The ABSENCE of `optional_lessons` is normal, not a finding: most bundles
+    never declare one, and the key is additive to bundle_format 1.
+    """
+    if not isinstance(manifest, dict) or manifest.get(OPTIONAL_KEY) is None:
+        report.na(
+            18,
+            f"the manifest declares no {OPTIONAL_KEY}, which is the normal case",
+        )
+        return
+    raw = manifest[OPTIONAL_KEY]
+    if not isinstance(raw, dict):
+        report.add(
+            18,
+            "tutorial.yaml",
+            f"{OPTIONAL_KEY} must be a mapping of lesson path to offer "
+            f"metadata, not {type(raw).__name__}. It is a map and not a list "
+            f"because the tutor looks a lesson up by path.",
+        )
+        report.ran(18, f"{OPTIONAL_KEY} is not a mapping")
+        return
+
+    listed_raw = as_list(manifest.get("lessons"))
+    listed: list[str] | None = (
+        [entry for entry in listed_raw if isinstance(entry, str)]
+        if listed_raw is not None
+        else None
+    )
+    modes = manifest.get(FAILURE_MODES_KEY)
+    declared_modes = {str(k) for k in modes} if isinstance(modes, dict) else set()
+    by_rel = {lesson.rel for lesson in discovered}
+
+    def in_lessons(where: str, field: str, value: Any) -> None:
+        """Report `value` unless it is a string naming a `lessons` entry."""
+        if not isinstance(value, str):
+            report.add(
+                18,
+                where,
+                f"{field} names {value!r}, which is not a path string",
+            )
+            return
+        if listed is None or value in listed:
+            return
+        report.add(
+            18,
+            where,
+            f"{field} names {value!r}, which is not an entry in tutorial.yaml's "
+            f"'lessons' list. Every offer point, repair site and gate is a "
+            f"place on the MAIN PATH, so each one must name a lesson the "
+            f"runner actually walks.",
+        )
+
+    for key, value in raw.items():
+        name = str(key)
+        where = f"tutorial.yaml ({OPTIONAL_KEY}.{name})"
+        if not isinstance(key, str):
+            report.add(
+                18,
+                "tutorial.yaml",
+                f"the {OPTIONAL_KEY} key {key!r} is not a path string",
+            )
+            continue
+        if name == GENERATED_DIR or name.startswith(GENERATED_DIR + "/"):
+            report.add(
+                18,
+                where,
+                f"an optional lesson is AUTHORED and ships in the bundle, so it "
+                f"lives in lessons/. This key names a path under "
+                f"{GENERATED_DIR}/, which holds lessons one tutor wrote for one "
+                f"learner during one course. To offer it to everyone, promote it "
+                f"into lessons/ first (see check 13).",
+            )
+            continue
+        resolved, reason = resolve_exact(root, name)
+        if resolved is None:
+            report.add(
+                18, where, f"the {OPTIONAL_KEY} key does not resolve: {reason}"
+            )
+        elif name not in by_rel:
+            report.add(
+                18,
+                where,
+                f"the {OPTIONAL_KEY} key resolves to a file that is not a "
+                f"lesson. A lesson is a top-level .md file in lessons/, or "
+                f"<folder>/LESSON.md. Supporting files inside a lesson folder "
+                f"are material and cannot be offered.",
+            )
+        if listed is not None and name in listed:
+            report.add(
+                18,
+                where,
+                f"this lesson is also an entry in the 'lessons' list. Nothing "
+                f"can be both: 'lessons' is the main path every learner walks "
+                f"in order, and an optional lesson is one the tutor offers and "
+                f"the learner may decline. Choose one list.",
+            )
+
+        if not isinstance(value, dict):
+            report.add(
+                18,
+                where,
+                f"the entry must be a mapping declaring at least "
+                f"{' and '.join(OPTIONAL_REQUIRED_FIELDS)}, not "
+                f"{type(value).__name__}",
+            )
+            continue
+
+        offer_at = value.get("offer_at")
+        if "offer_at" not in value or offer_at is None:
+            report.add(
+                18,
+                where,
+                "'offer_at' is required and is missing. It names the 'lessons' "
+                "entries at which the tutor raises the offer, and it is what "
+                "makes the lesson reachable at all.",
+            )
+        elif as_list(offer_at) is None:
+            report.add(
+                18,
+                where,
+                f"'offer_at' must be a list of 'lessons' entries, not "
+                f"{type(offer_at).__name__}",
+            )
+        elif not offer_at:
+            report.add(
+                18,
+                where,
+                "'offer_at' is empty, so nothing ever offers this lesson and no "
+                "learner can reach it. That is the same error as a lesson "
+                "listed in neither list (check 4), not a way to say 'offer it "
+                "whenever you like'. Name at least one 'lessons' entry.",
+            )
+        else:
+            for entry in offer_at:
+                in_lessons(where, "'offer_at'", entry)
+
+        if not _is_text(value.get("offer_because")):
+            report.add(
+                18,
+                where,
+                f"'offer_because' is required and must be a non-empty string. "
+                f"It is {value.get('offer_because')!r}. The tutor says this "
+                f"sentence to the learner when it offers the lesson, and it "
+                f"lives here rather than in the lesson so that offering costs "
+                f"no file open.",
+            )
+
+        anticipates = value.get("anticipates")
+        if anticipates is not None:
+            if as_list(anticipates) is None:
+                report.add(
+                    18,
+                    where,
+                    f"'anticipates' must be a list of failure-mode ids, not "
+                    f"{type(anticipates).__name__}",
+                )
+            else:
+                for item in anticipates:
+                    if not isinstance(item, str):
+                        report.add(
+                            18,
+                            where,
+                            f"'anticipates' names {item!r}, which is not a "
+                            f"failure-mode id string",
+                        )
+                    elif item not in declared_modes:
+                        report.add(
+                            18,
+                            where,
+                            f"'anticipates' names {item!r}, which is not "
+                            f"declared in '{FAILURE_MODES_KEY}'. The tutor "
+                            f"re-offers this lesson by recognising a named "
+                            f"failure, so the name has to exist and carry a "
+                            f"summary it can say out loud.",
+                        )
+
+        if "repair_in" in value and value["repair_in"] is not None:
+            in_lessons(where, "'repair_in'", value["repair_in"])
+
+        required_for = value.get("required_for")
+        if required_for is not None:
+            if as_list(required_for) is None:
+                report.add(
+                    18,
+                    where,
+                    f"'required_for' must be a list of 'lessons' entries, not "
+                    f"{type(required_for).__name__}",
+                )
+            else:
+                for entry in required_for:
+                    in_lessons(where, "'required_for'", entry)
+            if not _is_text_list(as_list(anticipates) or []):
+                report.add(
+                    18,
+                    where,
+                    "'required_for' declares a gate, but 'anticipates' is "
+                    "missing or empty. The gate closes when an anticipated "
+                    "failure is observed and opens when the lesson is taken, so "
+                    "with nothing to anticipate it can never do either. Declare "
+                    "the failure mode it gates on, or remove 'required_for'.",
+                )
+
+    if listed is None:
+        report.blocked(
+            18,
+            "tutorial.yaml has no usable 'lessons' list, so offer_at, repair_in "
+            "and required_for could not be resolved",
+        )
+    else:
+        report.ran(18, f"{len(raw)} optional lesson(s)")
+
+
+def check_failure_modes(
+    manifest: Any,
+    declared_validators: set[str] | None,
+    anticipated: set[str],
+    report: Report,
+) -> None:
+    """Check 19 - both modes.
+
+    The ABSENCE of `failure_modes` is normal, not a finding: it is needed only
+    by an optional lesson that anticipates something.
+    """
+    if not isinstance(manifest, dict) or manifest.get(FAILURE_MODES_KEY) is None:
+        report.na(
+            19,
+            f"the manifest declares no {FAILURE_MODES_KEY}, which is the "
+            f"normal case",
+        )
+        return
+    raw = manifest[FAILURE_MODES_KEY]
+    if not isinstance(raw, dict):
+        report.add(
+            19,
+            "tutorial.yaml",
+            f"{FAILURE_MODES_KEY} must be a mapping of id to definition, not "
+            f"{type(raw).__name__}. An optional lesson anticipates a failure "
+            f"BY ID, so the ids are the keys.",
+        )
+        report.ran(19, f"{FAILURE_MODES_KEY} is not a mapping")
+        return
+
+    checked_signals = 0
+    for key, value in raw.items():
+        name = str(key)
+        where = f"tutorial.yaml ({FAILURE_MODES_KEY}.{name})"
+        if not _FAILURE_MODE_ID_RE.fullmatch(name):
+            report.add(
+                19,
+                "tutorial.yaml",
+                f"the failure-mode id {name!r} must match [a-z0-9-]+. It is a "
+                f"stable name an optional lesson refers to, so it is spelled "
+                f"like every other id in this format.",
+            )
+        if not isinstance(value, dict):
+            report.add(
+                19,
+                where,
+                f"a failure mode must be a mapping declaring at least "
+                f"'summary', not {type(value).__name__}",
+            )
+            continue
+        if not _is_text(value.get("summary")):
+            report.add(
+                19,
+                where,
+                f"'summary' is required and must be a non-empty string. It is "
+                f"{value.get('summary')!r}. The tutor says this sentence when "
+                f"it connects an observed failure to the lesson the learner "
+                f"set aside, so a failure mode without one cannot be raised.",
+            )
+        signals = value.get("signals")
+        if signals is not None:
+            if as_list(signals) is None:
+                report.add(
+                    19,
+                    where,
+                    f"'signals' must be a list of evidence forms, not "
+                    f"{type(signals).__name__}",
+                )
+            else:
+                for item in signals:
+                    if not isinstance(item, str) or not item.strip():
+                        report.add(
+                            19,
+                            where,
+                            f"the signal {item!r} is not a string. A signal is "
+                            f"one of 'validator:<name>', 'token:<TOKEN>' or "
+                            f"the bare word 'diagnosis'.",
+                        )
+                        continue
+                    checked_signals += 1
+                    text = item.strip()
+                    if text == "diagnosis":
+                        continue
+                    if text.startswith("validator:"):
+                        vname = text[len("validator:") :].strip()
+                        if not vname:
+                            report.add(
+                                19,
+                                where,
+                                "the signal 'validator:' names no validator",
+                            )
+                        elif (
+                            declared_validators is not None
+                            and vname not in declared_validators
+                        ):
+                            report.add(
+                                19,
+                                where,
+                                f"the signal names validator {vname!r}, which "
+                                f"is not declared in tutorial.yaml's "
+                                f"'validators' map. A signal the tutor cannot "
+                                f"run is evidence it can never weigh.",
+                            )
+                        continue
+                    if text.startswith("token:"):
+                        if not text[len("token:") :].strip():
+                            report.add(
+                                19, where, "the signal 'token:' names no token"
+                            )
+                        continue
+                    report.add(
+                        19,
+                        where,
+                        f"the signal {text!r} is in none of the three permitted "
+                        f"forms: 'validator:<name>' for a declared validator "
+                        f"failing, 'token:<TOKEN>' for an identifier a check "
+                        f"you control prints, or the bare word 'diagnosis' for "
+                        f"something the tutor concluded by reading the code. "
+                        f"Raw compiler or test output is deliberately not a "
+                        f"form - it breaks the first time a toolchain rewords.",
+                    )
+        if name not in anticipated:
+            report.add(
+                19,
+                where,
+                f"no optional lesson anticipates {name!r}, so nothing can ever "
+                f"be re-offered when it happens and this declaration is dead "
+                f"weight - the same error as a lesson nothing lists. Name it in "
+                f"some optional lesson's 'anticipates', or remove it.",
+            )
+
+    if declared_validators is None:
+        report.blocked(
+            19,
+            "tutorial.yaml has no usable 'validators' map, so 'validator:' "
+            "signals could not be resolved",
+        )
+    else:
+        report.ran(19, f"{len(raw)} failure mode(s), {checked_signals} signal(s)")
+
+
+def check_optional_frontmatter(
+    lessons: list[Lesson],
+    optional_keys: set[str],
+    listed: list[str] | None,
+    report: Report,
+) -> None:
+    """Check 20 - both modes.
+
+    Deliberate redundancy, of the same class as "id must equal the slug". The
+    manifest already knows which lessons are optional. The lesson file says it
+    again because a lesson that does not say so reads as main path to anyone
+    who opens it alone - including its author, six months later.
+
+    A file whose frontmatter is missing or unparseable is skipped silently
+    here: check 3 already reports it, and a second finding about the same
+    unreadable block tells the author nothing new.
+    """
+    checked = 0
+    for lesson in lessons:
+        text = read_text(lesson.path)
+        if text is None:
+            continue
+        fm_text, _ = split_frontmatter(text)
+        if fm_text is None:
+            continue
+        try:
+            fm = load_yaml(fm_text, lesson.rel + " frontmatter")
+        except YamlError:
+            continue
+        if not isinstance(fm, dict):
+            continue
+        checked += 1
+        if lesson.rel in optional_keys:
+            if "optional" not in fm:
+                report.add(
+                    20,
+                    lesson.rel,
+                    f"tutorial.yaml lists this lesson in '{OPTIONAL_KEY}', but "
+                    f"its frontmatter does not declare 'optional: true'. Say it "
+                    f"in both places: a lesson file that does not say it is "
+                    f"optional reads as main path to everyone who opens it "
+                    f"alone.",
+                )
+            elif fm["optional"] is not True:
+                report.add(
+                    20,
+                    lesson.rel,
+                    f"optional is {fm['optional']!r}; a lesson listed in "
+                    f"'{OPTIONAL_KEY}' must declare exactly 'optional: true'. "
+                    f"There is no third state - a lesson is offered or it is "
+                    f"walked.",
+                )
+        elif "optional" in fm:
+            if lesson.generated:
+                where = (
+                    f"it belongs to {GENERATED_DIR}/, which is an overlay one "
+                    f"tutor wrote for one learner"
+                )
+            elif listed is not None and lesson.rel in listed:
+                where = (
+                    "it is an entry in tutorial.yaml's 'lessons' list, which "
+                    "every learner walks in order"
+                )
+            else:
+                where = "it is in neither list at all - see check 4"
+            report.add(
+                20,
+                lesson.rel,
+                f"the frontmatter declares 'optional: {fm['optional']!r}', but "
+                f"this lesson is not listed in '{OPTIONAL_KEY}': {where}. Only "
+                f"a lesson the tutor OFFERS is optional. Either add it to "
+                f"'{OPTIONAL_KEY}' with its offer metadata, or remove the "
+                f"field.",
+            )
+    report.ran(20, f"{checked} lessons, {len(optional_keys)} of them optional")
+
+
+def section_lines(body: str, heading: str) -> list[str] | None:
+    """The lines under '## <heading>', or None when the section is absent."""
+    pattern = re.compile(
+        rf"^#+[ \t]+{re.escape(heading)}[ \t]*$", re.IGNORECASE
+    )
+    lines = body.splitlines()
+    for index, line in enumerate(lines):
+        if not pattern.match(line):
+            continue
+        collected: list[str] = []
+        for rest in lines[index + 1 :]:
+            if re.match(r"^#+[ \t]", rest):
+                break
+            collected.append(rest)
+        return collected
+    return None
+
+
+def check_optional_state(
+    root: Path, optional_keys: set[str], fm: dict | None, report: Report
+) -> None:
+    """Check 21 - instance mode.
+
+    STATE.md records ONE learner's decision about each optional lesson they
+    were offered. Not yet offered is the ABSENCE of a record, which is why
+    there is no 'not-offered' state: a record saying so claims the tutor
+    offered a lesson and then un-offered it.
+    """
+    if "STATE.md" not in list_dir(root):
+        if optional_keys:
+            report.blocked(21, "STATE.md is missing (see check 7)")
+        else:
+            report.na(
+                21,
+                "the manifest declares no optional lessons, and there is no "
+                "STATE.md to record any",
+            )
+        return
+    text = read_text(root / "STATE.md")
+    if text is None:
+        if optional_keys:
+            report.blocked(21, "STATE.md could not be read (see check 11)")
+        else:
+            report.na(21, "the manifest declares no optional lessons")
+        return
+    _, body = split_frontmatter(text)
+    lines = section_lines(body, OPTIONAL_SECTION)
+    if lines is None:
+        if not optional_keys:
+            report.na(
+                21,
+                f"the manifest declares no optional lessons and STATE.md has "
+                f"no '## {OPTIONAL_SECTION}' section",
+            )
+            return
+        # The manifest offers lessons but this learner has no record yet. That
+        # is the ordinary state of a fresh instance, so the section's absence
+        # is not itself a finding - but active_lesson is still checked below.
+        lines = []
+
+    # Bullets may wrap: a continuation line belongs to the bullet above it.
+    entries: list[tuple[int, str]] = []
+    for offset, line in enumerate(lines):
+        if re.match(r"^[-*+][ \t]", line):
+            entries.append((offset, line.strip()))
+        elif entries and line.strip():
+            index, existing = entries[-1]
+            entries[-1] = (index, existing + " " + line.strip())
+
+    seen: dict[str, str] = {}
+    for _, entry in entries:
+        if re.fullmatch(r"[-*+][ \t]+[Nn]one\.?", entry):
+            continue  # the conventional "nothing to record" bullet
+        match = _OPTIONAL_RECORD_RE.match(entry)
+        if match is None:
+            report.add(
+                21,
+                f"STATE.md (## {OPTIONAL_SECTION})",
+                f"the entry {entry[:70]!r} is not a record. Each one names the "
+                f"lesson path in backticks, then a dash, then one of "
+                f"{', '.join(OPTIONAL_STATES)} - for example: "
+                f"- `lessons/pure-core-and-edges.md` — deferred — offered at "
+                f"`lessons/01-subcommands/LESSON.md` on 2026-09-11",
+            )
+            continue
+        path = match.group("path").strip()
+        state = match.group("state")
+        if path in seen:
+            report.add(
+                21,
+                f"STATE.md (## {OPTIONAL_SECTION})",
+                f"{path!r} is recorded twice, as {seen[path]!r} and {state!r}. "
+                f"One lesson has one current state; replace the record rather "
+                f"than appending to it.",
+            )
+        else:
+            seen[path] = state
+        if path not in optional_keys:
+            report.add(
+                21,
+                f"STATE.md (## {OPTIONAL_SECTION})",
+                f"{path!r} is not a key in tutorial.yaml's '{OPTIONAL_KEY}', so "
+                f"there is no lesson for this record to be about. This section "
+                f"records decisions about optional lessons only; a generated "
+                f"lesson belongs under '## Generated lessons'.",
+            )
+        if state == "not-offered":
+            report.add(
+                21,
+                f"STATE.md (## {OPTIONAL_SECTION})",
+                f"{path!r} is recorded as 'not-offered', which is not a state. "
+                f"Not yet offered is the ABSENCE of a record: delete the entry. "
+                f"The states are {', '.join(OPTIONAL_STATES)}.",
+            )
+        elif state not in OPTIONAL_STATES:
+            report.add(
+                21,
+                f"STATE.md (## {OPTIONAL_SECTION})",
+                f"{path!r} is recorded as {state!r}, which is not one of "
+                f"{', '.join(OPTIONAL_STATES)}.",
+            )
+
+    active = fm.get("active_lesson") if isinstance(fm, dict) else None
+    if isinstance(active, str) and active in optional_keys:
+        if active not in seen:
+            report.add(
+                21,
+                f"STATE.md (## {OPTIONAL_SECTION})",
+                f"active_lesson is the optional lesson {active!r}, but this "
+                f"section records nothing about it. The learner is standing in "
+                f"it, so it must be recorded as 'in-progress'.",
+            )
+        elif seen[active] != "in-progress":
+            report.add(
+                21,
+                f"STATE.md (## {OPTIONAL_SECTION})",
+                f"active_lesson is the optional lesson {active!r}, but its "
+                f"record says {seen[active]!r}. A lesson the learner is "
+                f"standing in is 'in-progress'.",
+            )
+    for path, state in seen.items():
+        if state == "in-progress" and path != active:
+            report.add(
+                21,
+                f"STATE.md (## {OPTIONAL_SECTION})",
+                f"{path!r} is recorded as 'in-progress', but active_lesson is "
+                f"{active!r}. One lesson is active at a time, so an optional "
+                f"lesson in progress is the active one. Record it as 'offered', "
+                f"'deferred' or 'complete', or make it active.",
+            )
+    report.ran(21, f"{len(seen)} record(s)")
+
+
 def check_state_template(
     root: Path, manifest: Any, report: Report
 ) -> None:
@@ -1140,7 +1847,11 @@ def check_state_template(
 
 
 def check_instance_state(
-    root: Path, manifest: Any, generated: list[Lesson], report: Report
+    root: Path,
+    manifest: Any,
+    generated: list[Lesson],
+    optional_keys: set[str],
+    report: Report,
 ) -> dict | None:
     """Check 11 - instance mode.
 
@@ -1208,23 +1919,26 @@ def check_instance_state(
                 f"active_lesson {active!r} does not resolve: {reason}",
             )
         listed = as_list(manifest.get("lessons")) if isinstance(manifest, dict) else None
-        # An instance may sit on a generated lesson, which is deliberately NOT
-        # in the manifest list. So the target may be either - and nothing else.
-        # A path that resolves to some other file (COURSE.md, a material file,
-        # an unlisted lesson) is still a finding: it leaves the runner with no
-        # way to say what comes next.
+        # An instance may sit on a generated lesson or on an optional one, and
+        # neither is in the manifest's `lessons` list - deliberately. So the
+        # target may be any of the three, and nothing else. A path that
+        # resolves to some other file (COURSE.md, a material file, an unlisted
+        # lesson) is still a finding: it leaves the runner with no way to say
+        # what comes next.
         generated_rels = {lesson.rel for lesson in generated}
         if (
             listed is not None
             and active not in listed
             and active not in generated_rels
+            and active not in optional_keys
         ):
             report.add(
                 11,
                 "STATE.md",
-                f"active_lesson {active!r} is neither an entry in tutorial.yaml's "
-                f"'lessons' list nor a lesson in {GENERATED_DIR}/, so the runner "
-                f"cannot tell which lesson comes next.",
+                f"active_lesson {active!r} is none of: an entry in "
+                f"tutorial.yaml's 'lessons' list, a key in its "
+                f"'{OPTIONAL_KEY}' map, or a lesson in {GENERATED_DIR}/. So the "
+                f"runner cannot tell which lesson comes next.",
             )
     report.ran(11)
     return fm
@@ -1438,13 +2152,18 @@ def check_manifest_lists_no_generated(manifest: Any, report: Report) -> None:
 
 
 def check_generated_resume(
-    fm: dict | None, manifest: Any, generated: list[Lesson], report: Report
+    fm: dict | None,
+    manifest: Any,
+    generated: list[Lesson],
+    optional_keys: set[str],
+    report: Report,
 ) -> None:
     """Check 17 - instance mode.
 
-    Only applies while the learner is ON a generated lesson. A detour that does
-    not record where it came from leaves the runner guessing which main-path
-    lesson to resume, and guessing is what `resume_at` exists to prevent.
+    Only applies while the learner is OFF the main path: on a generated lesson,
+    or on an optional one. Either way, a detour that does not record where it
+    came from leaves the runner guessing which main-path lesson to resume, and
+    guessing is what `resume_at` exists to prevent.
 
     `resume_at` names the lesson to MAKE ACTIVE when the detour finishes. It is
     deliberately NOT derived from, and NOT checked against, the generated
@@ -1453,6 +2172,15 @@ def check_generated_resume(
     tying them together would reject the ordinary case: a detour taken
     part-way through a lesson places itself before that lesson and returns
     INTO it, so `resume_at` is then LATER in `lessons` than `after:`.
+
+    The same is true of an optional lesson's `repair_in`, and for the same
+    reason. `repair_in` is in the MANIFEST and is identical for every learner:
+    it answers "whose work is now wrong". `resume_at` is in the INSTANCE and is
+    written at the moment the detour starts: it answers "where does this
+    learner stand". They differ whenever a failure surfaces later than the code
+    that caused it - a learner who defers at lesson 04 and trips the failure
+    while standing in lesson 06 returns to 06 and repairs what 04 built - which
+    is the ordinary case for an anticipated failure, not an exotic one.
     """
     if fm is None:
         report.blocked(17, "STATE.md frontmatter is missing or did not parse")
@@ -1461,7 +2189,10 @@ def check_generated_resume(
     generated_rels = {lesson.rel for lesson in generated}
     listed = as_list(manifest.get("lessons")) if isinstance(manifest, dict) else None
     resume = fm.get("resume_at")
-    if not isinstance(active, str) or active not in generated_rels:
+    off_path = isinstance(active, str) and (
+        active in generated_rels or active in optional_keys
+    )
+    if not off_path:
         # `resume_at` is present EXACTLY while a detour is active. Left
         # behind after one finished, it points a cold session at a lesson the
         # learner has already been through, with nothing to say it is stale.
@@ -1470,19 +2201,25 @@ def check_generated_resume(
                 17,
                 "STATE.md",
                 f"resume_at is {resume!r}, but active_lesson "
-                f"{active!r} is not a lesson in {GENERATED_DIR}/. The field "
-                f"records where an active detour returns to, so it belongs in "
-                f"STATE.md only while one is active. Remove it.",
+                f"{active!r} is neither a lesson in {GENERATED_DIR}/ nor a key "
+                f"in tutorial.yaml's '{OPTIONAL_KEY}' map. The field records "
+                f"where an active detour returns to, so it belongs in STATE.md "
+                f"only while the learner is off the main path. Remove it.",
             )
-            report.ran(17, "active_lesson is not a generated lesson")
+            report.ran(17, "active_lesson is a main-path lesson")
         else:
-            report.na(17, "active_lesson is not a generated lesson")
+            report.na(17, "active_lesson is a main-path lesson")
         return
+    kind = (
+        "a generated lesson"
+        if isinstance(active, str) and active in generated_rels
+        else "an optional lesson"
+    )
     if "resume_at" not in fm or resume is None:
         report.add(
             17,
             "STATE.md",
-            f"active_lesson {active!r} is a generated lesson, so STATE.md must "
+            f"active_lesson {active!r} is {kind}, so STATE.md must "
             f"also carry 'resume_at' naming the main-path lesson to make active "
             f"when the detour ends - the interrupted lesson when this detour "
             f"started part-way through one, otherwise the entry after the "
@@ -1502,7 +2239,7 @@ def check_generated_resume(
             f"tutorial.yaml's 'lessons' list. The detour has to return to the "
             f"main path, so it must name an authored lesson.",
         )
-    report.ran(17, f"active_lesson is {active!r}")
+    report.ran(17, f"active_lesson is {kind}")
 
 
 # --------------------------------------------------------------------------
@@ -1581,12 +2318,24 @@ def validate(target: Path, mode: str) -> Report:
         check_manifest(manifest, report)
     check_required_files(target, manifest_dict, report)
     check_workspace_and_ownership(manifest if manifest is not None else None, report)
+    # Optional lessons are reachable through `optional_lessons` rather than
+    # through `lessons`, so check 4 needs the keys before it can decide what is
+    # unlisted. A malformed map yields an empty set here and is reported by
+    # check 18 alone.
+    optional_keys = optional_lesson_keys(manifest_dict)
     lessons = check_lesson_list(
-        target, manifest_dict, lessons_dir_exists, lessons, report
+        target, manifest_dict, lessons_dir_exists, lessons, optional_keys, report
+    )
+    check_optional_lessons(target, manifest_dict, lessons, report)
+    check_failure_modes(
+        manifest_dict, declared, anticipated_failure_modes(manifest_dict), report
     )
     # Checks 1, 2, 3 and 6 apply to a generated lesson exactly as they do to an
     # authored one: it is an ordinary lesson with extra frontmatter.
     all_lessons = lessons + generated
+    check_optional_frontmatter(
+        all_lessons, optional_keys, as_list(manifest_dict.get("lessons")), report
+    )
     check_unique_slugs(all_lessons, report)
     check_lesson_frontmatter(all_lessons, anchors, declared, report)
     check_progress_markers(
@@ -1603,8 +2352,13 @@ def validate(target: Path, mode: str) -> Report:
         check_generated_lessons(
             target, manifest_dict, generated, generated_exact, generated_near, report
         )
-        state_fm = check_instance_state(target, manifest_dict, generated, report)
-        check_generated_resume(state_fm, manifest_dict, generated, report)
+        state_fm = check_instance_state(
+            target, manifest_dict, generated, optional_keys, report
+        )
+        check_generated_resume(
+            state_fm, manifest_dict, generated, optional_keys, report
+        )
+        check_optional_state(target, optional_keys, state_fm, report)
 
     return report
 
@@ -1668,18 +2422,6 @@ CATALOG_LIMITATIONS = """What a pass does and does not mean
   tutorial.yaml. The two are allowed to differ - the bundle is authoritative
   once resolved - and reporting every difference would reject valid
   catalogues whose entries are deliberately shorter."""
-
-
-def _is_text(value: Any) -> bool:
-    return isinstance(value, str) and value.strip() != ""
-
-
-def _is_text_list(value: Any) -> bool:
-    return (
-        isinstance(value, list)
-        and bool(value)
-        and all(_is_text(item) for item in value)
-    )
 
 
 def validate_catalog(target: Path, portable: bool) -> Report:

@@ -15,6 +15,21 @@ lessons:
   - lessons/01-subcommands/LESSON.md
   - lessons/02-errors-and-tests.md
 
+optional_lessons:
+  lessons/pure-core-and-edges.md:
+    offer_at:      [lessons/01-subcommands/LESSON.md]
+    offer_because: >
+      A counting function that opens the file itself cannot be checked without a
+      file on disk, and lesson 02 is where that bill arrives.
+    anticipates:   [counting-coupled-to-io, test-needs-a-fixture-file]
+    repair_in:     lessons/01-subcommands/LESSON.md
+    required_for:  [lessons/02-errors-and-tests.md]
+  lessons/what-is-a-character.md:
+    offer_at:      [lessons/02-errors-and-tests.md]
+    offer_because: >
+      DESIGN.md leaves a chars command undecided because nobody agrees what a
+      character is. There is a short lesson on that argument whenever you want it.
+
 workspace_kind: new-repository
 tutor_owned:    [tutorial/STATE.md, tutorial/DESIGN.md]
 learner_owned:  [src/**, tests/**, Cargo.toml]
@@ -25,6 +40,18 @@ validators:
   cargo-test:     { kind: command, command: [cargo, test] }
   has-test:       { kind: file-contains, path: src/main.rs, pattern: "#\\[test\\]" }
   explains-choice: { kind: manual }
+
+failure_modes:
+  counting-coupled-to-io:
+    summary: >
+      A counting function opens the file itself, so the counting rules cannot be
+      checked without a file on disk.
+    signals: [validator:cargo-test, validator:explains-choice, diagnosis]
+  test-needs-a-fixture-file:
+    summary: >
+      A test of the counting rules fails unless a fixture file exists, so the
+      suite depends on files the course never creates.
+    signals: [token:FIXTURE_FILE_REQUIRED, diagnosis]
 
 one_task_at_a_time: true
 solution_code: on-request-only

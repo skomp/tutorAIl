@@ -80,6 +80,28 @@ finding from such a run is worthless.
 None. The harness drives the runner, which works today. It does not need the bundle
 toolkit (sub-project A).
 
+### What it must exercise once optional lessons exist — added 2026-09-12
+
+The offer, defer and re-offer path has no test of any kind. The validator checks the
+shape of `optional_lessons`, `failure_modes` and the `## Optional lessons` record in
+`STATE.md`; nothing checks the behaviour those fields exist to produce.
+
+A harness run must cover both paths in `bundle-format.md` section 12:
+
+1. The learner accepts the lesson when it is first offered.
+2. The learner defers it, meets the anticipated failure several lessons later, is told
+   the connection, takes the lesson, and returns to repair the work `repair_in` names.
+
+Three behaviours are the ones most likely to be wrong and are invisible to the validator:
+
+- the tutor must not raise a deferred offer again with no new evidence;
+- the tutor must not offer a lesson it has already recorded `complete`;
+- a failure that persists after the lesson completed must become ordinary coaching, not
+  another offer.
+
+A learner agent that defers everything also tests the invariant nothing else can: that
+the course finishes with every offer declined.
+
 ---
 
 ## Follow-up from multi-catalogue support — 2026-09-12

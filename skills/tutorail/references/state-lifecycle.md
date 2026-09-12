@@ -2,7 +2,8 @@
 
 **Status:** normative for the runner. Load this when materializing a new instance, the
 first time in a session you are about to change `STATE.md`, when a task completes, when a
-lesson completes, or when you need to advance `active_lesson`.
+lesson completes, when an offer of an optional lesson is accepted or deferred, or when you
+need to advance `active_lesson`.
 
 `STATE.md` is the only place a learner's progress is recorded. Nothing in the bundle
 records progress; nothing outside `STATE.md` in the instance records it either. If you
@@ -64,8 +65,8 @@ updated: 2026-09-11
 | Field | Meaning | Constraint |
 |---|---|---|
 | `tutorial_id` | which course this instance is | MUST equal `id` in the instance `tutorial.yaml` |
-| `active_lesson` | the lesson file to load now | MUST be a path, and MUST appear in the manifest's `lessons` list — unless it names a generated lesson, section 8 |
-| `resume_at` | the lesson to make active when a detour finishes | present **only** while `active_lesson` names a file under `lessons.generated/`; see section 8.3 |
+| `active_lesson` | the lesson file to load now | MUST be a path, and MUST appear in the manifest's `lessons` list — unless it names a generated lesson (section 8) or a key in the manifest's `optional_lessons` (section 9) |
+| `resume_at` | the lesson to make active when a detour finishes | present **exactly** while `active_lesson` names a generated lesson or an optional lesson; see sections 8.3 and 9.3 |
 | `status` | `not-started`, `in-progress`, `complete` | set by the runner |
 | `updated` | date of the last change | update whenever you change the file |
 
@@ -76,8 +77,10 @@ work.
 
 ### Body sections
 
-All seven headings are always present, even when a section says "None". An eighth,
-*Generated lessons*, appears only once the instance has one — section 8.5.
+All seven headings are always present, even when a section says "None". Two further
+sections appear only once the instance needs them: *Generated lessons*, once a lesson has
+been written into this instance (section 8.5), and *Optional lessons*, once one has been
+offered (section 9.1).
 
 | Section | Holds | Does not hold |
 |---|---|---|
@@ -199,7 +202,9 @@ in `runner-protocol.md` section 6.
    the order, lesson `id` is not the order, and the number prefix is a convention rather
    than a rule. When the instance has a `lessons.generated/` directory, an incomplete
    generated lesson whose `after:` is the lesson just finished comes first instead —
-   section 8, and `runner-protocol.md` section 7.3.
+   section 8, and `runner-protocol.md` section 7.3. **An optional lesson is never reached
+   by advancing.** It is not in `lessons`, so this step cannot arrive at one; the only way
+   in is an accepted offer, section 9.3.
 4. **Reset the body for the new lesson.** *Last completed task* becomes the lesson
    completion. *Next task* becomes the first task of the new lesson. *Concepts
    demonstrated* and *Decisions made in discussion* accumulate across lessons — do not
@@ -267,11 +272,17 @@ started lets the tutor assume it exists.
 
 ### Inconsistencies to report rather than repair
 
-- `active_lesson` names a path that is neither in the manifest's `lessons` list nor a
-  file under `lessons.generated/` (section 8.3 permits the second, and only with
-  `resume_at` set);
+- `active_lesson` names a path that is in none of three places: the manifest's `lessons`
+  list, the manifest's `optional_lessons` map, or `lessons.generated/` (sections 8.3 and
+  9.3 permit the last two, and only with `resume_at` set);
 - `active_lesson` names a generated lesson that is not there, or names one while
   `resume_at` is absent or is not an entry in `lessons`;
+- `active_lesson` names an optional lesson while `resume_at` is absent, or while
+  `resume_at` is not an entry in `lessons`;
+- the *Optional lessons* section records a path that is not a key in the manifest's
+  `optional_lessons`;
+- an *Optional lessons* entry is recorded `in-progress` while `active_lesson` names
+  something else. One of the two is wrong and nothing in the file says which;
 - a file under `lessons.generated/` whose `after:` is not an entry in `lessons`, or which
   is missing any of the five provenance fields;
 - `tutorial_id` does not match the manifest's `id`;
@@ -409,10 +420,11 @@ updated: 2026-09-11
 
 | Field | Meaning | Constraint |
 |---|---|---|
-| `resume_at` | the `lessons` entry to make active when the detour finishes | present exactly while `active_lesson` names a generated lesson; absent otherwise |
+| `resume_at` | the `lessons` entry to make active when the detour finishes | present exactly while `active_lesson` names a generated lesson or an optional lesson; absent otherwise |
 
-**This is the one exception to "`active_lesson` MUST appear in the manifest's `lessons`
-list".** A path under `lessons.generated/` is deliberately not in the list, and the
+**This is one of the two exceptions to "`active_lesson` MUST appear in the manifest's
+`lessons` list"** — the other is an optional lesson, and it works identically (section
+9.3). A path under `lessons.generated/` is deliberately not in the list, and the
 presence of `resume_at` is what says so. Everything else about the field is unchanged:
 it is a path, it is the file a cold session opens, and it is still the single field that
 makes a conversation with no history work.
@@ -532,3 +544,123 @@ already grants, and the tutor appends to it rather than rewriting it.
 reaches back (section 3). Moving a generated lesson into a bundle is a separate,
 deliberate authoring act with its own procedure — `bundle-format.md` section 8 — and
 nothing in the teaching loop performs it.
+
+---
+
+## 9. Optional lessons
+
+A bundle may ship **optional lessons**: authored lessons that live in `lessons/` with every
+other lesson, are listed in the manifest's `optional_lessons` map rather than in `lessons`,
+and are offered rather than sequenced (`bundle-format.md` section 2).
+
+This section is the mechanics — what `STATE.md` records and what the frontmatter does.
+Whether to offer, when to re-offer, and when to refuse are judgement, and they are in
+`runner-protocol.md` section 8. Settle those there, exactly as section 8 above settles its
+half in `runner-protocol.md` section 7.
+
+### 9.1 What `STATE.md` records
+
+One extra body section, present only once an optional lesson has been offered in this
+instance. A fresh instance does not have it, and `STATE.template.md` never does:
+
+```markdown
+## Optional lessons
+
+- `lessons/event-time-and-watermarks.md` — deferred — offered at
+  `lessons/04-window-execution.md` on 2026-09-12
+- `lessons/what-is-a-character.md` — complete — taken at
+  `lessons/02-errors-and-tests.md` on 2026-09-14
+```
+
+Each entry carries the path, the state, and one clause saying where and when the last
+decision happened and what prompted it. **Nothing else.** The risk the lesson addresses is
+`offer_because`, the failures it anticipates are `anticipates`, and the lesson whose work
+it repairs is `repair_in` — all three are in `tutorial.yaml`, which you load every turn. A
+second copy here is a second thing to keep true, and it is the same argument section 8.5
+makes about `reason:`.
+
+When the last decision was a re-offer, the clause names the failure mode that prompted it:
+
+```markdown
+- `lessons/event-time-and-watermarks.md` — deferred — re-offered after
+  `late-event-wrong-window` at `lessons/06-correctness-under-delay.md` on 2026-09-15
+```
+
+### 9.2 The five states
+
+**Not yet offered is the absence of an entry.** Do not write a `not-offered` line: a course
+carrying twelve optional lessons would then open this section with twelve lines saying that
+nothing has happened, and the one question the section answers — *what has this learner been
+offered?* — would be answered in noise.
+
+The four that are written:
+
+- **`offered`** — you asked and have no answer yet. It normally lives for part of one turn.
+  Write it when the turn ends before the learner answers, so a cold session knows a
+  question is outstanding rather than asking it a second time.
+- **`deferred`** — the learner said not now. The clause MUST name the lesson the offer was
+  made at and the date. Both the anti-nag rule and the re-offer depend on knowing that the
+  offer happened and where (`runner-protocol.md` sections 8.3 and 8.5); an entry that omits
+  either records a decision nobody can act on.
+- **`in-progress`** — `active_lesson` names the lesson and `resume_at` is set. Both facts
+  are in the frontmatter already. The record exists so that a cold session answers "what
+  has this learner been offered" from one section, rather than by reasoning about which of
+  three kinds of path `active_lesson` currently holds.
+- **`complete`** — the lesson is finished. This is the state that stops it ever being
+  offered again (`runner-protocol.md` section 8.8), so it MUST be written the moment the
+  lesson completes, in the same step that records the completion.
+
+**Re-offering a `deferred` lesson updates the entry in place.** It never adds a second one.
+This section records the current state of each offer, not a history of offers, and one
+lesson has one entry for the life of the instance.
+
+### 9.3 Accepting an offer
+
+1. `active_lesson` becomes the optional lesson's path.
+2. `resume_at` becomes the lesson the learner is standing in. That is section 8.3's rule
+   and not a second one: the way back is recorded at the moment the detour starts, from
+   where the learner actually is. Never derive it from `repair_in`, and never from
+   `offer_at`.
+3. the *Optional lessons* entry becomes `in-progress`.
+4. **`updated`** — set to today.
+
+Do not reset the body. The learner has unfinished work in the lesson they were standing in,
+and section 8.4 step 5 is the same situation with the same instruction.
+
+An accepted offer and the generated-lesson advancement in section 8.4 cannot collide. An
+accepted offer takes effect in the turn the learner accepts; generated-lesson advancement
+applies when a lesson completes and no detour is active. Nor can the two name each other: a
+generated lesson's `after:` MUST be an entry in `lessons`, and an optional lesson is never
+in that list.
+
+### 9.4 Completing one
+
+Exactly section 8.4, with the *Optional lessons* entry in place of the *Generated lessons*
+one:
+
+1. **Check the completion conditions**, individually and with evidence, per
+   `runner-protocol.md` section 6. The author wrote them; *optional* describes how the
+   learner arrived, not how the lesson is left.
+2. **Persist what the lesson's *On completion, persist* section names** into the instance's
+   `DESIGN.md`, under an anchor that exists.
+3. **Record the entry `complete`** (9.2).
+4. **Return to the main path.** `active_lesson` becomes `resume_at`, and the `resume_at`
+   field is removed.
+5. **Do not reset the body.** `resume_at` always names the lesson the learner was standing
+   in, and that lesson's body was set when they arrived in it — whether or not they had
+   begun a task there. *Next task* becomes the repair `repair_in` names, stated in terms of
+   the lesson that built the work (`runner-protocol.md` section 8.6); where there is nothing
+   to repair, it is the task the detour interrupted. *Concepts demonstrated* accumulates as
+   usual, and what the optional lesson taught stays recorded.
+6. **`updated`** — set to today.
+
+Step 4 carries no exception here. Section 8.4's exception is for a second generated lesson
+sharing one `after:` value, and an optional lesson has no `after:`.
+
+### 9.5 What this section does not hold
+
+`repair_in` is in the manifest and is **never** copied into `STATE.md`. It is the same for
+every learner, it does not change while a course is taken, and it is read at one moment —
+when the detour completes and you state the first task on landing. The same holds for
+`offer_because`, `anticipates` and `required_for`. `STATE.md` records what happened to this
+learner; the manifest records what the course offers.

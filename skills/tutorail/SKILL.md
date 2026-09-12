@@ -37,6 +37,8 @@ back. A tutorial where the tutor finished the exercise taught nothing.
 | **bundle** | a course, distributable, no learner in it | no |
 | **instance** | `tutorial/` inside the learner's workspace, exactly one learner in it | yes |
 | **workspace** | the learner's own repository or directory | learner-owned |
+| **optional lesson** | the bundle — an authored lesson off the main path, offered rather than sequenced | no |
+| **failure mode** | the bundle — a stable name for a recognisable way the learner's work goes wrong | no |
 
 A bundle contains `STATE.template.md` and never `STATE.md`. An instance contains
 `STATE.md` and never `STATE.template.md`. That pair of files is how you tell them apart.
@@ -178,6 +180,23 @@ validator, a dangling `design_ref`: those are reported, never drafted over.
 `references/runner-protocol.md` section 7 carries that test and the advancement rule;
 `references/state-lifecycle.md` section 8 has the mechanics.
 
+## Optional lessons
+
+A bundle may also ship lessons that are **offered** rather than sequenced. They sit in
+`lessons/` like any other lesson, are listed in the manifest's `optional_lessons` map
+instead of `lessons`, and each one names where it is offered and the risk to state when
+offering it. Some anticipate a named **failure mode**, and that is what the feature is
+really for: warn the learner briefly before the choice that leads there, and if the failure
+later arrives, connect it to the topic they set aside.
+
+The behavioural rule, in one line: **warn briefly, let them defer, re-offer only when an
+anticipated failure has actually been observed, and never offer a completed one again.**
+Offering costs no file open — everything an offer needs is in the manifest you already
+hold, and the lesson is opened only if the learner accepts.
+
+`references/runner-protocol.md` section 8 carries the offer, the diagnosis and the guards
+against looping; `references/state-lifecycle.md` section 9 has what `STATE.md` records.
+
 ## Reference files, and when to load each
 
 Progressive disclosure is not automatic. Load a reference when its condition holds, and
@@ -186,8 +205,8 @@ not before.
 | Load this | When |
 |---|---|
 | `references/catalogue-format.md` | no active instance was found and you must find a tutorial to offer; the learner asks what tutorials are available; the learner wants to add a catalogue or register a course; a catalogue failed to refresh |
-| `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; you need to advance `active_lesson`; you are about to write a generated lesson |
-| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson |
+| `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; an offer of an optional lesson is accepted or deferred; you need to advance `active_lesson`; you are about to write a generated lesson |
+| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson |
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
 Two scripts, with opposite lifetimes. `scripts/catalogs.py` is a runtime tool: discovery
@@ -202,8 +221,9 @@ catalogue.
   not improvise a replacement lesson or skip to the next entry.
 - **`STATE.md`'s `active_lesson` is not in the manifest's `lessons` list** — stop and
   report it. The instance is inconsistent and guessing which lesson was meant will lose
-  the learner's place. The one exception: a path under `tutorial/lessons.generated/` with
-  `resume_at` set is a detour in progress, not an inconsistency. `resume_at` names the
+  the learner's place. Two exceptions, and both are a detour in progress rather than an
+  inconsistency: a path under `tutorial/lessons.generated/` with `resume_at` set, and a
+  key in the manifest's `optional_lessons` with `resume_at` set. `resume_at` names the
   lesson to make active when the detour finishes — including a lesson the detour
   interrupted part-way through.
 - **The instance directory holds `STATE.template.md`** — materialization did not finish.

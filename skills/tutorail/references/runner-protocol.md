@@ -1,8 +1,9 @@
 # Runner Protocol — The Teaching Loop
 
 **Status:** normative for the runner. Load this before the first task of a teaching
-session, when validating, when a lesson's completion conditions look met, or when you are
-unsure whether an edit is yours to make.
+session, when validating, when a lesson's completion conditions look met, when deciding
+whether to offer or re-offer an optional lesson, or when you are unsure whether an edit is
+yours to make.
 
 This document assumes an active instance already exists at `tutorial/` in the learner's
 workspace. Materialization is in `state-lifecycle.md`. Finding a tutorial in the first
@@ -18,10 +19,12 @@ tutorial it has never seen.
 Load, every turn:
 
 - the instance `tutorial.yaml` — the manifest, including `lessons`, `validators`,
-  `learner_owned`, `tutor_owned`, `ownership_policy`, and the teaching switches;
+  `learner_owned`, `tutor_owned`, `ownership_policy`, the teaching switches, and
+  `optional_lessons` and `failure_modes` where the bundle declares them (section 8);
 - `tutorial/STATE.md` — where the learner is;
 - the single lesson file named by `STATE.md`'s `active_lesson` — which is normally an
-  entry in `lessons`, and may be a file under `tutorial/lessons.generated/` (section 7);
+  entry in `lessons`, and may be a key in `optional_lessons` (section 8) or a file under
+  `tutorial/lessons.generated/` (section 7);
 - only the `DESIGN.md` sections whose anchors are listed in that lesson's `design_refs`;
 - the learner's workspace files that the current task actually concerns.
 
@@ -39,6 +42,11 @@ Do not load, unless one of the stated exceptions applies:
 A lesson folder's material is invisible until its `LESSON.md` names it. That is
 deliberate. If a lesson mentions `worked-example.md` and says to show it when the learner
 asks about state merging, open it then and not before.
+
+**Offering an optional lesson never costs a file open.** Everything an offer needs — the
+risk to state, the failures it anticipates, where the repair lands, whether it gates a
+later lesson — is in the manifest you are already holding. The lesson file is opened at
+one moment only: when the learner accepts and it becomes `active_lesson` (section 8).
 
 If answering a question seems to require another lesson, answer from the concept instead.
 The concept is what transfers; the other lesson is a context leak.
@@ -403,7 +411,7 @@ The distinction carries the whole feature:
 | `lessons` names a lesson file that is not there | a defect | stop; report the path |
 | a lesson names a validator the manifest does not declare | a defect | stop; report the name |
 | a lesson's `design_refs` names an anchor `DESIGN.md` does not have | a defect | stop; report the anchor |
-| `active_lesson` names a path in neither `lessons` nor `lessons.generated/` | a defect | stop; report it |
+| `active_lesson` names a path in none of `lessons`, `optional_lessons` or `lessons.generated/` | a defect | stop; report it |
 | a lesson folder has no `LESSON.md`, or names material that is not there | a defect | stop; report it |
 | `COURSE.md` maps a chapter, `lessons` claims no lesson for it | a gap | a main-path draft is warranted |
 | the learner is blocked on a concept the course never teaches | a gap | a side lesson is warranted |
@@ -573,7 +581,251 @@ matters easy to miss.
 
 ---
 
-## 8. Failure modes to refuse
+## 8. Optional lessons
+
+A bundle may ship lessons that are **offered** rather than sequenced. `bundle-format.md`
+section 2 defines how they are declared; this section is what you do with them.
+
+### 8.1 What an optional lesson is
+
+An **optional lesson** is written by the bundle author, shipped to every learner, and left
+off the main path. The learner reaches it only by accepting an offer you raise.
+
+Three things are easy to confuse, and they are three different things:
+
+| | Written by | For whom | Reached by |
+|---|---|---|---|
+| an optional lesson | the bundle author | every learner who takes the course | an offer you raise (8.2) |
+| a generated side lesson | you, during this course | one learner | your judgement, or their request (section 7) |
+| a lesson's *Optional deeper paths* | the bundle author | whoever is in that lesson | the learner asking, inside the lesson |
+
+The third never leaves the lesson it is written in. The second is evidence that the course
+has a hole. An optional lesson is neither: the course already carries it, in `lessons/`
+with every other lesson, and the only open question is whether this learner takes it.
+
+**You learn which optional lessons exist from the manifest**, which you already load every
+turn. `optional_lessons` carries the path, `offer_at`, `offer_because`, `anticipates`,
+`repair_in` and `required_for` — everything an offer needs. Never open an optional lesson
+file to decide whether to offer it. That cost is what this format is shaped to avoid, and
+it is why `offer_because` lives in the manifest rather than in the lesson.
+
+### 8.2 Offering
+
+Raise the offer when both of these hold:
+
+- `active_lesson` becomes a lesson named in that optional lesson's `offer_at`; **and**
+- `STATE.md` holds no entry for that optional lesson (`state-lifecycle.md` section 9).
+
+Both facts are in the manifest and `STATE.md`, so the check costs nothing and runs every
+time the active lesson changes. Raise it **once, before that lesson's first task**.
+
+Say four things, and stop:
+
+1. the risk, in the words of `offer_because` — it was written for the learner, so use it;
+2. that the lesson is optional;
+3. that deferring is fine;
+4. the question.
+
+Record the answer immediately, before the first task (`state-lifecycle.md` section 9).
+
+**Do not teach any of the lesson's content while offering it.** The offer is a warning and
+a question, never a lecture. A tutor that explains event time in order to ask whether the
+learner wants a lesson on event time has already given them the lesson, taken the decision
+away, and left them no reason to say yes to it.
+
+Do not open the optional lesson to make the offer. If `offer_because` is missing, or says
+nothing a learner could decide on, that is a bundle defect to report — not a file to open.
+
+When two optional lessons name the same `offer_at` entry, offer each on its own terms and
+record each separately. They are independent decisions.
+
+### 8.3 Deferring is a valid answer
+
+The learner says not now. Record the lesson `deferred`, with the lesson it was offered at
+and the date (`state-lifecycle.md` section 9). Then teach the lesson they are in.
+
+**Do not raise it again without new evidence.** New evidence means exactly one thing: an
+anticipated failure mode observed (8.4). It does not mean a new lesson boundary, it does
+not mean a hunch that they are about to need it, and — the case that will tempt you most —
+**it does not mean reaching a second entry in the same `offer_at` list.** A list with three
+entries is three places the offer may be raised for the first time, not three chances to
+ask the same learner the same question.
+
+The reason is not politeness. An offer repeated with nothing new to say teaches the learner
+that offers can be ignored, and the offer that matters — the one carrying a failure they
+have actually hit — is then the one they skip.
+
+An optional lesson that declares no `anticipates` can never produce new evidence, so a
+deferral of it is final. That is what enrichment means: offered once, at the point the
+author named, and declining ends it.
+
+### 8.4 Recognising a failure mode
+
+Three layers, and keeping them apart is what makes the re-offer trustworthy:
+
+| Layer | The question it answers | Where it comes from |
+|---|---|---|
+| evidence | what was observed? | the learner's workspace, the validator output, the code |
+| failure mode | what does that mean? | you infer it; `failure_modes` gives it a stable id |
+| the lesson | what addresses it? | the optional lesson whose `anticipates` names that id |
+
+Evidence is any of:
+
+- a validator the manifest declares failing, by name;
+- a fault-injection or delayed-input check doing exactly what it was written to do —
+  surfacing a failure the lesson's ordinary checks cannot reach;
+- a completion condition demonstrably unmet;
+- a stable token in a check's output, where the failure mode's `signals` names one
+  (`token:LATE_EVENT_MISBINNED`);
+- your own reading of the learner's code, or of how it behaves when it runs.
+
+**`signals` is evidence, never a rule.** It tells you which observations are worth weighing
+for a given failure mode. It does not decide that the failure mode occurred. A validator
+named in `signals` fails for reasons that have nothing to do with the failure mode, and a
+failure mode whose `signals` is `[diagnosis]` fires nothing at all until you look. The
+diagnosis stays with you, exactly as every other judgement in this loop does.
+
+**Matching raw compiler or error-message text is not how this works**, and no field in the
+format invites it. Two reasons, and the second is the larger one: a course that keys off an
+error string breaks the first time a toolchain rewords it, and the cases that matter most
+produce no distinctive string at all — a named test failing, a delayed record landing in
+the wrong window, a design you can see is wrong before it has failed anything. Name the
+failure, weigh the evidence, decide.
+
+### 8.5 Re-offering
+
+You have concluded that a failure mode occurred, and it is named in the `anticipates` of an
+optional lesson that `STATE.md` records as `deferred`. Say this, in this order:
+
+1. **what failed** — the validator, the check, the condition;
+2. **what it means**, in the words of that failure mode's `summary`;
+3. **that this is the topic they set aside, and where** — the lesson the offer was made at;
+4. **that the lesson is available now.**
+
+Then offer it, and stop. Do not start teaching it; 8.2's rule holds here for the same
+reason, and it holds harder, because a learner who has just hit a failure is least able to
+tell a lecture from an offer.
+
+**Report the connection neutrally.** Reference the earlier decision as a fact, never as
+vindication.
+
+Good: *"The `late-events` run fails, and a record that arrived after its window closed was
+counted in the window that was open when it arrived. That is the topic you set aside at
+lesson 04 — the lesson on event time and watermarks is there whenever you want it."*
+
+Bad: *"This is the late-event problem I warned you about at lesson 04."*
+
+The learner made a reasonable decision with what they knew at the time, and you recorded it
+so that this moment could be useful to them. "As I warned you" spends that on a score, and
+the next offer you raise is heard as a threat rather than as information.
+
+If they defer again, record it and treat the failure as an ordinary failure — section 3:
+name the concept, hand back one correction, do not repair the work. When a `required_for`
+gate applies, 8.7 says what else to tell them.
+
+### 8.6 Taking one
+
+An accepted offer is the detour mechanic in section 7.3, unchanged. The only difference is
+that the detour is a lesson the author wrote rather than one you did, so there is no file
+to create and no provenance to record. What happens:
+
+1. `active_lesson` becomes the optional lesson's path;
+2. `resume_at` becomes **the lesson the learner is standing in** — never `repair_in`, never
+   an `offer_at` entry. Same rule and same reason as `state-lifecycle.md` section 8.3: the
+   way back is recorded when the detour starts, from where the learner actually is;
+3. `STATE.md` records the lesson `in-progress` (`state-lifecycle.md` section 9);
+4. you teach it as you teach any lesson. Its completion conditions bind like any lesson's —
+   *optional* describes how the learner arrived, not how carefully it is taught.
+
+On completion, per `state-lifecycle.md` section 9.4: persist what the lesson's *On
+completion, persist* section names, record the lesson `complete`, set `active_lesson` to
+`resume_at`, and remove `resume_at`. **Do not reset the `STATE.md` body** when the learner
+lands back in a lesson they were part-way through; they have unfinished work in it.
+
+**The first task on landing is the repair.** `repair_in` names the `lessons` entry whose
+implementation is now wrong, and stating the task in those terms is what makes the detour
+pay: *"rework the window assignment lesson 04 built, then re-run `late-events`."* Where
+`repair_in` is absent, or names a lesson whose work does not exist yet — the learner
+accepted at the first offer and has built nothing — there is nothing to repair, and the
+lesson resumes at the task it was interrupted at.
+
+### 8.7 `required_for`
+
+This is the one case where you tell the learner a lesson is required rather than offered.
+
+A lesson listed in an optional lesson's `required_for` **cannot be completed while an
+anticipated failure stands**. The gate binds only once you have observed such a failure
+(8.4); until then it says nothing and the offer is an ordinary offer.
+
+When it binds, say three things: which lesson is gated, that it cannot be completed while
+this failure stands, and that the lesson addressing it is available now. The learner may
+still decline it, and may still stop for the day. What they may not do is finish the gated
+lesson with the failure in place — so do not confirm that lesson's completion conditions,
+and do not advance past it.
+
+**The gate is lifted by the repair, not by the lesson.** Taking the optional lesson teaches
+the concept; the failure stands until the learner's own code stops producing it. That is
+why the first task on landing is the repair (8.6).
+
+Without `required_for` there is no gate. Coach through the failure as an ordinary failure,
+section 3, one correction at a time — which for most courses is the better answer, and
+inventing a gate the author did not declare gives this learner a course nobody else is
+taking.
+
+### 8.8 Loops, and lessons already taken
+
+Four guards. Each has its own reason, and together they are the whole of what stops a
+recurring failure becoming a recurring offer:
+
+- **A `complete` optional lesson is NEVER offered again.** Not at another `offer_at` entry,
+  not when the same failure recurs, not when a different anticipated failure arrives. It
+  has been taught; what is left is coaching.
+- **An anticipated failure still standing after the lesson completed is an ordinary
+  failure.** Handle it per section 3. Do **not** write a generated side lesson on the same
+  topic: section 7.2's test now reads *in the coverage list, and was already taught*, and
+  the optional lesson taught it.
+- **A `deferred` lesson is re-offered at most once per newly observed occurrence.** The
+  same failure still standing from last turn is not a new occurrence. A validator that
+  keeps failing across five turns of coaching is one occurrence, not five.
+- **Never offer a lesson recorded `in-progress`.** It is the active lesson; you are
+  teaching it.
+
+Remove any one of the four and the feature becomes a loop: the failure recurs because the
+learner has not repaired it yet, the offer recurs because the failure did, and the learner
+stops reading offers — which costs the mechanism the only thing it has, an offer the
+learner will actually weigh.
+
+### 8.9 Optional lessons and the coverage list
+
+Section 7.2 decides whether a blocked learner has met a hole in the course or an exercise
+that is meant to be hard, by testing the blocking concept against `COURSE.md`'s coverage
+list. Optional lessons change one of its answers.
+
+**A concept an optional lesson teaches is in the course.** It was authored, it ships in the
+bundle, and every learner can reach it. So a learner blocked on it is not a hole to fill:
+
+| The blocking concept | What it is | What to do |
+|---|---|---|
+| is taught by an optional lesson this learner has not completed | an offer that was declined, or never raised | offer it — 8.2 when `STATE.md` has no entry, 8.5 when it is `deferred` |
+| is in the coverage list, no completed lesson taught it, and no optional lesson teaches it | a genuine prerequisite gap | a side lesson is warranted, per section 7.2 |
+
+Test the first row before the section 7.2 table, because the two disagree: a deferred
+optional lesson leaves its concept in the coverage list and untaught, which is exactly the
+shape of a prerequisite gap and is not one.
+
+Getting this backwards costs the course the thing it already paid for. Every learner who
+gets blocked receives a different improvised copy of a lesson the author wrote, reviewed
+and shipped — and the deferral that produced the block goes unmentioned, so the learner
+never finds out that this was theirs to choose.
+
+Judge the match from the manifest: the optional lesson's path and its `offer_because` say
+what it is about, and the coverage list carries the author's own name for the topic. Do not
+open the lesson to decide. If those do not settle it, offering an authored lesson is still
+the cheaper mistake than writing a new one.
+
+---
+
+## 9. Failure modes to refuse
 
 - **Advancing on assertion.** When `advance_on` is `validated-evidence-only`, "it works
   now" is not evidence. Run the validators.
@@ -596,6 +848,21 @@ matters easy to miss.
   handed over in a longer form. Section 7.2 has the test.
 - **Teaching a main-path draft as though someone wrote it.** The learner is owed one
   sentence saying the chapter was drafted on arrival. Section 7.4.
+- **Raising a deferred offer again with nothing new to say.** New evidence is an
+  anticipated failure observed — not a lesson boundary, not a second entry in the same
+  `offer_at`. An offer that repeats is an offer that gets ignored. Section 8.3.
+- **Re-offering a completed optional lesson.** It was taught. Whatever failed now is an
+  ordinary failure, and the answer is coaching. Section 8.8.
+- **Teaching an optional lesson's content while offering it.** The offer is a warning and
+  a question. A lecture takes the decision away and then asks for it. Section 8.2.
+- **Treating `signals` as a trigger table.** It names the evidence worth weighing; the
+  diagnosis is yours. A validator in `signals` fails for other reasons too. Section 8.4.
+- **Deriving the way back from `repair_in`.** It names whose work is now wrong, not where
+  the learner is standing. `resume_at` is recorded when the detour starts, from where they
+  actually are. Section 8.6, and `state-lifecycle.md` section 8.3.
+- **Generating a side lesson for a topic an optional lesson already covers.** The course
+  carries that lesson. Offer it instead of improvising a worse one per learner.
+  Section 8.9.
 - **Editing the manifest's `lessons` list.** It is the authored course. A generated lesson
   is an overlay; the list stays byte-identical to the bundle's.
 - **Refreshing a catalogue to teach a lesson.** A resume reads no catalogue. Section 1.

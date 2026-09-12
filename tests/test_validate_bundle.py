@@ -72,6 +72,11 @@ INSTANCE_BASELINES = {
 
 ALL_BASELINES = {**BASELINES, **INSTANCE_BASELINES}
 
+# The backward-compatibility control. Neither of these declares
+# `optional_lessons` or `failure_modes`, and both must keep validating exactly
+# as they did before those keys existed - in bundle mode and in instance mode.
+NO_OPTIONAL_BASELINES = ("automaton", "foldered")
+
 Mutator = Callable[[Path], None]
 
 
@@ -1025,6 +1030,333 @@ def m_stale_resume_at(root: Path) -> None:
     )
 
 
+# -- optional lessons: shared paths
+#
+# The "cli" baseline declares two optional lessons, one of each authored
+# shape, and the two failure modes the first of them anticipates:
+#
+#   lessons/pure-core-and-edges.md   anticipation - anticipates, repair_in,
+#                                    required_for
+#   lessons/what-is-a-character.md   plain enrichment - offer_at and
+#                                    offer_because and nothing else
+#
+# The "generated" instance is an instance of it, so it carries both, plus a
+# STATE.md whose "## Optional lessons" section records one deferral.
+
+OPT_PURE = "lessons/pure-core-and-edges.md"
+OPT_CHARS = "lessons/what-is-a-character.md"
+OPT_RECORD = (
+    "- `lessons/pure-core-and-edges.md` — deferred — offered at\n"
+    "  `lessons/01-subcommands/LESSON.md` on 2026-09-11"
+)
+# The whole `offer_because` block of the enrichment entry, as one string, so a
+# mutator can delete exactly it.
+CHARS_OFFER_BECAUSE = (
+    "    offer_because: >\n"
+    "      DESIGN.md leaves a chars command undecided because nobody agrees "
+    "what a\n"
+    "      character is. There is a short lesson on that argument whenever "
+    "you want it.\n"
+)
+
+
+def add_optional_entry(root: Path, key: str, body: str) -> None:
+    """Insert one optional_lessons entry, keeping the rest of the map intact.
+
+    Editing an EXISTING entry would make its lesson file unlisted as well, so
+    check 4 would fire alongside check 18 and the case would no longer say
+    which one it is really about.
+    """
+    edit(
+        root / "tutorial.yaml",
+        "\nworkspace_kind: new-repository",
+        f"  {key}:\n{body}\nworkspace_kind: new-repository",
+    )
+
+
+# -- check 18: optional_lessons is well-formed
+
+
+def m_optional_key_unresolved(root: Path) -> None:
+    add_optional_entry(
+        root,
+        "lessons/never-written.md",
+        "    offer_at:      [lessons/00-hello-args.md]\n"
+        "    offer_because: A lesson nobody wrote.\n",
+    )
+
+
+def m_optional_key_is_material(root: Path) -> None:
+    """A real file under lessons/ that is material, not a lesson."""
+    add_optional_entry(
+        root,
+        "lessons/01-subcommands/usage.txt",
+        "    offer_at:      [lessons/00-hello-args.md]\n"
+        "    offer_because: Material cannot be offered as a lesson.\n",
+    )
+    assert (root / "lessons/01-subcommands/usage.txt").is_file()
+
+
+def m_optional_key_is_generated(root: Path) -> None:
+    """An overlay one tutor wrote cannot be an authored optional lesson."""
+    add_optional_entry(
+        root,
+        SIDE,
+        "    offer_at:      [lessons/00-hello-args.md]\n"
+        "    offer_because: An overlay is not authored material.\n",
+    )
+
+
+def m_optional_also_on_main_path(root: Path) -> None:
+    """Listed in BOTH lists. Check 4 must stay quiet; this is check 18's."""
+    edit(
+        root / "tutorial.yaml",
+        "  - lessons/02-errors-and-tests.md\n",
+        f"  - lessons/02-errors-and-tests.md\n  - {OPT_CHARS}\n",
+    )
+
+
+def m_optional_no_offer_because(root: Path) -> None:
+    edit(root / "tutorial.yaml", CHARS_OFFER_BECAUSE, "")
+
+
+def m_optional_empty_offer_at(root: Path) -> None:
+    """An empty offer_at makes the lesson unreachable, not 'offer it anywhere'."""
+    edit(
+        root / "tutorial.yaml",
+        "    offer_at:      [lessons/02-errors-and-tests.md]",
+        "    offer_at:      []",
+    )
+
+
+def m_optional_offer_at_unlisted(root: Path) -> None:
+    """offer_at names a real lesson - but an OPTIONAL one, not a main-path entry."""
+    edit(
+        root / "tutorial.yaml",
+        "    offer_at:      [lessons/02-errors-and-tests.md]",
+        f"    offer_at:      [{OPT_PURE}]",
+    )
+    assert (root / OPT_PURE).is_file()
+
+
+def m_optional_anticipates_undeclared(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "    anticipates:   [counting-coupled-to-io, test-needs-a-fixture-file]",
+        "    anticipates:   [counting-coupled-to-i-o, test-needs-a-fixture-file]",
+    )
+
+
+def m_optional_repair_in_unlisted(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "    repair_in:     lessons/01-subcommands/LESSON.md",
+        f"    repair_in:     {OPT_PURE}",
+    )
+
+
+def m_optional_gate_without_anticipates(root: Path) -> None:
+    """A gate on the ENRICHMENT entry, which anticipates nothing.
+
+    required_for closes when an anticipated failure is observed and opens when
+    the lesson is taken. With no anticipates it can never do either.
+    """
+    edit(
+        root / "tutorial.yaml",
+        CHARS_OFFER_BECAUSE,
+        CHARS_OFFER_BECAUSE
+        + "    required_for:  [lessons/02-errors-and-tests.md]\n",
+    )
+
+
+def m_optional_lessons_is_a_list(root: Path) -> None:
+    path = root / "tutorial.yaml"
+    text = path.read_text()
+    start = text.index("optional_lessons:\n")
+    end = text.index("\nworkspace_kind: new-repository")
+    path.write_text(
+        text[:start]
+        + f"optional_lessons: [{OPT_PURE}, {OPT_CHARS}]\n"
+        + text[end:]
+    )
+
+
+def m_optional_entry_is_a_string(root: Path) -> None:
+    """The offer metadata replaced by a sentence.
+
+    The key stays valid, so checks 4 and 20 stay quiet and this case says
+    exactly which check it is about.
+    """
+    path = root / "tutorial.yaml"
+    text = path.read_text()
+    start = text.index(f"  {OPT_CHARS}:\n")
+    end = text.index("\nworkspace_kind: new-repository")
+    path.write_text(
+        text[:start] + f"  {OPT_CHARS}: offer it whenever you like\n" + text[end:]
+    )
+
+
+# -- check 19: failure_modes is well-formed
+
+
+def m_failure_mode_no_summary(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "    summary: >\n"
+        "      A test of the counting rules fails unless a fixture file "
+        "exists, so the\n"
+        "      suite depends on files the course never creates.\n",
+        "",
+    )
+
+
+def m_signal_names_undeclared_validator(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "    signals: [validator:cargo-test, validator:explains-choice, diagnosis]",
+        "    signals: [validator:cargo-tests, validator:explains-choice, diagnosis]",
+    )
+
+
+def m_signal_in_no_permitted_form(root: Path) -> None:
+    """Raw compiler output is deliberately NOT a signal form."""
+    edit(
+        root / "tutorial.yaml",
+        "    signals: [token:FIXTURE_FILE_REQUIRED, diagnosis]",
+        '    signals: ["error[E0502]: cannot borrow", diagnosis]',
+    )
+
+
+def m_failure_mode_unanticipated(root: Path) -> None:
+    """A declared failure mode no optional lesson names can never re-offer."""
+    edit(
+        root / "tutorial.yaml",
+        "    anticipates:   [counting-coupled-to-io, test-needs-a-fixture-file]",
+        "    anticipates:   [counting-coupled-to-io]",
+    )
+
+
+def m_failure_mode_id_not_slug_shaped(root: Path) -> None:
+    edit(root / "tutorial.yaml", "  test-needs-a-fixture-file:\n",
+         "  Test_Needs_A_Fixture_File:\n")
+    edit(
+        root / "tutorial.yaml",
+        "    anticipates:   [counting-coupled-to-io, test-needs-a-fixture-file]",
+        "    anticipates:   [counting-coupled-to-io, Test_Needs_A_Fixture_File]",
+    )
+
+
+# -- check 20: the 'optional:' frontmatter flag
+
+
+def m_main_path_declares_optional(root: Path) -> None:
+    edit(
+        root / "lessons" / "00-hello-args.md",
+        "title: Reading command-line arguments\n",
+        "title: Reading command-line arguments\noptional: true\n",
+    )
+
+
+def m_optional_lesson_omits_the_flag(root: Path) -> None:
+    edit(root / OPT_PURE, "optional: true\n", "")
+
+
+def m_optional_flag_is_false(root: Path) -> None:
+    edit(root / OPT_CHARS, "optional: true", "optional: false")
+
+
+def m_generated_lesson_declares_optional(root: Path) -> None:
+    """A generated lesson is an overlay, never an offer."""
+    edit(
+        root / SIDE,
+        "title: Borrowing, just enough to unblock the dispatch\n",
+        "title: Borrowing, just enough to unblock the dispatch\noptional: true\n",
+    )
+
+
+# -- check 21: STATE.md's "## Optional lessons" record
+
+
+def m_record_names_a_main_path_lesson(root: Path) -> None:
+    edit(
+        root / "STATE.md",
+        f"- `{OPT_PURE}` — deferred",
+        "- `lessons/00-hello-args.md` — deferred",
+    )
+
+
+def m_record_unknown_state(root: Path) -> None:
+    edit(root / "STATE.md", "` — deferred — offered at", "` — postponed — offered at")
+
+
+def m_record_not_offered(root: Path) -> None:
+    """'not-offered' is not a state: not yet offered is the ABSENCE of a record."""
+    edit(
+        root / "STATE.md", "` — deferred — offered at", "` — not-offered — offered at"
+    )
+
+
+def m_record_twice(root: Path) -> None:
+    edit(
+        root / "STATE.md",
+        OPT_RECORD,
+        OPT_RECORD + f"\n- `{OPT_PURE}` — complete — taken on 2026-09-12",
+    )
+
+
+def m_record_is_not_a_record(root: Path) -> None:
+    """A bullet that names no path in backticks must not be skipped silently."""
+    edit(
+        root / "STATE.md",
+        f"- `{OPT_PURE}` — deferred — offered at",
+        "- the learner put the pure-core lesson off — offered at",
+    )
+
+
+def m_record_in_progress_but_not_active(root: Path) -> None:
+    edit(
+        root / "STATE.md", "` — deferred — offered at", "` — in-progress — offered at"
+    )
+
+
+def m_active_optional_without_a_record(root: Path) -> None:
+    """active_lesson is the ENRICHMENT lesson, which no record mentions."""
+    edit(root / "STATE.md", f"active_lesson: {SIDE}", f"active_lesson: {OPT_CHARS}")
+
+
+def m_no_optional_section(root: Path) -> None:
+    """A learner who has been offered nothing yet has no section at all."""
+    path = root / "STATE.md"
+    text = path.read_text()
+    head, sep, _ = text.partition("\n## Optional lessons\n")
+    assert sep, "expected the fixture to carry an '## Optional lessons' section"
+    path.write_text(head + "\n")
+
+
+# -- check 17, extended to optional lessons
+
+
+def _stand_in_the_optional_lesson(root: Path) -> None:
+    """Move active_lesson onto the deferred optional lesson, record and all."""
+    edit(root / "STATE.md", f"active_lesson: {SIDE}", f"active_lesson: {OPT_PURE}")
+    edit(
+        root / "STATE.md", "` — deferred — offered at", "` — in-progress — offered at"
+    )
+
+
+def m_optional_active_without_resume(root: Path) -> None:
+    _stand_in_the_optional_lesson(root)
+    edit(root / "STATE.md", "resume_at: lessons/01-subcommands/LESSON.md\n", "")
+
+
+def m_optional_active_with_resume(root: Path) -> None:
+    """The legitimate shape: standing IN an optional lesson, with a way back."""
+    _stand_in_the_optional_lesson(root)
+    assert "resume_at: lessons/01-subcommands/LESSON.md" in (
+        root / "STATE.md"
+    ).read_text()
+
+
 # -- indeterminate: a check cannot run, yet nothing is wrong on its face
 
 
@@ -1197,7 +1529,7 @@ CASES: list[Case] = [
          "this instance does not belong to this manifest"),
     Case("11: active_lesson is not in the lessons list", 11, "automaton",
          "instance", m_instance_active_lesson_unlisted,
-         "neither an entry in tutorial.yaml's 'lessons' list nor a lesson in"),
+         "is none of: an entry in tutorial.yaml's 'lessons' list"),
     Case("11: active_lesson does not resolve", 11, "automaton", "instance",
          m_instance_active_lesson_unresolved,
          "active_lesson 'lessons/00-foundatoins.md' does not resolve"),
@@ -1276,7 +1608,7 @@ CASES: list[Case] = [
          m_generated_resume_not_a_path, "resume_at must be a lesson path"),
     Case("17: resume_at is left behind after the detour finished", 17,
          "generated", "instance", m_stale_resume_at,
-         "is not a lesson in lessons.generated/"),
+         "neither a lesson in lessons.generated/ nor a key in"),
     # ---- check 17, negative direction. `after:` and `resume_at` are
     # independent, so every legitimate detour shape must validate clean.
     Case("17: a boundary detour returning to the entry after its 'after:' is "
@@ -1288,7 +1620,7 @@ CASES: list[Case] = [
     # ---- check 11: the relaxation must not become a hole
     Case("11: active_lesson resolves, but to neither kind of lesson", 11,
          "generated", "instance", m_active_lesson_resolves_to_neither,
-         "neither an entry in tutorial.yaml's 'lessons' list nor a lesson in"),
+         "is none of: an entry in tutorial.yaml's 'lessons' list"),
     Case("11: active_lesson names a generated lesson that was never written",
          11, "generated", "instance", m_active_lesson_generated_but_absent,
          "'lessons.generated/never-written.md' does not resolve"),
@@ -1317,6 +1649,107 @@ CASES: list[Case] = [
          "'spare-notes.md' is never named by LESSON.md"),
     Case("5: a generated lesson carries a progress marker", 5, "generated",
          "instance", m_generated_progress_marker, "a Status: label"),
+    # ---- check 18: optional_lessons
+    Case("18: an optional_lessons key does not resolve", 18, "cli", "bundle",
+         m_optional_key_unresolved,
+         "optional_lessons.lessons/never-written.md): the optional_lessons "
+         "key does not resolve: no such file"),
+    Case("18: an optional_lessons key names material, not a lesson", 18, "cli",
+         "bundle", m_optional_key_is_material,
+         "resolves to a file that is not a lesson"),
+    Case("18: an optional_lessons key names a generated lesson", 18, "cli",
+         "bundle", m_optional_key_is_generated,
+         "an optional lesson is AUTHORED and ships in the bundle"),
+    Case("18: a lesson is listed in BOTH lessons and optional_lessons", 18,
+         "cli", "bundle", m_optional_also_on_main_path,
+         "this lesson is also an entry in the 'lessons' list"),
+    Case("18: an optional lesson has no offer_because", 18, "cli", "bundle",
+         m_optional_no_offer_because, "'offer_because' is required"),
+    Case("18: offer_at is empty, so nothing can reach the lesson", 18, "cli",
+         "bundle", m_optional_empty_offer_at, "'offer_at' is empty"),
+    Case("18: an offer_at entry is not in the lessons list", 18, "cli",
+         "bundle", m_optional_offer_at_unlisted,
+         "'offer_at' names 'lessons/pure-core-and-edges.md', which is not an "
+         "entry"),
+    Case("18: anticipates names a failure mode nothing declares", 18, "cli",
+         "bundle", m_optional_anticipates_undeclared,
+         "'anticipates' names 'counting-coupled-to-i-o'"),
+    Case("18: repair_in is not a lessons entry", 18, "cli", "bundle",
+         m_optional_repair_in_unlisted,
+         "'repair_in' names 'lessons/pure-core-and-edges.md'"),
+    Case("18: required_for with nothing to anticipate", 18, "cli", "bundle",
+         m_optional_gate_without_anticipates,
+         "'required_for' declares a gate, but 'anticipates' is missing"),
+    Case("18: optional_lessons is a list, not a mapping", 18, "cli", "bundle",
+         m_optional_lessons_is_a_list, "must be a mapping of lesson path"),
+    Case("18: an optional_lessons entry is a sentence, not a mapping", 18,
+         "cli", "bundle", m_optional_entry_is_a_string,
+         "the entry must be a mapping declaring at least offer_at and "
+         "offer_because"),
+    # ---- check 19: failure_modes
+    Case("19: a failure mode has no summary", 19, "cli", "bundle",
+         m_failure_mode_no_summary, "'summary' is required"),
+    Case("19: a signal names a validator nothing declares", 19, "cli",
+         "bundle", m_signal_names_undeclared_validator,
+         "the signal names validator 'cargo-tests'"),
+    Case("19: a signal is in none of the three permitted forms", 19, "cli",
+         "bundle", m_signal_in_no_permitted_form,
+         "is in none of the three permitted forms"),
+    Case("19: a declared failure mode nothing anticipates", 19, "cli",
+         "bundle", m_failure_mode_unanticipated,
+         "no optional lesson anticipates 'test-needs-a-fixture-file'"),
+    Case("19: a failure-mode id is not [a-z0-9-]+", 19, "cli", "bundle",
+         m_failure_mode_id_not_slug_shaped,
+         "the failure-mode id 'Test_Needs_A_Fixture_File' must match"),
+    # ---- check 20: the 'optional:' frontmatter flag
+    Case("20: a main-path lesson declares 'optional: true'", 20, "cli",
+         "bundle", m_main_path_declares_optional,
+         "lessons/00-hello-args.md: the frontmatter declares 'optional"),
+    Case("20: an optional lesson omits 'optional: true'", 20, "cli", "bundle",
+         m_optional_lesson_omits_the_flag,
+         "its frontmatter does not declare 'optional: true'"),
+    Case("20: an optional lesson declares 'optional: false'", 20, "cli",
+         "bundle", m_optional_flag_is_false, "optional is False"),
+    Case("20: a generated lesson declares 'optional: true'", 20, "generated",
+         "instance", m_generated_lesson_declares_optional,
+         "it belongs to lessons.generated/"),
+    # ---- check 21: the STATE.md record
+    Case("21: a record names a lesson that is not optional", 21, "generated",
+         "instance", m_record_names_a_main_path_lesson,
+         "'lessons/00-hello-args.md' is not a key in tutorial.yaml's "
+         "'optional_lessons'"),
+    Case("21: a record uses an unknown state word", 21, "generated",
+         "instance", m_record_unknown_state, "is recorded as 'postponed'"),
+    Case("21: a record claims the state 'not-offered'", 21, "generated",
+         "instance", m_record_not_offered,
+         "is recorded as 'not-offered', which is not a state"),
+    Case("21: one lesson is recorded twice", 21, "generated", "instance",
+         m_record_twice, "is recorded twice, as 'deferred' and 'complete'"),
+    Case("21: a bullet in the section is not a record at all", 21,
+         "generated", "instance", m_record_is_not_a_record, "is not a record"),
+    Case("21: a record says in-progress while another lesson is active", 21,
+         "generated", "instance", m_record_in_progress_but_not_active,
+         "is recorded as 'in-progress', but active_lesson is"),
+    Case("21: active_lesson is an optional lesson with no record", 21,
+         "generated", "instance", m_active_optional_without_a_record,
+         "but this section records nothing about it"),
+    # ---- check 21, negative direction: a learner offered nothing yet has no
+    # section, and that is the ordinary state of a fresh instance.
+    Case("21: an instance with no '## Optional lessons' section at all is NOT "
+         "reported", 21, "generated", "instance", m_no_optional_section,
+         kind="silent"),
+    # ---- check 17, extended to optional lessons
+    Case("17: active_lesson is an optional lesson and resume_at is absent", 17,
+         "generated", "instance", m_optional_active_without_resume,
+         "is an optional lesson, so STATE.md must also carry 'resume_at'"),
+    # ---- check 17 and 21, negative direction: standing IN an optional lesson
+    # with a way back recorded is the shape the feature exists to allow.
+    Case("17: standing in an optional lesson WITH resume_at is NOT reported",
+         17, "generated", "instance", m_optional_active_with_resume,
+         kind="silent"),
+    Case("21: an in-progress record naming the active optional lesson is NOT "
+         "reported", 21, "generated", "instance", m_optional_active_with_resume,
+         kind="silent"),
     # ---- the indeterminate path: check 1 cannot run, nothing else complains
     Case("exit 3: DESIGN.md is unreadable, so check 1 cannot run", 1,
          "automaton", "bundle", m_design_md_not_utf8, kind="indeterminate"),
@@ -1484,6 +1917,18 @@ def test_baselines_pass() -> None:
                 "; ".join(str(f) for f in report.findings)
                 or f"blocked = {report.blocked_checks}",
             )
+            if name in NO_OPTIONAL_BASELINES:
+                states = {n: report.status.get(n, ("missing", ""))[0]
+                          for n in (18, 19, 20, 21)}
+                record(
+                    states[18] == vb.NOT_APPLICABLE
+                    and states[19] == vb.NOT_APPLICABLE
+                    and states[21] == vb.NOT_APPLICABLE
+                    and states[20] == vb.RAN,
+                    f"baseline {name} as an instance: 18, 19 and 21 report "
+                    f"n/a and 20 still runs",
+                    f"states = {states}",
+                )
 
 
 def test_generated_baseline_is_expressible() -> None:
@@ -1509,7 +1954,7 @@ def test_generated_baseline_is_expressible() -> None:
         "every instance-mode check reported a status on it",
         f"no status for checks {missing}",
     )
-    for number in (14, 15, 17):
+    for number in (14, 15, 17, 18, 19, 20, 21):
         state, _ = report.status.get(number, ("missing", ""))
         record(
             state == vb.RAN,
@@ -1614,6 +2059,120 @@ def test_generated_baseline_is_expressible() -> None:
         "the same directory checked as a bundle fails check 13",
         f"findings = {[str(f) for f in report.findings]}",
     )
+
+
+def test_optional_baseline_is_expressible() -> None:
+    """The POSITIVE control for optional lessons.
+
+    Without it the four new checks prove only that they can reject. It has to
+    be possible to express a valid bundle WITH optional lessons, in both
+    authored shapes, or the feature is unusable however good the rejections
+    are.
+    """
+    print("\na valid bundle carrying optional lessons:")
+    root = BASELINES["cli"]
+    report = vb.validate(root, "bundle")
+    record(
+        report.exit_code() == 0,
+        "the optional-lesson bundle validates clean",
+        "; ".join(str(f) for f in report.findings)
+        or f"blocked = {report.blocked_checks}",
+    )
+    for number in (18, 19, 20):
+        state, _ = report.status.get(number, ("missing", ""))
+        record(
+            state == vb.RAN,
+            f"check {number} actually RAN on it, rather than being skipped",
+            f"status was {state!r}; an 'n/a' here would mean the positive "
+            f"control proves nothing about this check",
+        )
+
+    manifest = vb._RestrictedYaml(
+        (root / "tutorial.yaml").read_text(), "tutorial.yaml"
+    ).parse()
+    optional = manifest["optional_lessons"]
+    record(
+        set(optional) == {OPT_PURE, OPT_CHARS},
+        "the fixture declares exactly the two optional lessons",
+        repr(sorted(optional)),
+    )
+    gates = ("anticipates", "repair_in", "required_for")
+    record(
+        all(field in optional[OPT_PURE] for field in gates),
+        "one of them is the ANTICIPATION shape - anticipates, repair_in and "
+        "required_for all present",
+        repr(optional[OPT_PURE]),
+    )
+    record(
+        not any(field in optional[OPT_CHARS] for field in gates),
+        "and the other is plain ENRICHMENT, declaring none of the three, "
+        "which must still validate clean",
+        repr(optional[OPT_CHARS]),
+    )
+    modes = manifest["failure_modes"]
+    anticipated = set(optional[OPT_PURE]["anticipates"])
+    record(
+        set(modes) == anticipated and len(modes) == 2,
+        "every declared failure mode is anticipated, and both are exercised",
+        f"declared = {sorted(modes)}, anticipated = {sorted(anticipated)}",
+    )
+    forms = {
+        signal.split(":", 1)[0]
+        for mode in modes.values()
+        for signal in mode.get("signals", [])
+    }
+    record(
+        forms == {"validator", "token", "diagnosis"},
+        "all three signal forms are exercised by the fixture",
+        f"forms = {sorted(forms)}",
+    )
+    for rel in (OPT_PURE, OPT_CHARS):
+        front, _ = vb.split_frontmatter((root / rel).read_text())
+        assert front is not None
+        parsed = vb._RestrictedYaml(front, rel).parse()
+        record(
+            parsed.get("optional") is True,
+            f"{rel} declares 'optional: true' in its own frontmatter",
+            repr(parsed),
+        )
+    listed = [str(entry) for entry in manifest["lessons"]]
+    record(
+        not any(entry in optional for entry in listed),
+        "no lesson is on the main path AND offered",
+        f"lessons = {listed!r}",
+    )
+    for rel in listed:
+        front, _ = vb.split_frontmatter((root / rel).read_text())
+        assert front is not None
+        record(
+            "optional" not in vb._RestrictedYaml(front, rel).parse(),
+            f"the main-path lesson {rel} declares no 'optional' field",
+            rel,
+        )
+
+    # Backward compatibility. A bundle that declares neither key is valid
+    # exactly as it was before the keys existed, and the two checks that have
+    # nothing to look at must say "n/a" rather than passing silently.
+    for name in NO_OPTIONAL_BASELINES:
+        other = vb.validate(BASELINES[name], "bundle")
+        states = {n: other.status.get(n, ("missing", ""))[0] for n in (18, 19, 20)}
+        record(
+            other.exit_code() == 0,
+            f"baseline {name}, which declares neither new key, still passes",
+            "; ".join(str(f) for f in other.findings)
+            or f"blocked = {other.blocked_checks}",
+        )
+        record(
+            states[18] == vb.NOT_APPLICABLE and states[19] == vb.NOT_APPLICABLE,
+            f"baseline {name}: checks 18 and 19 report n/a, not a pass",
+            f"states = {states}",
+        )
+        record(
+            states[20] == vb.RAN,
+            f"baseline {name}: check 20 still RUNS - 'no lesson declares "
+            f"optional' is a real thing to verify",
+            f"states = {states}",
+        )
 
 
 def test_real_repositories() -> None:
@@ -1933,6 +2492,7 @@ def main() -> int:
 
     test_baselines_pass()
     test_generated_baseline_is_expressible()
+    test_optional_baseline_is_expressible()
     test_real_repositories()
     test_mode_is_never_inferred()
     test_cli()

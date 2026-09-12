@@ -48,8 +48,13 @@ A bundle is a directory:
     ├── 01-<slug>/                a lesson as a folder, when it has material
     │   ├── LESSON.md             the lesson itself; exact name, exact case
     │   └── <anything else>       diagrams, data, examples, references
+    ├── <slug>.md                 an optional lesson: off the main path, no
+    │                             number prefix, offered rather than sequenced
     └── ...
 ```
+
+Every lesson lives in `lessons/`, whether the learner reaches it by walking the course
+or by accepting an offer. There is no second lesson directory in a bundle.
 
 ### The rule that separates a bundle from an instance
 
@@ -90,6 +95,22 @@ lessons:
   - lessons/01-rows-cells-temporal.md
   - lessons/02-typed-keys-table-hierarchy.md
 
+optional_lessons:
+  lessons/interior-mutability.md:
+    offer_at:      [lessons/02-typed-keys-table-hierarchy.md]
+    offer_because: >
+      A shared cache behind an immutable handle needs interior mutability, and
+      the borrow checker will not explain which tool to reach for.
+    anticipates:   [shared-cache-needs-refcell]
+    repair_in:     lessons/02-typed-keys-table-hierarchy.md
+
+failure_modes:
+  shared-cache-needs-refcell:
+    summary: >
+      Two owners need to mutate one cache, so the design grows a clone per
+      call rather than a shared cell.
+    signals: [validator:cargo-check, diagnosis]
+
 workspace_kind: existing-or-new-repository
 tutor_owned:    [tutorial/STATE.md, tutorial/DESIGN.md]
 learner_owned:  [src/**, tests/**, Cargo.toml]
@@ -117,7 +138,9 @@ advance_on: validated-evidence-only
 | `aliases` | SHOULD | Extra terms a learner might say instead of a subject. |
 | `level` | MUST | e.g. `beginner`, `intermediate`, `intermediate-to-advanced`. |
 | `style` | SHOULD | e.g. `project-driven`, `interactive`, `exercise-based`. |
-| `lessons` | MUST | Ordered list of lesson paths. See below. |
+| `lessons` | MUST | Ordered list of lesson paths — the main path. See below. |
+| `optional_lessons` | MAY | Authored lessons off the main path, offered rather than sequenced. See **Optional lessons** below. |
+| `failure_modes` | MAY | Stable ids for the ways a learner's work goes wrong. See **Failure modes** below. |
 | `workspace_kind` | MUST | See below. |
 | `tutor_owned` | MUST | Globs the tutor may modify. |
 | `learner_owned` | MUST | Globs the tutor must not modify. |
@@ -127,21 +150,23 @@ advance_on: validated-evidence-only
 | `solution_code` | SHOULD | `on-request-only` or `freely`. |
 | `advance_on` | SHOULD | `validated-evidence-only` or `learner-assertion`. |
 
-**`lessons`** is the authoritative lesson sequence. It defines two things nothing else
-does:
+**`lessons`** is the authoritative lesson sequence — the **main path**, which every
+learner walks in order. It defines two things nothing else does:
 
 - **which lesson is first** — it is `lessons[0]`. There is no separate `entry_lesson`
   field; one ordered list is the single source of truth.
 - **what "the next lesson" means** when one completes. Do not rely on filenames sorting
   correctly; the list is the order.
 
-Every entry MUST resolve to a real file, and every **lesson** in `lessons/` MUST appear
-in the list exactly once. A lesson that is not listed is invisible to the runner and is
-reported as an error, not silently skipped.
+Every entry MUST resolve to a real file, and every **lesson** in `lessons/` MUST be
+listed exactly once — in `lessons` when it is on the main path, or in `optional_lessons`
+when it is not. A lesson in neither list is invisible to the runner and is reported as an
+error, not silently skipped. A lesson in both is reported too: the main path is walked in
+order and an optional lesson is offered, and nothing can be both.
 
 "Every lesson" means every top-level `.md` file plus every folder containing a
 `LESSON.md`. Supporting files inside a lesson folder are material, not lessons, and MUST
-NOT appear in the list.
+NOT appear in either list.
 
 Name lessons by path, the same form used by `active_lesson`, so every reference to a
 lesson looks identical everywhere. An entry always names the Markdown file, whether the
@@ -200,6 +225,141 @@ is invalid.
 Do **not** put "which warnings are currently acceptable" here. That is a property of one
 learner's run, not of the course. It belongs in the instance's `STATE.md`.
 
+### Optional lessons — `optional_lessons`
+
+**This is not the same thing as a lesson's *Optional deeper paths* section.** That is
+material inside one lesson, read on request, and section 6 keeps it. It is also not a
+generated side lesson, which one tutor writes for one learner during one course
+(section 8). An **optional lesson** is authored by you, shipped in the bundle, available
+to every learner, and simply not on the main path.
+
+The main path is `lessons`, and every learner walks it in order. An optional lesson is
+one the tutor **offers**: the learner takes it, or declines it and carries on.
+
+Two author intentions share one mechanism:
+
+- **enrichment** — a topic worth an hour to a learner who wants it. It is offered once at
+  the point you name, and if they decline, that is the end of it;
+- **anticipation** — you can see that a choice the learner is about to make leads to a
+  recognisable failure. The tutor warns them briefly, offers the lesson, and lets them
+  defer it. When the failure actually arrives, the tutor connects it to the topic they
+  set aside and offers the lesson again.
+
+The second is what this part of the format is really for, and it is the only one that
+needs `failure_modes`. An optional lesson that declares no `anticipates` is enrichment,
+which keeps ordinary optional material possible without inventing a failure for it.
+
+```yaml
+optional_lessons:
+  lessons/event-time-and-watermarks.md:
+    offer_at:      [lessons/04-window-execution.md]
+    offer_because: >
+      Windows keyed on arrival time put a delayed record in whichever window is
+      open when it arrives, not the one it belongs to.
+    anticipates:   [late-event-wrong-window, window-never-closes]
+    repair_in:     lessons/04-window-execution.md
+    required_for:  [lessons/06-correctness-under-delay.md]
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| the key | MUST | The lesson's path, in the form `lessons` uses. It MUST resolve to a lesson, and MUST NOT also appear in `lessons`. |
+| `offer_at` | MUST | Non-empty list of `lessons` entries. The tutor raises the offer when one of them becomes the active lesson, before that lesson's first task. |
+| `offer_because` | MUST | One or two sentences, written for the learner, that the tutor says when it offers the lesson. For an anticipatory lesson, this names the risk. |
+| `anticipates` | SHOULD | Failure-mode ids declared in `failure_modes`. Omit it for enrichment. |
+| `repair_in` | SHOULD | The `lessons` entry whose implementation the learner repairs after taking this lesson. Meaningful only with `anticipates`. |
+| `required_for` | MAY | `lessons` entries that cannot be completed while an anticipated failure stands. Requires a non-empty `anticipates`. |
+
+**`offer_at` is what makes the lesson reachable**, and it is the same rule the main path
+obeys: a lesson nothing can reach is invisible. An empty `offer_at` is rejected rather
+than read as "offer it whenever you like".
+
+**`offer_because` lives in the manifest and not in the lesson, deliberately.** The tutor
+reads `tutorial.yaml` every turn and opens exactly one lesson file. If the sentence it
+needs in order to *offer* a lesson lived inside that lesson, offering would cost one file
+open per optional lesson per turn — which is the cost this whole format exists to avoid.
+`anticipates`, `repair_in` and `required_for` are here for the same reason: the tutor has
+to act on them without opening anything.
+
+**`repair_in` is not the way back.** The lesson a detour returns to is recorded in the
+instance, at the moment the detour starts, from where the learner is actually standing —
+that is `resume_at`, and `state-lifecycle.md` section 8.3 explains why it is never
+derived from a declared field. `repair_in` answers a different question: *whose work is
+now wrong?* The two differ whenever a failure surfaces later than the code that caused
+it, which is the ordinary case for an anticipated failure. A learner who defers at lesson
+04 and trips the failure while standing in lesson 06 returns to **06**, and repairs what
+**04** built.
+
+**`required_for` is the one way an optional lesson stops being optional.** It says these
+main-path lessons cannot be completed while an anticipated failure stands, so once that
+failure is observed the tutor tells the learner the lesson is now required in order to
+continue. Use it sparingly and only where the blocked lesson genuinely cannot be
+finished. Everything else stays an offer, and a learner who declines everything must
+still be able to finish the course — section 13.
+
+Nothing here records whether any learner was offered a lesson, deferred it or took it.
+That is progress: it lives in the instance's `STATE.md`, in the section
+`state-lifecycle.md` section 9 defines.
+
+### Failure modes — `failure_modes`
+
+A **failure mode** is a stable name for a recognisable way a learner's work goes wrong.
+It is the middle of three terms, and keeping the three apart is the point of having it at
+all:
+
+| Layer | What it is | Where it lives |
+|---|---|---|
+| evidence | what was observed — a validator failed, an output carried a token, you read the code | the learner's workspace and the validator output |
+| failure mode | what the tutor concluded from that evidence | `failure_modes`, by id |
+| the lesson | what addresses it | an optional lesson's `anticipates` |
+
+```yaml
+failure_modes:
+  late-event-wrong-window:
+    summary: >
+      A record that arrives after its window closed is counted in whichever
+      window is open when it arrives.
+    signals:
+      - validator:late-events
+      - token:LATE_EVENT_MISBINNED
+      - diagnosis
+  window-never-closes:
+    summary: A window that receives no later record never emits its result.
+    signals: [validator:test-suite, diagnosis]
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| the key | MUST | A stable id, `[a-z0-9-]+`. Never reuse one for a different failure. |
+| `summary` | MUST | One sentence in the learner's terms naming what goes wrong. This is what the tutor says when it connects an observed failure to a deferred lesson. |
+| `signals` | SHOULD | The forms of evidence that may indicate this failure mode. |
+
+A `signals` entry is one of three forms:
+
+| Entry | Means |
+|---|---|
+| `validator:<name>` | that validator failing. `<name>` MUST be declared in `validators`. |
+| `token:<TOKEN>` | a stable identifier appearing in a check's output, emitted by a check you control. |
+| `diagnosis` | the tutor inferred it from the learner's code or from observed behaviour. |
+
+**`signals` is evidence, not a rule.** It tells the tutor which observations are worth
+weighing. It never decides that a failure mode occurred — the diagnosis stays with the
+tutor, exactly as every other judgement in this format does, and `runner-protocol.md`
+section 8.4 states that normatively.
+
+This is why there is no field that matches raw compiler or test output. A course whose
+re-offer depends on an error string breaks the first time a toolchain rewords it, and it
+cannot express the cases that matter most: a named test failing, a fault-injection run
+behaving exactly as designed, or a design you can see is wrong before it has failed
+anything. Name the failure, and let the evidence point at the name.
+
+**Prefer `token:` to `diagnosis` when a check you wrote can emit one.** A test that prints
+`LATE_EVENT_MISBINNED` on the assertion that catches the bug turns a judgement into an
+observation, and it survives every rewording of everything around it.
+
+**A failure mode no optional lesson anticipates can never do anything.** Declare the ones
+your optional lessons name, and no others.
+
 ---
 
 ## 3. `COURSE.md`
@@ -212,6 +372,8 @@ MUST contain:
 - the teaching philosophy specific to this course
 - a high-level map of the chapters or lessons, in order
 - milestone or checkpoint structure, if the course has one
+- the optional lessons the course carries, if it has any, marked as optional. They are
+  not part of the order, so do not number them into the map
 
 SHOULD contain: a coverage list, described below.
 
@@ -256,6 +418,24 @@ learner and looks it up:
 | is in your list, and no completed lesson taught it | writes a side lesson for it — your course has a genuine hole here |
 | is in your list, and was taught already | coaches, and writes nothing |
 | is not in your list | tells the learner the topic is outside this course, rather than quietly widening it |
+
+**A topic an optional lesson teaches is in the course.** Put it in the coverage list like
+any other, and the first row above then resolves correctly: the tutor finds the topic
+listed, finds an authored lesson that teaches it, and **offers that lesson** instead of
+writing a side lesson for a hole the course does not have. `runner-protocol.md` section
+8.9 is that rule. Leaving an optional lesson's topic out of the list produces the
+opposite and worse outcome — every learner who needs it gets a different improvised
+version of a lesson you already wrote.
+
+**Word the entry so a tutor can match it**, which is a real obligation and not a style
+note. Nothing in `optional_lessons` states what a lesson *teaches*: the tutor has the
+lesson's path, its `offer_because`, and your coverage-list entry, and it may not open the
+lesson to settle the question. So a topic listed as `stream time semantics`, offered by a
+lesson at `lessons/event-time-and-watermarks.md`, whose `offer_because` talks about
+delayed records, gives the tutor three vocabularies for one thing and no way to know they
+are one thing. Use one name in all three places. This is the same rule that governs
+everything else in this format — one word, one meaning — and here it decides whether an
+authored lesson gets offered or improvised over.
 
 So the list does two jobs at once: it records what the course owes, and it tells every
 tutor teaching your course where your course stops.
@@ -488,10 +668,37 @@ Material available if the learner asks. Not required.
 | `title` | MUST | Human-facing lesson name. |
 | `design_refs` | SHOULD | `DESIGN.md` anchors this lesson needs. MUST all resolve. |
 | `validators` | SHOULD | Validator names from `tutorial.yaml`. MUST all be declared. |
+| `optional` | MUST on an optional lesson | `true`, on every lesson listed in `optional_lessons` and on no other. |
 
 `design_refs` is how a lesson stays cheap. A lesson about splitting a file into a
 library declares only the anchors it truly needs. It does not pull in storage,
 networking or replication design that belongs to a later chapter. List the minimum.
+
+### Writing an optional lesson
+
+An optional lesson is an ordinary lesson file in `lessons/`. Same frontmatter, same
+sections, same material rules, same treatment once it is active. Three things differ:
+
+- **it is listed in `optional_lessons`, not in `lessons`** (section 2). That list is also
+  where its offer metadata lives, because the tutor must be able to offer it without
+  opening it;
+- **its frontmatter declares `optional: true`.** The manifest already knows, so this is a
+  second statement of one fact — deliberately, in the same way `id` restates the slug. A
+  lesson file that does not say it is optional reads as main path to everyone who opens
+  it alone, including you, six months later. A main-path lesson MUST NOT declare it;
+- **do not give it a number prefix.** The prefix is a convention that follows the main
+  path's order, and an optional lesson has no position in that order. Write
+  `lessons/event-time-and-watermarks.md`, not `lessons/04b-event-time.md`. This is the
+  same reasoning that keeps a number off a generated lesson (section 8).
+
+Its completion conditions bind exactly like any other lesson's. *Optional* describes how
+the learner arrives at the lesson, never how carefully it is taught or how it is left.
+
+Write it so it stands alone. It is reached from at least one point you named and possibly
+from a failure several lessons later, so it cannot assume the learner arrived with a
+particular task half-finished. State what it needs in *Prerequisites*, the same as any
+lesson, and keep it short — a detour that costs more than the lesson it interrupts is a
+detour nobody finishes.
 
 ### A lesson is not a script
 
@@ -609,6 +816,22 @@ authoring act that you perform, on the bundle, using a generated lesson as sourc
 10. **Re-run the self-check in section 10, and the validator.** A promoted lesson is a new
    lesson, and every rule in this document applies to it.
 
+#### Promoting a side lesson as an *optional* lesson
+
+A promoted side lesson does not have to join the main path. When the evidence says that
+*some* learners need it at a particular point and others do not, the honest outcome is an
+optional lesson: step 7 puts the path in `optional_lessons` instead of `lessons`, with
+`offer_at` naming the lesson the drafts' `after:` values cluster around. Every other step
+is unchanged, and `optional: true` goes into the frontmatter beside the `id` you fixed in
+step 2.
+
+That is also the moment to ask whether the detour was *anticipating* a failure. If the
+reason a learner needed it was a mistake your course could see coming, declare the failure
+mode and the next learner gets to defer it knowingly instead of meeting it blind. The
+`reason:` fields you are already reading are where that pattern shows: three learners
+detouring after the same lesson, for the same concept, is an anticipated failure with no
+name yet.
+
 A learner who is already partway through the previous revision does not receive the new
 lesson. Revising a bundle while an instance is live has no reconciliation story yet.
 Promotion improves the course for the learners who come after.
@@ -651,7 +874,8 @@ why it is written for you rather than for the learner.
    Delete them. They describe one learner.
 3. **A `STATE.template.md` that is not empty of progress.** It must describe a learner
    who has not started.
-4. **A lesson file that is not listed in `lessons`.** It will never be reached.
+4. **A lesson file that is in neither `lessons` nor `optional_lessons`.** It will
+   never be reached, by walking or by an offer.
 5. **`design_refs` pointing at anchors that do not exist**, usually after renaming a
    `DESIGN.md` heading.
 6. **Lessons referencing validators not declared in `tutorial.yaml`.**
@@ -670,7 +894,21 @@ why it is written for you rather than for the learner.
     run. Strip all five.
 15. **Promoting a generated lesson without re-checking `design_refs`.** The instance's
     `DESIGN.md` grew during the course; your bundle's did not.
-16. **Naming a foldered lesson's body anything but `LESSON.md`.** `index.md` and
+16. **An optional lesson listed in `lessons` as well.** The main path is walked and an
+    optional lesson is offered. Nothing can be both.
+17. **An optional lesson with no `offer_at`.** Nothing reaches it, so it is as invisible
+    as a lesson that is in no list at all.
+18. **A failure mode no optional lesson anticipates.** It can never re-offer anything.
+    Name it from a lesson, or delete it.
+19. **Putting `offer_because` in the lesson instead of the manifest.** The tutor would
+    have to open every optional lesson every turn to know what it could offer, which is
+    the cost the format exists to avoid.
+20. **Giving an optional lesson a number prefix.** It has no position in the order.
+21. **Writing `repair_in` as the way back.** It names whose work is wrong, not where the
+    learner stands. The way back is recorded in the instance when the detour starts.
+22. **Recording in the bundle that a learner deferred something.** An offer and a
+    deferral are progress. They belong in the instance's `STATE.md`.
+23. **Naming a foldered lesson's body anything but `LESSON.md`.** `index.md` and
     `README.md` are not recognised. `lesson.md` is worse than not recognised: macOS and
     Windows filesystems are case-insensitive, so it appears to work locally and then
     fails on Linux. Match the case exactly.
@@ -688,8 +926,9 @@ Confirm each of these by looking, not by remembering:
 - [ ] `STATE.template.md` exists and describes a learner who has not started
 - [ ] `tutorial.yaml`, `COURSE.md`, `DESIGN.md`, `lessons/` all exist
 - [ ] every `lessons` entry resolves to a file that exists
-- [ ] every lesson in `lessons/` appears in `lessons` exactly once — counting both
-      top-level `.md` files and folders containing `LESSON.md`
+- [ ] every lesson in `lessons/` is listed exactly once — in `lessons` **or** in
+      `optional_lessons`, never in both — counting both top-level `.md` files and
+      folders containing `LESSON.md`
 - [ ] every folder directly under `lessons/` contains a `LESSON.md`
 - [ ] every supporting file in a lesson folder is mentioned by its `LESSON.md`
 - [ ] `STATE.template.md`'s `tutorial_id` equals `tutorial.yaml`'s `id`
@@ -697,6 +936,16 @@ Confirm each of these by looking, not by remembering:
 - [ ] every lesson file has `id` and `title` in frontmatter
 - [ ] every `design_refs` entry resolves to a real anchor in `DESIGN.md`
 - [ ] every lesson `validators` entry is declared in `tutorial.yaml`
+- [ ] every `optional_lessons` key resolves to a lesson, and its `offer_at`,
+      `repair_in` and `required_for` entries are all entries in `lessons`
+- [ ] every `offer_at` is non-empty and every entry has an `offer_because`
+- [ ] every `anticipates` id is declared in `failure_modes`, and every declared failure
+      mode is anticipated by at least one optional lesson
+- [ ] every `signals` entry of the form `validator:<name>` names a declared validator
+- [ ] every lesson listed in `optional_lessons` declares `optional: true` in its
+      frontmatter, and no main-path lesson declares it
+- [ ] the course can be finished by a learner who declines every offer — unless a
+      `required_for` gate says otherwise and you meant it (section 13)
 - [ ] neither `COURSE.md` nor any file under `lessons/` carries a progress marker in a
       structural position — a heading annotated with a status, a `Status:` label, a ticked
       checklist box, a bold `**Next:**` label, a "current lesson" or "resume marker"
@@ -811,3 +1060,142 @@ lessons:
 
 The `id` stays `00-hello-args`, because the slug is now the folder name. Nothing else
 changes.
+
+---
+
+## 12. Worked example: an optional lesson that anticipates a failure
+
+A streaming course. Lesson 04 has the learner implement windowed aggregation. The author
+knows what almost everyone writes first — a window keyed on the time the record arrived —
+and knows what it costs two lessons later, when a delayed record turns up.
+
+`tutorial.yaml`, the relevant parts only:
+
+```yaml
+lessons:
+  - lessons/00-records-and-streams.md
+  - lessons/04-window-execution.md
+  - lessons/06-correctness-under-delay.md
+
+validators:
+  test-suite:  { kind: command, command: [pytest, -q] }
+  late-events: { kind: command, command: [pytest, -q, tests/test_late_events.py] }
+
+optional_lessons:
+  lessons/event-time-and-watermarks.md:
+    offer_at:      [lessons/04-window-execution.md]
+    offer_because: >
+      Windows keyed on arrival time put a delayed record in whichever window is
+      open when it arrives, not the one it belongs to. There is a lesson on event
+      time and watermarks whenever you want it.
+    anticipates:   [late-event-wrong-window, window-never-closes]
+    repair_in:     lessons/04-window-execution.md
+    required_for:  [lessons/06-correctness-under-delay.md]
+
+failure_modes:
+  late-event-wrong-window:
+    summary: >
+      A record that arrives after its window closed is counted in whichever
+      window is open when it arrives.
+    signals: [validator:late-events, token:LATE_EVENT_MISBINNED, diagnosis]
+  window-never-closes:
+    summary: A window that receives no later record never emits its result.
+    signals: [validator:test-suite, diagnosis]
+```
+
+`lessons/event-time-and-watermarks.md` is an ordinary lesson file with `optional: true` in
+its frontmatter and no number prefix.
+
+### Path 1 — the learner takes it when it is offered
+
+1. Lesson 04 becomes the active lesson. Before its first task the tutor states the risk
+   in the two sentences of `offer_because`, says the lesson is optional, and asks. It
+   teaches no event time while offering; the offer is a warning and a question, not a
+   lecture.
+2. The learner says yes. `active_lesson` becomes `lessons/event-time-and-watermarks.md`
+   and `resume_at` becomes `lessons/04-window-execution.md` — the lesson they were
+   standing in. `STATE.md` records the optional lesson as `in-progress`.
+3. The lesson is taught and its completion conditions are checked, like any lesson.
+   `STATE.md` records it `complete`.
+4. `active_lesson` goes back to `resume_at`, the `resume_at` field is removed, and lesson
+   04 begins with the learner able to key a window on event time. `repair_in` names lesson
+   04 as well, and there is nothing to repair, because nothing was built yet.
+
+### Path 2 — the learner defers it, and the failure arrives
+
+1. The same offer, at the same point.
+2. The learner says "not now". `STATE.md` records the lesson `deferred`, at lesson 04,
+   with the date. **The tutor does not raise it again** — not later in lesson 04, not at
+   its end, not in lesson 05. Nothing new has happened, and saying it twice is nagging.
+3. Lesson 04 completes on its own terms. The learner keyed the window on arrival time and
+   every check lesson 04 declares passes, because none of them delays a record. That is
+   not a defect in the course. It is what an anticipated failure looks like before it
+   happens.
+4. In lesson 06 the `late-events` validator fails, and its output carries
+   `LATE_EVENT_MISBINNED`.
+5. The tutor has evidence: a named validator failed, and a token appeared in its output.
+   Both are `signals` of `late-event-wrong-window`. It reads the learner's window key,
+   confirms the diagnosis, and now holds a failure mode rather than an error message.
+6. `late-event-wrong-window` is in `anticipates` for a lesson `STATE.md` records as
+   `deferred`. So the tutor says, in this order: what failed; what that means, in the
+   words of `summary`; that this is the topic set aside at lesson 04; and that the lesson
+   is available now. It reports the connection neutrally. It does not say "as I warned".
+7. The learner accepts. `active_lesson` becomes the optional lesson and `resume_at`
+   becomes `lessons/06-correctness-under-delay.md`, because that is where they are
+   standing. **Not lesson 04** — `repair_in` is not the way back.
+8. The lesson completes. `active_lesson` returns to lesson 06, and the first task there is
+   the repair: rework the window assignment that lesson 04 built — which is what
+   `repair_in` names — and re-run `late-events`.
+9. `STATE.md` records the optional lesson `complete`. If a similar failure appears again
+   it is now an ordinary failure and the tutor coaches. A completed optional lesson is
+   never offered a second time.
+
+### If the learner defers it again at step 7
+
+That is allowed, and it is recorded. Because lesson 06 appears in `required_for`, the
+tutor also says what the gate means: lesson 06 cannot be completed while this failure
+stands. The learner can stop there or take the lesson; what they cannot do is finish
+lesson 06 with the failure in place.
+
+Without `required_for` the tutor would simply coach them through the failure as an
+ordinary failure, one correction at a time, which for many courses is the better answer.
+Reach for the gate only when the blocked lesson genuinely cannot be finished.
+
+---
+
+## 13. Older runners, and bundles that predate this
+
+`bundle_format` stays `1`. `optional_lessons` and `failure_modes` are additive: a bundle
+written before this section existed is valid exactly as it stands, nothing in this
+document changes what it means, and no edit is implied. Run the validator over it and see.
+
+The other direction is the one to understand before you ship a course that uses the
+feature. A runner that predates it reads `tutorial.yaml`, does not recognise the two new
+keys, and ignores them. The effect on a learner is precise, and worth stating plainly:
+
+- **every optional lesson is never offered.** The learner walks `lessons` and finishes the
+  course without meeting one;
+- **every `required_for` gate goes unenforced.** The learner is not stopped. They meet the
+  failure, and the tutor coaches them through it as an ordinary failure;
+- **nothing is taught wrongly.** The main path is untouched, because an optional lesson is
+  never in it.
+
+So the invariant that makes this safe is one you hold, and no validator can check it:
+
+> **The course MUST be completable by a learner who declines every offer.**
+
+That is worth insisting on for a reason beyond old runners: the old-runner case is
+identical to a learner who says no to everything, and you have to support that learner
+anyway. A `required_for` gate is the single exception, and it fails in the direction of
+coaching rather than of a wrong result.
+
+Two things follow:
+
+- **never put a concept the main path depends on into an optional lesson alone.** If a
+  later main-path lesson cannot be completed without it, it belongs on the main path.
+  `required_for` is for a mistake the learner has already made, never for a prerequisite;
+- **an older copy of `validate_bundle.py` reports every optional lesson as unlisted.**
+  That is a stale validator, not a defect in the bundle: the check it runs was written
+  before `optional_lessons` existed. Update the validator rather than the bundle, and do
+  not "fix" the finding by moving the lesson into `lessons`.
+

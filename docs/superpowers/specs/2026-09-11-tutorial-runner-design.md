@@ -453,6 +453,95 @@ announcement is noise that makes the one that matters easier to miss.
 > prose headings, so the scan matched nothing and reported clean without examining
 > anything. An explicit list in the manifest removes the need to parse prose at all.
 
+### Optional lessons
+
+**Added 2026-09-12.** A course can carry authored lessons that are *offered* rather than
+sequenced. They live in `lessons/` beside every other authored lesson, are listed in a new
+manifest map `optional_lessons` instead of the ordered `lessons` list, and carry
+`optional: true` in their own frontmatter.
+
+The motivating case is not enrichment. It is a mistake the author can see coming: the
+learner is about to key a window on arrival time, or write a counting function that opens
+its own file, and the failure that follows is recognisable, specific, and several lessons
+away. The tutor warns in one sentence, offers a lesson, and lets the learner **defer** it.
+When the anticipated failure actually arrives, the tutor connects the observed failure to
+the deferred topic and offers the lesson again — which makes this an adaptive branch that
+re-enters the main path when its relevance becomes observable, not a reading list.
+
+Two manifest maps carry it:
+
+```yaml
+optional_lessons:
+  lessons/event-time-and-watermarks.md:
+    offer_at:      [lessons/04-window-execution.md]   # where it may first be offered
+    offer_because: >                                   # what the tutor says when offering
+      Windows keyed on arrival time put a delayed record in whichever window is
+      open when it arrives, not the one it belongs to.
+    anticipates:   [late-event-wrong-window]           # omit for plain enrichment
+    repair_in:     lessons/04-window-execution.md      # whose work gets repaired
+    required_for:  [lessons/06-correctness-under-delay.md]
+
+failure_modes:
+  late-event-wrong-window:
+    summary: >
+      A record that arrives after its window closed is counted in whichever
+      window is open when it arrives.
+    signals: [validator:late-events, token:LATE_EVENT_MISBINNED, diagnosis]
+```
+
+**Three layers stay separate, and that separation is the design.** Evidence is what was
+observed — a named validator failed, a token appeared in its output, the tutor read the
+code. A failure mode is what the tutor *concluded*, and it has a stable id. The lesson is
+what addresses that conclusion. `signals` says which observations are worth weighing and
+never decides; diagnosis stays with the tutor, exactly as every other judgement in this
+format does. That is why there is no field matching raw compiler output: a rule built on
+an error string breaks when a toolchain rewords it, and it cannot express the cases that
+matter most — a named test failing, a fault-injection run behaving as designed, or a
+design that is visibly wrong before it has failed anything.
+
+**`anticipates` doubles as the re-offer trigger; there is no separate `reoffer_when`.**
+The failure mode carries its own evidence, so a second field would be a second place for
+the same fact. An author who wants to warn about one failure and re-offer on another can
+declare both in `anticipates`; nothing yet needs them to differ, and §15 records that as
+open.
+
+**`repair_in` is not the way back, and the distinction is load-bearing.** The lesson a
+detour returns to is `resume_at`, recorded in `STATE.md` when the detour starts, from
+where the learner is actually standing — the existing rule, and the one an earlier
+revision of `state-lifecycle.md` got wrong by deriving it from a declared field. An
+anticipated failure surfaces *later* than the code that caused it, so the two genuinely
+differ: a learner who defers at lesson 04 and trips the failure in lesson 06 returns to
+**06**, and repairs what **04** built. `repair_in` names the second thing only.
+
+**The learner's decisions are progress**, so they live in the instance: a `## Optional
+lessons` section in `STATE.md` recording `offered`, `deferred`, `in-progress` or
+`complete`. *Not yet offered* is the absence of an entry, because a course with twelve
+optional lessons would otherwise carry twelve lines saying nothing happened. Four rules
+keep it from looping: a `complete` lesson is never offered again; a `deferred` one is
+re-offered only on newly observed evidence, and reaching another `offer_at` entry is not
+evidence; a failure that persists after the lesson is an ordinary failure to coach through;
+and an `in-progress` lesson is the active one and is not offered at all.
+
+**Reuse, not new machinery.** Taking an optional lesson *is* the existing detour:
+`active_lesson` moves to it, `resume_at` records the way back, and the same exception that
+lets `active_lesson` leave the `lessons` list for a generated lesson covers this one. The
+only genuinely new concepts are the failure-mode registry and the offer metadata, and both
+live in the manifest rather than in lesson frontmatter for one reason: **the tutor loads
+the manifest every turn and opens exactly one lesson file.** Metadata the tutor needs in
+order to decide whether to *offer* a lesson cannot live inside that lesson without costing
+one file open per optional lesson per turn, which is the cost this whole format exists to
+avoid.
+
+**`bundle_format` stays `1`.** The two keys are additive, and every bundle written before
+them is valid unchanged. The degradation is stated in `bundle-format.md` §13 rather than
+signalled by a version: a runner that predates the feature ignores both keys, so every
+optional lesson goes unoffered and every `required_for` gate unenforced — which is
+identical to a learner who declines every offer, a case an author has to support anyway.
+The invariant that makes it safe is an authoring obligation no validator can check: **the
+course must be completable by a learner who declines everything.** An older copy of the
+validator additionally reports each optional lesson as unlisted; that is a stale checker,
+not a defect in the bundle.
+
 ---
 
 ## 7. Catalogue and the provider boundary
@@ -709,8 +798,8 @@ it with zero context.
 2. every lesson `validators` entry is declared in `tutorial.yaml`
 3. every lesson has `id` + `title` frontmatter, and `id` equals its slug
 4. every `lessons` entry resolves; every lesson in `lessons/` (top-level `.md` plus
-   folders with `LESSON.md`) is listed exactly once; every lesson folder has a
-   `LESSON.md` named in exact case
+   folders with `LESSON.md`) is listed exactly once, in `lessons` **or** in
+   `optional_lessons`; every lesson folder has a `LESSON.md` named in exact case
 5. no progress markers anywhere in `COURSE.md` or `lessons/`
 6. every file in a lesson folder is mentioned by that folder's `LESSON.md`
 
@@ -730,6 +819,31 @@ stays explicit on the command line for the same reason bundle and instance do.
 10. `workspace_kind` and `ownership_policy` are known values; `tutor_owned` is non-empty;
     `learner_owned` is non-empty **unless** `workspace_kind: none`, since a course that
     builds no software owns none of the learner's files
+
+**Optional-lesson checks** (added 2026-09-12, with the feature in §6):
+
+18. `optional_lessons` is well-formed — every key resolves to a lesson under `lessons/`
+    and is not also in `lessons`; `offer_at` is non-empty and every entry is a `lessons`
+    entry; `offer_because` is present; every `anticipates` id is declared; `repair_in`
+    and `required_for` name `lessons` entries; `required_for` requires a non-empty
+    `anticipates`, because a gate with nothing to gate on can never open or close
+19. `failure_modes` is well-formed — ids are shaped, `summary` is present, every
+    `signals` entry is one of `validator:<declared name>`, `token:<TOKEN>` or
+    `diagnosis`, and every declared mode is anticipated by some optional lesson
+20. `optional: true` in a lesson's frontmatter agrees with the `optional_lessons` list,
+    in both directions
+21. [instance] `STATE.md`'s `## Optional lessons` record is well-formed — known states
+    only, paths that are declared optional lessons, no duplicates, and `in-progress`
+    agreeing with `active_lesson` both ways
+
+Checks 18, 19 and 21 report `n/a` when the bundle uses none of this, which is the normal
+case and is **not** the same as passing. Check 20 runs on every bundle, because "no
+main-path lesson declares `optional`" is a claim worth checking whether or not the course
+has optional lessons.
+
+**What none of them check**, and it is the invariant that matters most: that the course
+can be finished by a learner who declines every offer (`bundle-format.md` §13). It is an
+authoring obligation, a green run does not certify it, and `LIMITATIONS` says so.
 
 Mode is explicit, never inferred: `validate_bundle.py <path>` checks a bundle,
 `validate_bundle.py --instance <path>` checks an instance. Inferring the mode from which
@@ -980,6 +1094,19 @@ caches a *bundle* that a learner has not chosen.
 6. **`tutorail-bundles` has no `catalog.yaml` of its own.** Adding one is what makes the
    repository installable with a single `catalogs.yaml` entry, and the maintenance skills
    should generate it. Not done here: that repository is out of this change's scope.
+7. **Whether an optional lesson ever needs to warn about one failure and be re-offered on
+   a different one.** `anticipates` currently serves both roles. Splitting it into a
+   second field is cheap later and unmotivated now; no course has asked for it.
+8. **What happens when a `required_for` gate blocks a lesson and the learner refuses the
+   lesson anyway.** The runner says the lesson cannot be completed and stops there. That
+   is honest and it is also a dead end, and no course has reached it yet.
+9. **An anticipated failure that persists after its lesson was taken** falls back to
+   ordinary coaching, which is the loop guard. Whether a course should be able to say
+   "this failure means the lesson did not land" is not decided, and answering it wrongly
+   reintroduces the loop.
+10. **`optional: true` duplicates the manifest.** It is deliberate redundancy of the same
+    class as `id` restating the slug, and it is checked, but it is still a second place
+    for one fact. Recorded because the argument will be had again.
 
 ---
 
@@ -1063,8 +1190,10 @@ real files. One repository cannot satisfy both without duplication.
 | `tutorail-bundles` repository | **done** — holds `rust-automaton-db` |
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
-| Validator (`scripts/validate_bundle.py`) | **done** — 17 bundle checks + 7 catalogue checks |
-| Validator test suite | **done** — 189 assertions; every check proven firing |
+| Validator (`scripts/validate_bundle.py`) | **done** — 21 bundle checks + 7 catalogue checks |
+| Validator test suite | **done** — 252 assertions; every check proven firing |
+| Optional lessons (`optional_lessons`, `failure_modes`) | **done** — 2026-09-12, §6; checks 18-21 |
+| Offer / defer / re-offer behaviour | **untested** — no harness exercises it; `TODO.md` |
 | Multi-catalogue support (`scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
 | Catalogue test suite (`tests/test_catalogs.py`) | **done** — 158 assertions; every failure kind proven firing |
 | Shared YAML reader (`scripts/yamlite.py`) | **done** |

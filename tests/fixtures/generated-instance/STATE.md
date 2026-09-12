@@ -35,3 +35,15 @@ Read the detour on borrowing, then return to the dispatch lesson.
 ## Deferred items
 
 None.
+
+## Generated lessons
+
+- `lessons.generated/lifetimes-and-borrows.md` — side-lesson, after
+  `lessons/00-hello-args.md` — pending
+- `lessons.generated/03-reading-files-draft/LESSON.md` — main-path-draft, after
+  `lessons/02-errors-and-tests.md` — pending
+
+## Optional lessons
+
+- `lessons/pure-core-and-edges.md` — deferred — offered at
+  `lessons/01-subcommands/LESSON.md` on 2026-09-11

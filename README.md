@@ -97,10 +97,29 @@ rust-automaton-db/
 ├── STATE.template.md    the shape a fresh learner starts in
 └── lessons/
     ├── 00-foundations.md
-    └── 08-automaton-machinery/
-        ├── LESSON.md            a lesson that ships material
-        └── worked-example.md
+    ├── 08-automaton-machinery/
+    │   ├── LESSON.md            a lesson that ships material
+    │   └── worked-example.md
+    └── interior-mutability.md   an optional lesson, offered rather than sequenced
 ```
+
+## Lessons the tutor offers instead of teaching
+
+Most lessons sit on the main path and every learner walks them in order. A course can also
+carry **optional lessons**, which the tutor offers at a point the author names.
+
+The useful case is a mistake the author can see coming. The tutor warns you in a sentence,
+offers the lesson, and lets you say "not now" — and then leaves it alone. If the failure it
+anticipated actually turns up later, the tutor recognises it, tells you this is the thing
+you set aside and where, and offers the lesson again. Take it, and you come back to repair
+the work that caused the failure.
+
+Deferring is a real answer, not a delay. The tutor does not raise an offer a second time
+without new evidence, and it never offers a lesson you have already taken. A course must
+still be finishable by someone who declines every offer.
+
+`optional_lessons` and `failure_modes` in `tutorial.yaml` are how an author expresses it;
+`bundle-format.md` sections 2 and 12 carry the contract and a worked example.
 
 An **instance** is your copy, inside your own project, and it is the only place progress
 exists:
@@ -194,6 +213,11 @@ python3 skills/tutorail/scripts/validate_bundle.py --instance path/to/project/tu
 The validator is an authoring tool. Learners never run it. It checks structure — that
 references resolve, that no progress leaked into the course, that every lesson is reachable.
 It says nothing about whether the course is any good.
+
+One thing it cannot check is worth knowing before you ship: a course carrying optional
+lessons must still be finishable by a learner who declines every offer. Nothing enforces
+that, and `bundle-format.md` section 13 explains why it is the invariant that keeps an
+older runner — which ignores the offers entirely — from teaching a broken course.
 
 ## Design
 

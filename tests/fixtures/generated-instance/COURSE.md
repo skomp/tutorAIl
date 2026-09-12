@@ -57,6 +57,21 @@ operator, `main` returning a `Result`, and exit statuses. Then write the tests t
 the counting rules to the letter — the empty file, the missing trailing newline, the
 double space.
 
+## Optional lessons
+
+Two lessons in this course sit off the main path. The tutor offers them at the point they
+become relevant and you decide whether to take them; declining one costs you nothing, and
+the course finishes either way.
+
+- **A pure core, and the edges around it.** Offered during lesson 01. Whether a counting
+  function opens its own file or is handed a string decides how much work lesson 02's
+  tests turn out to be. If you decline it and the tests later need a file on disk, the
+  tutor will connect the two and offer the lesson again.
+- **What a character is, and why `tally` counts neither.** Offered during lesson 02.
+  Enrichment, and nothing depends on it: the three answers Rust gives for "a character",
+  and why `DESIGN.md` leaves the `chars` command undecided.
+
+
 ## Checkpoints
 
 There are two points where the tool works from a terminal, and they are the ones worth
