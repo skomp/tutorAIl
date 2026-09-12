@@ -725,6 +725,75 @@ uses the manifest and should say so.
 `scope` is the exception: it exists only in the catalogue, has no manifest field, and is
 derived at registration time from the length of the `lessons` list.
 
+### 7.6 Presenting the choice — a selection, and leveled narrowing
+
+**Added 2026-09-12, from an observed session.** The learner asked "i want to learn
+something. which tutorials are available?" and the runner answered with a prose list of
+all three courses. Two defects, and they are separate:
+
+1. **The choice was prose, not a selection.** The learner had to read paragraphs and then
+   type a title back. Choosing from a list is the interaction; describing a list is not.
+2. **A broad request got a flat dump.** "I want to learn something" carries no subject, no
+   level and no budget, and the runner had all three facets in the catalogue it had just
+   loaded.
+
+**A choice is offered as a selection.** The candidates go in front of the learner as
+options to pick from, through whatever interactive selection the host provides, and as a
+numbered list when it has none. The rule is stated as an *action*, and the skill names no
+host-specific tool for it — the §10 host-neutrality rule, which is what lets one
+`SKILL.md` serve both hosts: on Claude Code the instruction resolves to the interactive
+picker, and on Codex it degrades to a numbered list instead of breaking.
+
+**Narrowing is triggered by the candidate count, never by the shape of the question.**
+"I want to learn WebGL" already lands on one entry; narrowing there interrogates someone
+who has already answered. Phrasing is a poor signal and a learner pays for a wrong guess
+with a round of questions; the count is exact and free.
+
+When more candidates remain than fit one comfortable question, the runner narrows **one
+facet at a time, in the order people choose a course: subject, then level, then time
+commitment (`scope`)**. That order matches how the decision is actually made — nobody
+picks a difficulty before a topic — and each answer makes the next question smaller.
+
+**Every facet's options are derived from the loaded catalogue, never hardcoded.** Subject
+options come from the candidates' `subjects` and `aliases`, level options from their
+distinct `level` values, time options from their distinct `scope` values. This is the
+same argument as §7.4's: the runner holds no subject knowledge. A new bundle in any
+catalogue therefore appears in the first question by itself, with no edit to the skill —
+and a facet on which every candidate agrees is skipped, because it separates nothing.
+
+Three guards, all of which matter more than the narrowing itself:
+
+- **Stop at four or fewer candidates**, then present the real choice with the metadata a
+  learner decides on — title, description, level, scope, workspace kind, and why it
+  matched. Never the lesson list: §7.4's provider boundary is unchanged, and nothing
+  under a bundle path is opened before the learner chooses.
+- **Never narrow to zero.** A filter that would empty the list is not applied; the runner
+  says that no course carries that combination and keeps the previous set. This is §7.3's
+  honesty rule in a second place — "nothing matched" is as false after a self-inflicted
+  empty filter as it is when a catalogue failed to refresh.
+- **Always offer an escape hatch** — an option showing everything, at any point, and a
+  free-text answer honoured as written. A learner who knows what they want must never be
+  walked down a tree to reach it.
+
+Narrowing shortens a list and never chooses from it. Every §7.4 rule survives intact: a
+single survivor is offered and never auto-started, more than one plausible match is
+presented rather than silently resolved, each candidate says why it matched, and
+weak-but-valid alternatives are ranked lower rather than dropped.
+
+`catalogs.py discover --json` already returns every field this needs — `subjects`,
+`aliases`, `level`, `scope`, `workspace_kind`, `title`, `description` — so the facets are
+a judgement over data the runner already holds, and the script did not change.
+
+**Where it is written.** The normative procedure is `catalogue-format.md` §9, because
+that is the document a discovery loads; `runner-protocol.md` §1 carries the rule for a
+mid-course "what else is available?" and points at it, and `SKILL.md` keeps one paragraph
+as a control plane. Putting the procedure in `runner-protocol.md` alone would hide it
+from the only phase that needs it, since that document is loaded before the first
+teaching task — after the choice has been made.
+
+---
+
+
 ---
 
 

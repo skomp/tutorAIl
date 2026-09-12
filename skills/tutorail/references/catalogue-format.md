@@ -279,6 +279,63 @@ Rules, all of which matter more than ranking quality:
 
 ## 9. Presenting the choice
 
+### 9.1 A choice is a selection, not a paragraph
+
+> **Offer the candidates as a list the learner picks from.**
+
+Use whatever interactive selection this host provides for a question with a fixed set of
+answers, so the learner picks an option instead of retyping a title. When the host has no
+such mechanism, number the candidates and ask for a number. Both of those are a
+selection. Three paragraphs describing three courses and ending "which would you like?"
+is not one, and it is the failure this section exists to prevent.
+
+This holds for every question a discovery asks, not only the last one. The facet
+questions in 9.2 are selections as well.
+
+### 9.2 Narrow only when there are too many candidates
+
+**The trigger is the number of candidates, never the shape of the request.**
+
+- **Four or fewer candidates — present them now.** "I want to learn WebGL" lands on one
+  entry. Asking that learner which subject interests them interrogates someone who has
+  already answered.
+- **More than four — narrow one facet at a time**, in the order people choose a course:
+  **subject, then level, then time commitment.** Ask one facet, filter the candidates,
+  then count again. Stop as soon as four or fewer remain and present the real choice.
+
+**Every facet's options are built from the candidates in hand, never from a fixed list.**
+
+| Facet | Built from | Offered as |
+|---|---|---|
+| subject | the `subjects` and `aliases` of the current candidates, gathered into the few families they fall into | a selection of those families |
+| level | the distinct `level` values of the current candidates | a selection of those values |
+| time commitment | the distinct `scope` values of the current candidates | a selection of those values, in the learner's own terms — "a few hours" against "months of work" |
+
+A facet on which every candidate agrees tells the learner nothing: skip it and go to the
+next. A facet with more options than fit one comfortable question is **grouped, not
+truncated** — a subject family covering three entries is one option, whereas leaving the
+fourth entry out of the question hides it.
+
+Because the options come from the catalogue just loaded, a new bundle's subject appears
+in the first question on its own, and this document never has to list one.
+
+### 9.3 Never narrow to zero, and always leave a way out
+
+- **A filter that would empty the list is not applied.** Say that no course carries that
+  combination, keep the previous set, and offer another facet or the whole list. This is
+  the honesty rule of section 7 in a second place: "nothing matched" is a false statement
+  when the truth is "your last two answers do not occur together".
+- **Every question carries an escape hatch** — an option that shows everything on offer,
+  available at any point — and an answer that is none of the offered options is honoured
+  as the learner wrote it. Someone who already knows what they want must never be walked
+  down a tree to reach it.
+- **Narrowing never chooses.** It shortens a list; the learner still chooses from what
+  survives. Section 8 holds throughout: a single survivor is offered and never
+  auto-started, weak-but-valid alternatives are ranked lower rather than dropped, and
+  every candidate still says why it matched.
+
+### 9.4 What each candidate shows
+
 For each candidate, show:
 
 - `title`
@@ -300,11 +357,15 @@ Do **not** show:
   indistinguishable;
 - a guess at content the entry does not state.
 
-Then ask the learner to choose. Wait for an answer. When they have chosen, run
-`catalogs.py resolve <id>` to get the bundle directory, then load `state-lifecycle.md` and
-materialize; that is the first moment anything under a bundle path may be opened. When
-`resolve` reports that the bundle is not there, report it and stop — a cached catalogue can
-name a bundle the last successful fetch did not carry.
+A selection whose options are titles alone is not enough: the learner decides on this
+metadata, so it belongs beside the options, in the selection or in the sentence that
+introduces it.
+
+Then wait for an answer. When the learner has chosen, run `catalogs.py resolve <id>` to
+get the bundle directory, then load `state-lifecycle.md` and materialize; that is the
+first moment anything under a bundle path may be opened. When `resolve` reports that the
+bundle is not there, report it and stop — a cached catalogue can name a bundle the last
+successful fetch did not carry.
 
 ---
 
@@ -346,6 +407,16 @@ where every bundle must travel with the catalogue.
 - **Peeking into a bundle to improve a recommendation.** It breaks the provider boundary
   and is the change that makes a remote catalogue impossible.
 - **Auto-starting a single match.** The learner chooses.
+- **Presenting a choice as prose.** Candidates are options to pick from, not paragraphs
+  to be read and then typed back. Section 9.1.
+- **Narrowing a request that is already narrow.** The count decides, not the wording. One
+  candidate is presented, not questioned. Section 9.2.
+- **Offering a facet option this catalogue does not carry.** Every option comes from the
+  candidates in hand. Section 9.2.
+- **Narrowing to an empty list.** A filter that would empty the candidates is not
+  applied; say so and keep the previous set. Section 9.3.
+- **Walking a learner down a tree with no way out.** Every question offers everything.
+  Section 9.3.
 - **Refreshing per turn, or during a resume.** Once, when discovery starts.
 - **Letting one failed catalogue fail the whole discovery.** Serve what answered.
 - **Collapsing the failure kinds into one message.** Three problems, three repairs.

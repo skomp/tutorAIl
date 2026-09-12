@@ -78,6 +78,15 @@ failed, by kind — an unreachable host, a repository you have no access to, and
 repository with no catalogue file are three problems with three repairs. One failed
 catalogue never fails discovery.
 
+Present what you find as a **selection, not as prose**. Offer the candidates as options
+the learner picks from, using whatever interactive selection this host provides, and fall
+back to a numbered list when it has none. When more candidates remain than fit a
+comfortable choice, narrow one facet at a time — subject, then level, then time
+commitment — with each facet's options built from the catalogue you just loaded, never
+from a fixed list. Stop at four or fewer and present the real choice. Never narrow to
+zero, and always leave an option that shows everything. `references/catalogue-format.md`
+section 9 carries the procedure.
+
 The rule that matters most is unchanged: read catalogue metadata only. Do not open
 anything under a candidate's bundle path until the learner has chosen.
 

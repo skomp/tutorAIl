@@ -67,6 +67,15 @@ The one exception is a learner who, mid-course, asks what else is available. Tha
 discovery request inside a teaching session: refresh once, answer, and go back to the
 lesson.
 
+A discovery answers with a **selection**, never with prose. Offer the candidates as
+options the learner picks from, through whatever interactive selection this host
+provides, and number them when it has none. When more candidates remain than fit one
+comfortable question, narrow one facet at a time — subject, then level, then time
+commitment — building each facet's options from the catalogue just loaded, stopping at
+four or fewer candidates, never narrowing to zero, and always leaving an option that
+shows everything. `catalogue-format.md` section 9 is normative and carries the procedure;
+it is the document a discovery loads, so that is where the detail lives.
+
 ---
 
 ## 2. One turn
@@ -866,6 +875,12 @@ the cheaper mistake than writing a new one.
 - **Editing the manifest's `lessons` list.** It is the authored course. A generated lesson
   is an overlay; the list stays byte-identical to the bundle's.
 - **Refreshing a catalogue to teach a lesson.** A resume reads no catalogue. Section 1.
+- **Answering "what else is available?" with a paragraph.** A mid-course discovery is a
+  selection like any other, and it ends by going back to the lesson.
+  `catalogue-format.md` section 9.
+- **Questioning a learner who already named the course.** Narrowing is triggered by the
+  number of candidates, not by how broad the sentence sounded. `catalogue-format.md`
+  section 9.2.
 - **Reporting a catalogue that failed to refresh as though it simply held nothing.** A
   host that cannot be reached, a repository the learner has no access to, and a
   repository with no catalogue file at that path are three problems with three repairs,

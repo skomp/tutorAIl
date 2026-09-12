@@ -687,14 +687,14 @@ sections, same material rules, same treatment once it is active. Three things di
   lesson file that does not say it is optional reads as main path to everyone who opens
   it alone, including you, six months later. A main-path lesson MUST NOT declare it;
 - **do not give it a number prefix.** The prefix is a convention that follows the main
-  path's order, and an optional lesson has no position in that order. Write
+  path's order, and an optional lesson has no position in that order. Name it
   `lessons/event-time-and-watermarks.md`, not `lessons/04b-event-time.md`. This is the
   same reasoning that keeps a number off a generated lesson (section 8).
 
 Its completion conditions bind exactly like any other lesson's. *Optional* describes how
 the learner arrives at the lesson, never how carefully it is taught or how it is left.
 
-Write it so it stands alone. It is reached from at least one point you named and possibly
+Compose it so it stands alone. It is reached from at least one point you named and possibly
 from a failure several lessons later, so it cannot assume the learner arrived with a
 particular task half-finished. State what it needs in *Prerequisites*, the same as any
 lesson, and keep it short — a detour that costs more than the lesson it interrupts is a

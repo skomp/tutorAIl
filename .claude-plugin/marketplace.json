@@ -8,7 +8,7 @@
     {
       "name": "tutorail",
       "source": "./",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "description": "Runs interactive, project-driven tutorials inside a coding agent. Discovers courses from a catalogue, keeps progress in the learner's own repository, and loads one lesson at a time.",
       "author": {
         "name": "skomp",

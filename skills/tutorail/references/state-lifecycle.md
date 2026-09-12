@@ -596,7 +596,7 @@ offered?* — would be answered in noise.
 The four that are written:
 
 - **`offered`** — you asked and have no answer yet. It normally lives for part of one turn.
-  Write it when the turn ends before the learner answers, so a cold session knows a
+  Record it when the turn ends before the learner answers, so a cold session knows a
   question is outstanding rather than asking it a second time.
 - **`deferred`** — the learner said not now. The clause MUST name the lesson the offer was
   made at and the date. Both the anti-nag rule and the re-offer depend on knowing that the
