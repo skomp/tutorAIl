@@ -92,7 +92,7 @@ offered (section 9.1).
 | Last completed task | the most recent task that was validated | anything still in progress |
 | Concepts demonstrated | concepts the learner has shown they can use | concepts you explained |
 | Decisions made in discussion | choices the learner made that later lessons depend on | decisions about the subject that belong in `DESIGN.md` |
-| Known intentional or incomplete state | deliberate gaps, stubs, commented-out code | bugs the learner has not seen yet |
+| Known intentional or incomplete state | deliberate gaps, stubs, commented-out code; and the one entry that is about the course rather than the code, an uncertified bundle the learner chose to start anyway (section 3.1) | bugs the learner has not seen yet |
 | Accepted warnings | the YAML list in section 6, with expiries | warnings nobody has accepted |
 | Next task | the single task to ask for next | a plan for the rest of the lesson |
 | Deferred items | work explicitly postponed, with why | vague intentions |
@@ -144,9 +144,13 @@ Steps, in order:
    (`local:` plus the path, and for future provider types the equivalent locator).
    This block is **provenance only**. Nothing in the teaching loop reads it. It exists so
    a learner, or a future update mechanism, can tell where the instance came from. It
-   never appears in a bundle.
+   never appears in a bundle. Section 3.1 adds three validation keys to this same
+   block; those keys are the one part of the stamp anything ever reads, and what
+   reads them is a session deciding whether this instance was ever checked — never a
+   teaching turn.
 6. **Verify the invariant**, by looking: the instance has `STATE.md` and does not have
-   `STATE.template.md`. Say that you checked.
+   `STATE.template.md`. Say that you checked. **Then validate the instance, before
+   step 7 and before anything is placed outside `tutorial/`: section 3.1.**
 7. **Report what was created** — the instance path, the course title, the first lesson.
 8. **Place what the manifest supplies, then report it.** When `tutorial.yaml` declares
    `supplies` at the top level, place those entries now: the instance exists, no lesson
@@ -198,6 +202,112 @@ Steps, in order:
    `runner-protocol.md` section 11 has what it looks like and what the three answers are;
    section 10 of this document has the stamp it leaves. A course that declares no
    `assumes` skips this step entirely and leaves no stamp. Then start teaching.
+
+### 3.1 Validating the instance, between step 6 and step 7
+
+The runner checks a course before it teaches from it, and this is the moment: the instance
+exists, it is stamped, no file has been placed outside `tutorial/`, and no learner has
+started. A defect found here costs a conversation. The same defect found at lesson 7 costs
+a learner their place in a course they cannot finish.
+
+Run `scripts/validate_bundle.py --instance <the instance directory>`. The script path is
+relative to this skill's directory, the same way `scripts/catalogs.py` is reached
+(`catalogue-format.md` section 4); the argument is the `tutorial/` directory step 1
+created. It needs Python 3 and nothing else, it reads only the instance, and it contacts
+nothing.
+
+The position in the sequence is fixed at both ends. The run comes **after** step 5, because
+instance mode reports a finding against check 7 when the `instance:` stamp is absent — an
+earlier run would fail a correct bundle for a reason the runner created. It comes **before**
+step 8, because step 8 writes files into the learner's workspace outside `tutorial/`, and a
+course that cannot be certified must not scatter files there first.
+
+#### The four outcomes
+
+| Exit | What it means | What the runner does |
+|---|---|---|
+| 0, no warnings | every applicable check ran and found nothing | record the pass below, then go on to step 7 |
+| 0, with warnings | the same result, plus notes addressed to the course author | start the course. A warning never blocks one |
+| 1 | findings — the bundle is defective | do not start the course. Report it: `runner-protocol.md` section 13.3 |
+| 3 | indeterminate — no findings, and some check could not run | not a pass. Stop before the first task and say what was not certified: `runner-protocol.md` section 13.3 |
+
+Exit 2 is a fifth case and it is the runner's, not the bundle's: a usage or I/O error, a
+wrong path, a directory that cannot be opened. Correct the invocation and run it again.
+Never report a 2 to the learner as a defect in their course. When it persists, the
+validator did not run, which leaves the course uncertified — handle that as exit 3.
+
+**Findings stop the course, and warnings never do.** The validator keeps the two apart on
+purpose: warnings live in a list the exit code cannot consult, so a quality signal can
+never reject a bundle, however many of them a run produces. Do not add that coupling back
+by counting warnings and stopping at some number of them.
+
+#### What happens to a warning
+
+A warning is addressed to the person who wrote the course, not to the person taking it.
+Checks 23 and 25 are the two that raise them, and both are about vocabulary — an alias that
+collides with a concept id, a `covers` concept that no phrase in `COURSE.md` resembles.
+Neither one tells a learner anything they can act on, and neither one affects a single
+lesson.
+
+So: **do not narrate warnings at materialization**, and do not discard them either. Record
+how many there were, in the stamp, and surface them verbatim at the three moments where
+someone can use them:
+
+- the learner asks about the state of the course, or about this check;
+- the learner says they nearly missed this course, or could not find it by the words they
+  used — check 25 and check 23's alias collisions are precisely that defect, and a warning
+  that explains a learner's own experience is worth reading out;
+- an author asks, in a session that is fixing the bundle rather than teaching it.
+
+Copying the text into the instance is unnecessary, and that is the reason the count is
+enough: the instance is what produced the warnings, the check is deterministic, and
+re-running it on the same directory prints them word for word whenever they are wanted.
+
+#### Recording the outcome
+
+Extend step 5's block with the validation keys:
+
+```yaml
+instance:
+  materialized_from: local:../tutorail-bundles/rust-automaton-db
+  materialized_at: 2026-09-11
+  runner_version: 1
+  validated: 2026-09-12
+  validation: pass            # pass | not-certified
+  validation_warnings: 2      # omit the key when there were none
+  validation_unchecked: [1]   # only with not-certified: the checks that did not run
+```
+
+`validation: not-certified` is written in one case only — an exit 3 the learner decided to
+start on anyway (section 13.2 of `runner-protocol.md`). **A run that produced findings
+leaves no record at all.** That absence is deliberate and it is what closes the hole: an
+instance whose stamp carries no `validated` key has never been certified, so the next
+session that opens it runs the check before teaching rather than assuming a check that
+never happened.
+
+Also write one line into `STATE.md` under *Known intentional or incomplete state* when the
+outcome was `not-certified`, naming the checks that did not run and the reason the
+validator gave. It is the one entry in that section that describes the course rather than
+the learner's code, and it earns its place: when a defect surfaces at lesson 7, the
+instance itself says why nothing caught it. A pass writes nothing into `STATE.md`.
+
+#### When the course does not start
+
+For exit 1, and for an exit 3 the learner chose not to start on:
+
+- leave `tutorial/` where it is. It holds no progress, no lesson has opened, and removing
+  a directory is not the runner's call — offer it, and do it only if the learner asks;
+- place nothing. Step 8 never runs, so the learner's workspace outside `tutorial/` is
+  exactly as it was;
+- write nothing into `STATE.md`, and leave `status` as the template set it;
+- do not repair the instance, do not skip the lesson a finding names, and do not draft a
+  replacement for it. Section 8 permits writing a lesson when the course works and the
+  learner needs something it does not cover; it permits nothing when the course is broken.
+
+A repair belongs in the bundle, not in the instance. An instance patched into shape leaves
+the defect in the course everyone else takes, and leaves this learner taking a course
+nobody else is taking. When the bundle is local and the learner's own, the way forward is
+to correct it there and materialize again — which is this section from step 1.
 
 ### Workspace kinds
 

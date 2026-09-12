@@ -3,7 +3,8 @@
 **Status:** normative for the runner. Load this before the first task of a teaching
 session, when validating, when a lesson's completion conditions look met, when deciding
 whether to offer or re-offer an optional lesson, when a course finishes or the learner asks
-what comes after it, or when you are unsure whether an edit is yours to make.
+what comes after it, when a newly materialized instance does not pass validation, or when
+you are unsure whether an edit is yours to make.
 
 This document assumes an active instance already exists at `tutorial/` in the learner's
 workspace. Materialization is in `state-lifecycle.md`. Finding a tutorial in the first
@@ -929,6 +930,13 @@ the cheaper mistake than writing a new one.
   a pointer to a course that exists somewhere, not a dependency. Section 12.4.
 - **Copying a finished course's workspace into a follow-up.** Relationship metadata says
   nothing about source code. Section 12.5.
+- **Teaching from an instance nobody validated.** Materialization runs the validator once,
+  on the instance it just created, before the first task. An instance whose stamp carries
+  no `validated` key has never been checked, and the first defect in it will be found by
+  the learner. Section 13.
+- **Treating an INDETERMINATE validator run as a pass.** "Found nothing" and "checked
+  everything" are different sentences, and exit code 3 exists to keep them apart.
+  Section 13.2.
 
 ---
 
@@ -1335,3 +1343,142 @@ never overwrite or mutate an existing project.
   as a statement about source code. Section 12.5.
 - **Asking whether the earlier course was completed** before starting a follow-up. Section
   11.5, and it is the same refusal.
+---
+
+## 13. Validating the instance
+
+The tutor never improvises around a broken bundle (section 9). That refusal is only worth
+having if the runner finds the defect before a learner does, and the moment to find it is
+materialization: the instance exists, no file has been placed outside `tutorial/`, and
+nobody has started. `state-lifecycle.md` section 3.1 is the procedure — where in the
+materialization sequence the run sits, what is recorded, and why. This section is the
+policy: when the check runs afterwards, what each outcome means, and what the learner is
+told.
+
+### 13.1 When the validator runs, and when it does not
+
+**A teaching turn does not run it.** Section 1 sets the cost of a resume — the manifest,
+`STATE.md`, one lesson, no host contacted, nothing fetched — and a validator on every turn
+breaks that rule to re-check a directory that almost never changes. The files the checks
+read are the bundle's, and the bundle's copy in an instance is written once.
+
+**Never re-checking is the opposite mistake**, because an instance whose files were edited
+would never be looked at again. So the check runs at four further moments, each one a
+moment where something changed or something is already wrong:
+
+1. **The stamp carries no `validated` key.** The instance was materialized by a runner
+   older than this check, or materialization stopped before reaching it. Validate before
+   the first task of that session and record the outcome, exactly as at materialization.
+2. **Materialization is being completed after an interruption** — the instance still holds
+   `STATE.template.md`. The validation step is part of the sequence being completed, not an
+   extra.
+3. **A structural defect surfaces during teaching** — a lesson file the manifest lists and
+   the instance does not have, a validator a lesson names and the manifest does not
+   declare, a `design_refs` anchor that is not in `DESIGN.md`. Run the validator once and
+   report the whole list. A defect rarely travels alone, and one run answers "what else is
+   wrong in here" for no context at all.
+4. **Somebody asks for it**, or the learner says they changed something inside `tutorial/`.
+
+A `validated` key that is present is not re-checked on a resume. It records that the check
+ran on the day it says; it is not a claim that nothing has changed since. Moment 3 is what
+covers a changed instance, and it covers it at the point where the change actually matters.
+
+### 13.2 The outcomes, and the one choice that is the learner's
+
+`state-lifecycle.md` section 3.1 carries the outcome table. The policy in three lines:
+
+- **A finding stops the course from starting.** The bundle is defective and the tutor does
+  not teach from it.
+- **A warning never stops anything.** The validator keeps warnings in a list the exit code
+  cannot consult, precisely so a quality signal can never reject a bundle. Do not add that
+  coupling back by counting them.
+- **Indeterminate is not a pass.**
+
+Exit 3 says the validator found nothing wrong **and could not certify that nothing is
+wrong**. A `DESIGN.md` that is not valid UTF-8 reaches it that way: check 1 reports NOT
+RUN, and no `design_refs` entry in the course was resolved at all. Calling that a pass is
+exactly the false oracle the exit code exists to prevent — the check that would have seen
+the defect is the check that did not run, so a green verdict built on it certifies nothing,
+and the dangling anchor surfaces at lesson 7 as if no validator had ever existed.
+
+So an indeterminate run does not start a course on the runner's own judgement. It is also
+not a finding, and telling a learner their course is broken would be false. Stop before the
+first task, report what did not run (13.3), and let the learner decide. When they choose to
+start anyway:
+
+- say in the same breath which checks are uncertified and what each one would have proved;
+- record `validation: not-certified` with those check numbers in the stamp, and one line in
+  `STATE.md` under *Known intentional or incomplete state* (`state-lifecycle.md` section
+  3.1);
+- start, and do not raise it again. A session that resumes an instance carrying that record
+  does not re-ask a question the learner has already answered.
+
+Never present an indeterminate run as "probably fine", and never let the checks that did
+run stand in for the one that did not.
+
+### 13.3 What the learner is told
+
+A learner did not write the bundle and usually cannot repair it. "The course is broken"
+gives them nothing to do; a pasted validator run gives them a check table, a limitations
+essay and no sentence addressed to them. Five things, in this order:
+
+1. **Which course, and where it came from.** The title and `id`, the `materialized_from`
+   locator in the stamp, and the catalogue entry that offered it while discovery is still
+   in hand. The catalogue is how they reach whoever can fix this.
+2. **What the validator said, in its own words** — one line per finding: the check number,
+   the file, the message. Do not paraphrase. The message names the anchor, the path or the
+   field that is wrong, and that is the only part an author can act on. Do not include the
+   check table, and do not include the limitations text printed after the verdict.
+3. **That it is the bundle, not them.** The course as published is defective. Nothing in
+   their workspace caused it, and nothing they write will fix it.
+4. **What they can actually do**, offered as choices rather than instructions: take a
+   different course — the candidates from discovery are still in hand and offering them
+   costs no file open; tell whoever publishes this one, naming the catalogue and the source
+   it resolved to; or, when the bundle is local and theirs, correct it **in the bundle** and
+   start again. Correcting the instance is not on the list, and 13.5 says why.
+5. **Where their workspace stands.** `tutorial/` exists and holds no progress, nothing was
+   placed outside it, and it can be removed if they want it gone.
+
+For an indeterminate run, items 2 and 3 change and the other three are identical: name the
+checks that did not run with the reason the validator printed for each, say what those
+checks would have proved, and say plainly that nothing was found wrong and nothing was
+certified either. Then the choice in 13.2.
+
+This is a report, not a lesson. The findings go in verbatim; everything else is a sentence.
+
+### 13.4 A defect found while a course is already running
+
+A running course is not the same situation as a course about to start, and the rule is not
+the same. The learner has work in the workspace and a place in the course. Stopping that
+protects nobody and loses both.
+
+Report the finding as 13.3 describes, refuse to improvise around it exactly as section 9
+requires, and go on teaching whatever the defect does not touch. A dangling `design_refs`
+anchor costs one lesson its design reading; a lesson file that is missing costs that lesson.
+Neither one costs the learner the lesson they are standing in, unless the finding names it.
+
+When the defect does block the next step, say so plainly and say which repair unblocks it —
+a corrected bundle and a fresh instance, or the author's next release. Then update the
+stamp's validation record with the date and outcome of that run.
+
+### 13.5 Failure modes to refuse
+
+- **Teaching from an instance nobody validated.** Section 13.1.
+- **Treating an indeterminate run as a pass**, or deciding on the learner's behalf to start
+  on an uncertified course. Section 13.2.
+- **Stopping a course over warnings**, or counting warnings until they add up to a failure.
+  The exit code cannot see them, and neither should the decision.
+- **Narrating warnings to a learner as defects.** They are addressed to the author, they
+  name nothing the learner can act on, and reading them out at the start of a course is
+  noise. Discarding them is the opposite mistake: the count is recorded and a re-run prints
+  them verbatim. `state-lifecycle.md` section 3.1.
+- **Paraphrasing a finding.** "Something is wrong with lesson 3" is not something an author
+  can act on; `[check 1] lessons/03-first-refactor.md: design_refs names 'state-merge',
+  which is not an anchor in DESIGN.md` is.
+- **Repairing the instance so the finding goes away.** The course everyone else takes still
+  has the defect, and this learner now takes a course nobody else is taking. Repairs belong
+  in the bundle.
+- **Reporting an exit 2 as a defect in the learner's course.** A usage or I/O error is the
+  runner's own mistake; correct the invocation. When it persists, the course is uncertified
+  and 13.2 applies.
+- **Running the validator every turn.** Section 13.1, and the cost rule in section 1.

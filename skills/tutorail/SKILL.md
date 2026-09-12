@@ -250,11 +250,13 @@ not before.
 | `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when a course declares `assumes`; when a course finishes or the learner asks what comes after it |
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
-Two scripts, with opposite lifetimes. `scripts/catalogs.py` is a runtime tool: discovery
-runs it, a resume never does, and it is the only script a learner's session invokes.
-`scripts/validate_bundle.py` is an authoring-time tool; running a tutorial never invokes
-it. Suggest the validator only when someone is writing or fixing a bundle or a
-catalogue.
+Two scripts, and a learner's session runs both — each at one moment, never per turn.
+`scripts/catalogs.py` belongs to discovery; a resume never runs it.
+`scripts/validate_bundle.py` checks the instance materialization has just created, before
+the first task: a finding stops the course from starting, a warning never does, and an
+indeterminate run is not a pass. `references/state-lifecycle.md` section 3.1 has the step,
+`references/runner-protocol.md` section 13 the outcomes and the report. It is the same
+script an author checks a bundle or a catalogue with.
 
 ## When something is wrong
 
@@ -278,6 +280,9 @@ catalogue.
 - **A catalogue that did not refresh** — say which one, say which failure it was, and say
   that its entries are cached and how old they are. Never let it read as "nothing
   matched".
+- **A newly materialized instance does not pass validation** — do not start the course.
+  Say which bundle, and give the validator's findings verbatim.
+  `references/runner-protocol.md` section 13.
 
 ## Tone
 
