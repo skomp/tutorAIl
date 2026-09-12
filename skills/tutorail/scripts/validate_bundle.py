@@ -2490,15 +2490,38 @@ def check_supplies(
                     f"a supplies entry is missing required key {key!r}",
                 )
 
-            if "describe" in entry and not _is_text(entry.get("describe")):
-                report.add(
-                    22,
-                    where,
-                    "a supplies entry's 'describe' must be a non-empty "
-                    "string naming what these files are, in the author's "
-                    "words - it is the sentence the runner says to the "
-                    "learner",
-                )
+            if "describe" in entry:
+                describe = entry.get("describe")
+                if not _is_text(describe):
+                    report.add(
+                        22,
+                        where,
+                        "a supplies entry's 'describe' must be a non-empty "
+                        "string naming what these files are, in the author's "
+                        "words - it is the sentence the runner says to the "
+                        "learner",
+                    )
+                elif "\n" in describe.strip() or "\r" in describe.strip():
+                    # bundle-format.md puts "one non-empty LINE" in the MUST
+                    # column, and the runner SPEAKS this string to the
+                    # learner, so an embedded newline is a defect in
+                    # learner-facing output, not a style preference.
+                    #
+                    # The test is on the STRIPPED value deliberately. A
+                    # folded scalar ('describe: >') is the author writing one
+                    # sentence across several source lines: yamlite folds it
+                    # to a single line and leaves one trailing newline, which
+                    # must NOT be a finding. A literal scalar ('describe: |')
+                    # keeps its newlines INSIDE the value, which must.
+                    report.add(
+                        22,
+                        where,
+                        "a supplies entry's 'describe' must be ONE line: the "
+                        "runner says it to the learner as a sentence, and an "
+                        "embedded newline breaks that in the learner's "
+                        "output. Use a folded scalar ('describe: >') to wrap "
+                        "one sentence across source lines, or shorten it",
+                    )
 
             if "from" in entry:
                 from_ = entry.get("from")

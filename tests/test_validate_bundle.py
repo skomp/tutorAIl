@@ -1449,6 +1449,49 @@ supplies:
 """)
 
 
+def m_supplies_describe_is_multiline(root: Path) -> None:
+    """A literal scalar keeps its newlines INSIDE the value.
+
+    bundle-format.md puts "one non-empty line" in the MUST column, and the
+    runner SPEAKS this string to the learner, so an embedded newline is a
+    defect in learner-facing output. Paired with
+    m_supplies_describe_is_folded below, which is the control: without it
+    this case is equally consistent with a check that rejects every
+    'describe' written across more than one source line.
+    """
+    (root / "supplies").mkdir()
+    (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: supplies/Cargo.toml
+    to: Cargo.toml
+    describe: |
+      the manifest this course assumes
+      and a second line the runner would have to speak
+""")
+
+
+def m_supplies_describe_is_folded(root: Path) -> None:
+    """The control for m_supplies_describe_is_multiline: one sentence
+    written across two source lines with a FOLDED scalar.
+
+    yamlite folds this to a single line with one trailing newline. It is
+    exactly what an author with a long 'describe' should write, it is what
+    the manifest's own 'description' and 'offer_because' fields use, and it
+    must be silent. A newline test that forgot to strip would fire here.
+    """
+    (root / "supplies").mkdir()
+    (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: supplies/Cargo.toml
+    to: Cargo.toml
+    describe: >
+      the manifest this course assumes, described at enough length
+      to need a second source line
+""")
+
+
 def m_supplies_unknown_entry_key(root: Path) -> None:
     """A complete, otherwise-valid entry plus one extra key - breaking
     exactly the one thing this case is meant to prove, not also 'describe
@@ -2063,6 +2106,14 @@ CASES: list[Case] = [
          m_supplies_to_is_inside_the_instance, "'tutorial/' is the instance"),
     Case("22: describe is empty", 22, "automaton", "bundle",
          m_supplies_describe_is_empty, "'describe' must be a non-empty"),
+    Case("22: describe carries an embedded newline", 22, "automaton", "bundle",
+         m_supplies_describe_is_multiline, "'describe' must be ONE line"),
+    # ---- the control for the case above: a FOLDED 'describe' is one line
+    # once yamlite has folded it, and must not be reported. Without this,
+    # the case above is equally consistent with a check that rejects any
+    # 'describe' spanning two source lines.
+    Case("22: a folded multi-source-line describe is NOT reported", 22,
+         "automaton", "bundle", m_supplies_describe_is_folded, kind="silent"),
     Case("22: an entry carries an unknown key", 22, "automaton", "bundle",
          m_supplies_unknown_entry_key, "unknown key 'description'"),
     Case("22: a lesson that is not listed declares supplies", 22, "automaton",
