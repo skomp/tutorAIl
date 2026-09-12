@@ -1128,25 +1128,38 @@ def names_file(text: str, rel_in_folder: str) -> bool:
     return False
 
 
-def check_material_reachable(lessons: list[Lesson], report: Report) -> None:
+def check_material_reachable(
+    root: Path, manifest: Any, lessons: list[Lesson], report: Report
+) -> None:
     """Check 6 - forward direction only.
 
     The reverse check ("LESSON.md names a file that does not exist") was
     implemented and deleted: it cannot tell a material reference from an
     ordinary prose mention of DESIGN.md, src/lib.rs or Cargo.toml. Do not
     reintroduce it.
+
+    A file is exempt from the "named in LESSON.md" rule when some declared
+    `supplies:` entry - from the manifest OR from any lesson, not only the
+    one that owns the folder - covers it. A supplies entry says more than a
+    prose mention does: it states what the file is and where it goes, so a
+    tutor already knows it exists without LESSON.md repeating that. This is
+    an EXEMPTION, not a loosening - a file no supplies entry covers must
+    still be named, exactly as before.
     """
     foldered = [lesson for lesson in lessons if lesson.folder is not None]
     if not foldered:
         report.na(6, "no foldered lessons")
         return
+    supplies_entries = [entry for _, entry in collect_supplies(root, manifest, lessons)]
     checked = 0
+    supplied = 0
     for lesson in foldered:
         text = read_text(lesson.path)
         if text is None:
             continue
         folder = lesson.folder
         assert folder is not None
+        folder_rel = folder.relative_to(root).as_posix()
         for path in sorted(folder.rglob("*")):
             if not path.is_file():
                 continue
@@ -1156,6 +1169,10 @@ def check_material_reachable(lessons: list[Lesson], report: Report) -> None:
             if any(part.startswith(".") for part in path.relative_to(folder).parts):
                 continue
             checked += 1
+            bundle_rel = f"{folder_rel}/{rel_in_folder}"
+            if supplies_covers(supplies_entries, bundle_rel):
+                supplied += 1
+                continue
             if not names_file(text, rel_in_folder):
                 report.add(
                     6,
@@ -1166,8 +1183,8 @@ def check_material_reachable(lessons: list[Lesson], report: Report) -> None:
                 )
     report.ran(
         6,
-        f"{checked} material files in {len(foldered)} lesson folders; "
-        f"names only, not intent",
+        f"{checked} material files in {len(foldered)} lesson folders "
+        f"({supplied} cleared by a supplies declaration); names only, not intent",
     )
 
 
@@ -2670,7 +2687,7 @@ def validate(target: Path, mode: str) -> Report:
         report,
         ("lessons", GENERATED_DIR) if mode == "instance" else ("lessons",),
     )
-    check_material_reachable(all_lessons, report)
+    check_material_reachable(target, manifest_dict, all_lessons, report)
     check_manifest_lists_no_generated(manifest_dict, report)
     # A lesson-scope supplies entry is legible only if its lesson is
     # reachable at all - through 'lessons' or 'optional_lessons', the same

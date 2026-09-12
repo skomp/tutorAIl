@@ -443,6 +443,31 @@ def m_material_properly_named(root: Path) -> None:
     )
 
 
+def m_supplied_material_and_an_uncovered_sibling(root: Path) -> None:
+    """Check 6 must ignore the supplied file and still catch the other one.
+
+    Both halves live in one fixture on purpose: a mutator that only added
+    the covered file would pass against a check 6 that had been disabled
+    altogether. `model/Duck.glb` is covered by the `supplies:` entry added
+    to LESSON.md's frontmatter; `stray.txt`, alongside it in the same
+    folder, is not covered by anything and must still be reported.
+    """
+    folder = root / "lessons" / "01-subcommands"
+    (folder / "model").mkdir()
+    (folder / "model" / "Duck.glb").write_bytes(b"glTF\x02\x00\x00\x00")
+    (folder / "stray.txt").write_text("never named\n", encoding="utf-8")
+    lesson = folder / "LESSON.md"
+    edit(
+        lesson,
+        "id: 01-subcommands",
+        "id: 01-subcommands\n"
+        "supplies:\n"
+        "  - from: lessons/01-subcommands/model/\n"
+        "    to: models/\n"
+        "    describe: the sample model this lesson loads",
+    )
+
+
 # -- check 7: the bundle/instance distinction
 
 
@@ -1746,6 +1771,9 @@ CASES: list[Case] = [
          "'notes.md' is never named by LESSON.md"),
     Case("6: the same filename, properly named, is NOT reported", 6, "cli",
          "bundle", m_material_properly_named, kind="silent"),
+    Case("6: a supplied material file is exempt, its uncovered sibling still fires",
+         6, "cli", "bundle", m_supplied_material_and_an_uncovered_sibling,
+         "'stray.txt' is never named"),
     # ---- check 7
     Case("7: a bundle carries STATE.md", 7, "automaton", "bundle",
          m_bundle_has_state_md, "a bundle must not contain STATE.md"),
@@ -2859,6 +2887,51 @@ def test_supplies_helpers() -> None:
         )
 
 
+def test_check6_supplies_exemption() -> None:
+    """Check 6's exemption, verified in one run against both halves.
+
+    The CASES entry for this fixture only proves "stray.txt still fires" -
+    it never asserts Duck.glb's ABSENCE, so it would pass even against a
+    check 6 that never consulted supplies at all (both files would fire,
+    and the Case's one positive assertion is satisfied either way). This
+    test calls validate() once and inspects the findings directly, so the
+    negative half - the one that actually distinguishes "fixed" from
+    "check 6 quietly disabled" - is checked too.
+    """
+    print("\ncheck 6: a supplies-covered file is exempt, its uncovered sibling is not:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("cli", Path(tmpdir))
+        m_supplied_material_and_an_uncovered_sibling(root)
+        report = vb.validate(root, "bundle")
+        hits = [f for f in report.findings if f.check == 6]
+
+        record(
+            any("stray.txt" in h.message for h in hits),
+            "the uncovered sibling 'stray.txt' still produces a finding",
+            "; ".join(str(f) for f in hits) or "(no check-6 findings at all)",
+        )
+        record(
+            not any("Duck.glb" in h.message or "Duck.glb" in h.where for h in hits),
+            "the supplies-covered 'Duck.glb' produces NO finding (negative control)",
+            "; ".join(str(f) for f in hits),
+        )
+        record(
+            len(hits) == 1,
+            "exactly one check-6 finding - the exemption clears Duck.glb and "
+            "nothing else",
+            "; ".join(str(f) for f in hits),
+        )
+        ran_status = report.status.get(6)
+        record(
+            ran_status is not None
+            and ran_status[0] == vb.RAN
+            and "1 cleared by a supplies declaration" in ran_status[1],
+            "the 'ran' line reports exactly 1 file cleared by a supplies "
+            "declaration, so a reader can tell which mechanism cleared it",
+            f"got {ran_status}",
+        )
+
+
 def test_supplies_status_text() -> None:
     """check 22's status, not just its exit code - fix round 1.
 
@@ -2978,6 +3051,7 @@ def main() -> int:
     test_yaml_reader()
     test_names_file()
     test_supplies_helpers()
+    test_check6_supplies_exemption()
     test_supplies_status_text()
     test_check_coverage()
 
