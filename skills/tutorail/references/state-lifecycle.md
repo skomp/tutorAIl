@@ -782,6 +782,14 @@ The four that are written:
   offered again (`runner-protocol.md` section 8.8), so it MUST be written the moment the
   lesson completes, in the same step that records the completion.
 
+  **`complete` is terminal, and nothing later in the course reverses it.** An anticipated
+  failure that recurs after this lesson does not move the entry back to `deferred`, does
+  not add a second entry, and does not license one more offer. Such a failure is ordinary
+  coaching from then on, permanently. Recurrence is evidence that the author's lesson did
+  not land — evidence for the quality checker and the dry-run harness, not something to act
+  on against the learner mid-course. A `complete` entry that can be un-completed is a loop
+  one iteration long, and the learner inside it is the person least able to leave it.
+
 **Re-offering a `deferred` lesson updates the entry in place.** It never adds a second one.
 This section records the current state of each offer, not a history of offers, and one
 lesson has one entry for the life of the instance.

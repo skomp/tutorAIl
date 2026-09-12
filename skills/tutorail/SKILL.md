@@ -80,20 +80,14 @@ may configure many catalogues, and any of them may live in a Git repository, so 
 `scripts/catalogs.py discover` once at the start of a discovery request and act on what
 it prints. It refreshes, merges by first-match-wins precedence, and reports each source.
 
-Three things it tells you that you must pass on: which catalogue supplied an entry and
-which were shadowed; which catalogues were served from cache, and how stale; and which
-failed, by kind — an unreachable host, a repository you have no access to, and a
-repository with no catalogue file are three problems with three repairs. One failed
-catalogue never fails discovery.
+Pass on what it reports about its sources: which catalogue supplied an entry and which
+were shadowed, which were served from cache and how stale, and which failed and by kind.
+One failed catalogue never fails discovery, and stale results are never presented as
+current — `references/catalogue-format.md` sections 6 and 7.
 
-Present what you find as a **selection, not as prose**. Offer the candidates as options
-the learner picks from, using whatever interactive selection this host provides, and fall
-back to a numbered list when it has none. When more candidates remain than fit a
-comfortable choice, narrow one facet at a time — subject, then level, then time
-commitment — with each facet's options built from the catalogue you just loaded, never
-from a fixed list. Stop at four or fewer and present the real choice. Never narrow to
-zero, and always leave an option that shows everything. `references/catalogue-format.md`
-section 9 carries the procedure.
+Present what you find as a **selection, not as prose**: options the learner picks from,
+narrowed one facet at a time when there are too many, never narrowed to zero, always with
+a way to see everything. Section 9 of that file carries the procedure.
 
 The rule that matters most is unchanged: read catalogue metadata only. Do not open
 anything under a candidate's bundle path until the learner has chosen.
@@ -229,14 +223,12 @@ pending start is still pending, because nothing moved. Stamp `assumes_reviewed` 
 never inspect a licence or a completion record to decide whether they may begin.
 
 At completion, and whenever asked, offer follow-ups from `scripts/catalogs.py follow-ups`:
-the author's own list first in manifest order, then courses naming this one as a previous
-bundle, each with its `because`. Inferred matches stay behind a separate "find more" —
-they are nobody's recommendation. Never auto-start, install or purchase anything, never
-imply the learner must continue, and never fail a finished course because a recommended
-one is missing. Starting a follow-up is starting any other course: no proof, no earlier
-instance, and its baseline code is the workspace contract's business, never the metadata's
-(`references/runner-protocol.md` sections 11 and 12, `references/state-lifecycle.md`
-section 10).
+the author's own list first, then courses naming this one as a previous bundle, each with
+its `because`. Inferred matches stay behind a separate "find more" — they are nobody's
+recommendation. Never auto-start, install or purchase anything, and never fail a finished
+course because a recommended one is missing. Starting a follow-up is starting any other
+course (`references/runner-protocol.md` sections 11 and 12,
+`references/state-lifecycle.md` section 10).
 
 ## Reference files, and when to load each
 

@@ -61,8 +61,9 @@ or by accepting an offer. There is no second lesson directory in a bundle.
 `supplies/` is optional and is a convention, not a reserved name: a manifest-scope
 `supplies` entry may take its `from` anywhere in the bundle, and `supplies/` is where
 authors are told to put those files. A **lesson-scope** entry is different — its `from`
-MUST resolve inside `lessons/`, so a lesson's own supplied files belong in that lesson's
-folder. Section 2, **Supplied files**, says why the two scopes differ.
+MUST resolve somewhere inside `lessons/`. A lesson folder is the usual home and the one
+worth recommending, but it is not required. Section 2, **Supplied files**, says why the
+two scopes differ and where a lesson-supplied file may sit.
 
 ### The rule that separates a bundle from an instance
 
@@ -84,12 +85,24 @@ to do when you find one, and how to promote a lesson out of it properly.
 
 ## 2. `tutorial.yaml`
 
-Keep it shallow. Most fields are a scalar or a flat list, and a field that nests does so
-because the shape it describes really is nested: `optional_lessons` and `failure_modes`
-are a map of maps, `optional_lessons` reaching a list at the third level, and `covers` and
-`assumes` are a map of concept id to that concept's definition. Nesting deeper than those
-is a sign the field wants to be a list of mappings instead, the way `supplies` and the two
-recommendation lists are.
+Keep it shallow, and the ceiling is a measured one rather than a slogan: **the deepest
+shape this format uses is three levels of container, with scalars at the leaves. Nothing
+reaches a fourth.**
+
+Most fields are a scalar or a flat list. Five keys are a map of maps whose inner values
+include a flat list, and each is that shape because the thing it describes really is:
+
+| Key | Level 1 | Level 2 | Level 3 |
+|---|---|---|---|
+| `optional_lessons` | lesson path | that lesson's fields | `offer_at`, `anticipates`, `required_for` |
+| `failure_modes` | failure-mode id | that mode's fields | `signals` |
+| `validators` | validator name | that validator's definition | `command` |
+| `covers` | concept id | that concept's definition | `aliases` |
+| `assumes` | concept id | that concept's definition | `aliases` |
+
+The other nested shape is one level of list over one level of mapping, with scalars
+underneath — `supplies` and the two recommendation lists. A field that seems to want a
+fourth level wants to be that shape instead.
 
 ```yaml
 bundle_format: 1
@@ -296,7 +309,7 @@ optional_lessons:
 | `offer_because` | MUST | One or two sentences, written for the learner, that the tutor says when it offers the lesson. For an anticipatory lesson, this names the risk. |
 | `anticipates` | SHOULD | Failure-mode ids declared in `failure_modes`. Omit it for enrichment. |
 | `repair_in` | SHOULD | The `lessons` entry whose implementation the learner repairs after taking this lesson. Meaningful only with `anticipates`. |
-| `required_for` | MAY | `lessons` entries that cannot be completed while an anticipated failure stands. Requires a non-empty `anticipates`. |
+| `required_for` | MAY | `lessons` entries that cannot be completed while an anticipated failure stands. The gate is on the failure, not on this lesson: it opens when the failure clears, however it cleared. Requires a non-empty `anticipates`. |
 
 **`offer_at` is what makes the lesson reachable**, and it is the same rule the main path
 obeys: a lesson nothing can reach is invisible. An empty `offer_at` is rejected rather
@@ -318,12 +331,23 @@ it, which is the ordinary case for an anticipated failure. A learner who defers 
 04 and trips the failure while standing in lesson 06 returns to **06**, and repairs what
 **04** built.
 
-**`required_for` is the one way an optional lesson stops being optional.** It says these
-main-path lessons cannot be completed while an anticipated failure stands, so once that
-failure is observed the tutor tells the learner the lesson is now required in order to
-continue. Use it sparingly and only where the blocked lesson genuinely cannot be
-finished. Everything else stays an offer, and a learner who declines everything must
-still be able to finish the course — section 13.
+**`required_for` gates the failure, never the lesson.** It says these main-path lessons
+cannot be completed **while an anticipated failure stands**, and the gate opens the moment
+that failure clears — by whatever route cleared it. The optional lesson does not become
+required, and taking it is not what lifts the gate; the learner's own code no longer
+producing the failure is.
+
+So a learner who declined the lesson and then meets the gate is not in a dead end. The
+tutor teaches the repair as ordinary coaching inside the lesson they are standing in — no
+transition, no fresh offer — and advances when the failure clears. The optional lesson
+remains the better route and stays available; it is never the only one. Reading
+`required_for` the other way produces a course whose only exit is a lesson the learner has
+already refused twice, which contradicts the invariant in section 13 that a course must be
+completable by a learner who declines every offer. `runner-protocol.md` section 8.7 is the
+tutor's side of this.
+
+Use it sparingly and only where the blocked lesson genuinely cannot be finished with the
+failure in place. Everything else stays an offer.
 
 Nothing here records whether any learner was offered a lesson, deferred it or took it.
 That is progress: it lives in the instance's `STATE.md`, in the section
@@ -460,9 +484,26 @@ its `from` MUST resolve inside `lessons/`.
 
 A lesson-scope `from` pointing outside `lessons/` is a **bundle defect**, not a style
 choice: materialization does not copy it, so the file is simply not there when the tutor
-opens that lesson. Put a lesson's own supplied files in that lesson's folder, beside its
-`LESSON.md`. Manifest-scope files have no such constraint, and `supplies/` at the bundle
-root is where to keep them (section 1).
+opens that lesson. Manifest-scope files have no such constraint, and `supplies/` at the
+bundle root is where to keep them (section 1).
+
+**`lessons/` is the whole of the requirement, and a lesson folder is not part of it.**
+Supplying a file does not turn a single-file lesson into a foldered one. `lessons/00-hello-args.md`
+may declare `from: lessons/seed.txt` with `seed.txt` sitting loose beside it, and that
+bundle validates in both modes. Where a supplied file may sit under `lessons/` is decided
+by section 6's rule about what counts as a lesson, not by this key:
+
+| Where the file sits | Legal | Why |
+|---|---|---|
+| inside a lesson folder, beside a `LESSON.md` | yes — **and this is the recommendation** | the file travels with the lesson that uses it, and a reader finds it where they look for it |
+| loose directly under `lessons/`, not named `*.md` | yes | it is neither a top-level `.md` file nor a folder, so section 6 does not read it as a lesson |
+| loose directly under `lessons/`, named `*.md` | **no** | a top-level `.md` file under `lessons/` **is** a lesson: it must carry `id` and `title` frontmatter and be listed in `lessons` or `optional_lessons` |
+| in a subdirectory of `lessons/` that has no `LESSON.md` | **no** | a folder directly under `lessons/` without a `LESSON.md` is not a lesson, and everything in it is unreachable |
+
+So the folder is advice, and the two `no` rows are the rule. Prefer the folder anyway: a
+lesson whose material sits beside it is the shape section 6 is written around, and a loose
+file under `lessons/` belongs to no lesson in particular once a second lesson supplies one
+too.
 
 **The trailing slash is not decoration.** `assets/shaders/` and `assets/shaders` are not
 interchangeable, and neither form is accepted for the other: a directory declared without
@@ -1165,7 +1206,7 @@ Material available if the learner asks. Not required.
 | `design_refs` | SHOULD | `DESIGN.md` anchors this lesson needs. MUST all resolve. |
 | `validators` | SHOULD | Validator names from `tutorial.yaml`. MUST all be declared. |
 | `optional` | MUST on an optional lesson | `true`, on every lesson listed in `optional_lessons` and on no other. |
-| `supplies` | MAY | Files this lesson hands the learner's workspace when it opens, in the same three-field form the manifest key uses. A lesson-scope `from` MUST resolve inside `lessons/` — put these files in this lesson's own folder. See section 2, **Supplied files**. |
+| `supplies` | MAY | Files this lesson hands the learner's workspace when it opens, in the same three-field form the manifest key uses. A lesson-scope `from` MUST resolve inside `lessons/` — anywhere inside it, though this lesson's own folder is the recommended home. Declaring `supplies` does not oblige a single-file lesson to become a foldered one. See section 2, **Supplied files**. |
 
 `design_refs` is how a lesson stays cheap. A lesson about splitting a file into a
 library declares only the anchors it truly needs. It does not pull in storage,
@@ -1460,9 +1501,9 @@ Confirm each of these by looking, not by remembering:
       frontmatter, and no main-path lesson declares it
 - [ ] every `supplies` entry names a `from` that exists in the bundle, a `to` that
       lands outside `tutorial/`, and a `describe` a learner would understand
-- [ ] every **lesson-scope** `supplies` entry names a `from` inside `lessons/` — a
-      lesson's own supplied files live in that lesson's folder, because the instance
-      carries nothing else
+- [ ] every **lesson-scope** `supplies` entry names a `from` inside `lessons/`, because
+      the instance carries nothing else — a lesson folder is the recommended home, not a
+      requirement, and a single-file lesson may supply a loose file beside it
 - [ ] every `covers` and `assumes` concept id matches `[a-z0-9-]+` and names a technical
       concept rather than a lesson file
 - [ ] every `covers` and `assumes` concept carries a non-empty `summary`, and every
@@ -1474,8 +1515,9 @@ Confirm each of these by looking, not by remembering:
 - [ ] every recommendation names a `bundle` id spelled as that bundle spells its own `id`,
       and a `because` written for the learner
 - [ ] no recommendation names this bundle, and no bundle id appears twice in one list
-- [ ] the course can be finished by a learner who declines every offer — unless a
-      `required_for` gate says otherwise and you meant it (section 13)
+- [ ] the course can be finished by a learner who declines every offer — with no
+      exception, `required_for` included: a gate is on the failure, so the tutor clears it
+      by coaching and the declining learner still finishes (section 13)
 - [ ] neither `COURSE.md` nor any file under `lessons/` carries a progress marker in a
       structural position — a heading annotated with a status, a `Status:` label, a ticked
       checklist box, a bold `**Next:**` label, a "current lesson" or "resume marker"
@@ -1684,12 +1726,25 @@ its frontmatter and no number prefix.
 
 That is allowed, and it is recorded. Because lesson 06 appears in `required_for`, the
 tutor also says what the gate means: lesson 06 cannot be completed while this failure
-stands. The learner can stop there or take the lesson; what they cannot do is finish
-lesson 06 with the failure in place.
+stands. What the learner cannot do is finish lesson 06 with the failure in place.
 
-Without `required_for` the tutor would simply coach them through the failure as an
-ordinary failure, one correction at a time, which for many courses is the better answer.
-Reach for the gate only when the blocked lesson genuinely cannot be finished.
+**What happens next is ordinary coaching, and this is the part that is easy to get
+wrong.** The tutor does not stop, does not re-offer, and does not wait for the learner to
+change their mind. It teaches the repair inside lesson 06 — name the concept, hand back
+one correction, let the learner rework the window assignment — and when `late-events`
+passes, the failure has cleared and the gate opens. The learner finishes lesson 06 without
+ever taking the optional lesson.
+
+The optional lesson stays the better route: it teaches the model rather than patching one
+symptom, and it stays available for as long as the learner wants it. It is never the only
+route. A gate whose only exit were a lesson the learner refused twice would contradict the
+invariant in section 13, and that is why the gate is on the failure rather than on the
+lesson.
+
+Without `required_for` the tutor would coach them through the failure in exactly the same
+way, and simply advance past lesson 06 as well. The gate changes when the learner may
+advance, never who may teach the repair. Reach for it only when the blocked lesson
+genuinely cannot be finished with the failure in place.
 
 ---
 
@@ -1728,8 +1783,12 @@ So the invariant that makes this safe is one you hold, and no validator can chec
 
 That is worth insisting on for a reason beyond old runners: the old-runner case is
 identical to a learner who says no to everything, and you have to support that learner
-anyway. A `required_for` gate is the single exception, and it fails in the direction of
-coaching rather than of a wrong result.
+anyway.
+
+**There is no exception, and `required_for` is not one.** The gate is on the failure, not
+on the lesson, so a current runner clears it by coaching the repair inline and an old
+runner never applies it at all. Both finish the course. The two runners differ only in
+whether the learner is told the gate exists — never in whether they can reach the end.
 
 Two things follow:
 

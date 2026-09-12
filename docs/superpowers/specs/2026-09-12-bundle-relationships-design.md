@@ -43,7 +43,7 @@ spends most of its effort eliminating.
 | Fact | Value |
 |---|---|
 | Restricted YAML reader handles `covers`/`assumes`/recommendation shapes | **yes**, verified by parsing all four fields with `yamlite.load_yaml` |
-| Two-level nesting precedent in the manifest | `optional_lessons` already nests map→map→list, so the "deliberately shallow" claim in the runner spec is outdated and should be corrected |
+| Nesting precedent in the manifest | `validators`, `optional_lessons` and `failure_modes` already nest map→map→list, so the "at most one level of nesting" claim in the runner spec was outdated. **Corrected**: the ceiling is three levels of container with scalars at the leaves — runner spec §4 and `bundle-format.md` section 2 |
 | Highest validator check number on main | 21; `supplies` adds 22, so **this feature starts at 23** |
 | `supplies` branch state at inspection | green, 292 assertions, all three real bundles valid, zero file overlap with main's then-HEAD |
 
@@ -133,9 +133,45 @@ Ranking:
 1. exact `covers` concept-id match
 2. exact per-concept alias match
 3. normalised textual match against id, alias, or summary
-4. explicit recommended previous bundle that covers the concept
+4. explicit recommended previous bundle **that covers the concept** — see the rule below
 5. broader `subjects` or bundle-alias match
 6. semantic match, only if the architecture already has it
+
+> ### Rank 4 is a join of two declarations, and both halves are required
+>
+> **Rule R4, stated so that no summary of it can drop a clause:**
+>
+> > Bundle **P** qualifies at rank 4 for concept **C** only when **both** of these hold:
+> >
+> > 1. some bundle **Q** names **P** in its `recommended_previous_bundles`; **and**
+> > 2. **P itself declares C in its own `covers`.**
+> >
+> > Condition 2 is not optional, not an optimisation, and not implied by condition 1.
+> > Without it, rank 4 answers a `covers` query with a bundle that merely **assumes** C.
+>
+> **The route is for finding a teacher no other rank reaches.** Rank 4 exists because the
+> learner may be searching in **Q's** wording — Q's `assumes` summary is where they read the
+> concept's name — while the bundle that actually **teaches** it is P, whose own wording
+> they never saw. Following Q's recommendation back to P is the only way to reach P from
+> that query. Narrowing rank 4 to bundles that cover C keeps that route open and removes
+> nothing from it.
+>
+> **Rank 4 is not an author recommendation for a `covers` query.** Neither author wrote the
+> conjunction: Q's author recommended P, and P's author declared what P covers. Print P's
+> `because` and attribute it to Q, but do not label the *match* as an author recommendation
+> — the match is the runner's inference from two independent declarations.
+>
+> **Why this is written at this length.** Two sessions dropped the final clause of rank 4
+> and shipped a real defect, fixed in commit `9e03c2c`: a `covers` query for `go-programming`
+> returned `durable-event-broker`, which assumes Go at level `working` and teaches none of
+> it, tagged as an author recommendation. A learner who could not write Go was sent to a
+> course that assumes working Go — the first entry on `catalogue-format.md`'s own refusal
+> list. The predicate is the one `prepare_for` already uses, so the two commands agree by
+> construction rather than by coincidence; their disagreement is what found the defect.
+>
+> **Tier 4 is narrowed, not disabled**, and a test pins that: it proves the tier still finds
+> a teacher no other tier reaches when the query matches the assuming author's wording.
+> Sabotaging tier 4 to make a filter simpler fails that test.
 
 **No semantic-search service may be required.** Exact identifiers and aliases work
 deterministically.
@@ -144,9 +180,10 @@ Every result explains why it matched — `Exact concept match: partition-offsets
 `Alias match: stream-offsets`, `Recommended by streaming-query-engine`,
 `Related subject: event-streaming`.
 
-**A query for bundles *covering* a concept searches `covers`, never `assumes`.** Return
-multiple suitable bundles; never collapse to the single one named in
-`recommended_previous_bundles`.
+**A query for bundles *covering* a concept searches `covers`, never `assumes`.** This
+applies to every rank without exception, rank 4 included: `assumes` is read to find *who
+needs* a concept, never to answer *who teaches* it. Return multiple suitable bundles; never
+collapse to the single one named in `recommended_previous_bundles`.
 
 ### Provenance is preserved, always
 
@@ -283,3 +320,30 @@ Before finishing, grep the implementation and documentation for `covers`, `assum
 `recommended_follow_ups` and `recommended_previous_bundles`, and confirm where each is
 parsed, validated, indexed, documented and exercised by tests. List any renamed field with
 its exact replacement and rationale.
+
+---
+
+## 13. Where the validation lists are — a correction
+
+**Added 2026-09-12.** This specification has never had a section 13. It ended at section
+12, and two dispatch prompts nevertheless cited "section 13" as the home of the
+reject / allow / warn lists. An agent following either one found nothing, which is the
+worst outcome a cross-reference can produce: it reads as authoritative and resolves to
+silence.
+
+**The lists are in section 8, "Validation".** There are three of them and they are
+different instruments:
+
+| List | Section 8 heading | Effect on the bundle |
+|---|---|---|
+| what the validator rejects | **Reject** | a finding; exit code 1; the bundle is invalid |
+| what it accepts in silence | **Allow** | nothing reported; these shapes are correct, not tolerated |
+| what it reports without rejecting | **Warn, never reject** | a warning; the exit code cannot see it; the bundle stays valid |
+
+Section 8's closing paragraph carries the rule that outranks all three: cross-catalogue
+validation **must never fail an otherwise valid independently distributed bundle because
+another bundle is missing.**
+
+This section exists so that a reader arriving at "section 13" lands on a correct pointer
+rather than off the end of the document. Cite **section 8** in anything written from here
+on.

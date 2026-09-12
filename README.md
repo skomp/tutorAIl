@@ -214,9 +214,14 @@ python3 skills/tutorail/scripts/validate_bundle.py path/to/bundle
 python3 skills/tutorail/scripts/validate_bundle.py --instance path/to/project/tutorial
 ```
 
-The validator is an authoring tool. Learners never run it. It checks structure — that
-references resolve, that no progress leaked into the course, that every lesson is reachable.
-It says nothing about whether the course is any good.
+The runner runs the same script. It validates the instance it has just materialized, before
+the first task, so that a defect in your bundle is found by the runner rather than by a
+learner several lessons in. It does not run on a teaching turn, and a learner never invokes
+it by hand. Your run and the runner's run are the same checks over the same files, which is
+the point: a bundle that passes here starts cleanly there.
+
+It checks structure — that references resolve, that no progress leaked into the course, that
+every lesson is reachable. It says nothing about whether the course is any good.
 
 One thing it cannot check is worth knowing before you ship: a course carrying optional
 lessons must still be finishable by a learner who declines every offer. Nothing enforces

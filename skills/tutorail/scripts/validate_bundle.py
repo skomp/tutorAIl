@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
 """Structural validator for tutorAIl bundles and instances.
 
-Authoring-time only. Running a tutorial never invokes this script.
+Two callers, one script. An author runs it over a bundle or a catalogue
+before shipping. A runner runs it over the instance it has just materialized,
+before the first task, and at the four further moments
+references/runner-protocol.md section 13.1 names. It is never run on a
+teaching turn, and a learner never invokes it by hand.
+
+It is safe on a learner's machine because it is stdlib-only (below) and reads
+without writing: no file in the bundle, the instance or the workspace is
+created, modified or removed by a run.
 
 Usage:
     validate_bundle.py <path>              check a bundle

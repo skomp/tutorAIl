@@ -82,13 +82,16 @@ enforces it (§9, check 5).
 Shallow by default, because the author is more likely to err than the parser is. Most
 fields are a scalar or a flat list.
 
-**Corrected 2026-09-12.** This section said "at most one level of nesting". That was true
-when it was written and stopped being true when `optional_lessons` landed, which is a map
-of lesson path to a map of fields, reaching a list at the third level; `failure_modes`,
-`covers` and `assumes` are maps of maps too. `bundle-format.md` section 2 carries the rule
-that replaced it: a field nests when the shape it describes really is nested, and nesting
-deeper than that is a sign the field wants to be a list of mappings instead. Anyone who
-read the old sentence and shaped a manifest field around it should re-read that section.
+**Corrected 2026-09-12, restated after measurement.** This section said "at most one level
+of nesting". That was already wrong when it was written — `validators` has always been a
+map of name to a definition carrying a `command` list — and `optional_lessons`,
+`failure_modes`, `covers` and `assumes` are the same shape. **Five keys are a map of maps
+reaching a flat list at the third level; measured across all six manifests in hand, nothing
+reaches a fourth.** `bundle-format.md` section 2 carries the rule and the table that
+replaced the old sentence: three levels of container with scalars at the leaves is the
+ceiling, and a field that seems to want a fourth wants to be a list of mappings instead —
+the shape `supplies` and the two recommendation lists already use. Anyone who read the old
+sentence and shaped a manifest field around it should re-read that section.
 
 ```yaml
 bundle_format: 1
@@ -635,9 +638,10 @@ several real entries depend on it.
 
 Fetching, caching, merging, precedence and staleness are deterministic, error-prone, and
 exactly the kind of work an agent does inconsistently across sessions — the same argument
-that justified `validate_bundle.py`. Unlike the validator, **this script runs on a
-learner's machine at runtime**, so it is stdlib-only plus the `git` binary. No third-party
-packages.
+that justified `validate_bundle.py`. **This script runs on a learner's machine at runtime**,
+so it is stdlib-only plus the `git` binary. No third-party packages. The validator has the
+same constraint for the same reason — it too runs on a learner's machine (§9) — and the two
+differ in *when*: `catalogs.py` runs at discovery, `validate_bundle.py` at materialization.
 
 | Command | Runs when | Does |
 |---|---|---|
@@ -863,10 +867,25 @@ warning` / `known accepted warning` (matched against `STATE.md`'s `accepted_warn
 
 ## 9. Validator script
 
-`skills/tutorail/scripts/validate_bundle.py` — **authoring-time only.** Never in a
-learner's path; running a tutorial does not invoke it. `scripts/catalogs.py` (§7.2) is the
-opposite: it is the one script a learner's session does run, at discovery. The two share
-`scripts/yamlite.py` and nothing else.
+`skills/tutorail/scripts/validate_bundle.py` — **written for authors, and run by the runner
+too.**
+
+**Corrected 2026-09-12.** This section said "authoring-time only. Never in a learner's
+path; running a tutorial does not invoke it." That was true when it was written and stopped
+being true when the runner began validating the instance at materialization (issue #9). The
+claim that replaced it:
+
+- an **author** runs it over a bundle or a catalogue before shipping;
+- a **runner** runs it over the instance it has just materialized, before the first task,
+  and at the four further moments `references/runner-protocol.md` section 13.1 names;
+- **no teaching turn runs it**, which is the cost rule in `runner-protocol.md` section 1,
+  and **no learner invokes it by hand**.
+
+So the distinction is *when* it runs and *who* triggers it, never *whether* a learner's
+machine runs it. Both scripts do. `scripts/catalogs.py` (§7.2) runs at discovery;
+this one runs at materialization. Both are therefore stdlib-only, and both share
+`scripts/yamlite.py` and nothing else. Anyone who read the old sentence and concluded the
+validator may depend on an authoring-only toolchain should re-read this section.
 
 Its justification is the same as the runner's: **checking a bundle must not require
 reading the bundle into context.** For a 23-lesson course, verifying every lesson's
@@ -1203,6 +1222,11 @@ caches a *bundle* that a learner has not chosen.
    An author whose lesson does not land should fix the lesson. Recurrence is evidence about
    the *lesson*, not about the learner, and the places to act on it are the quality checker
    and the dry-run harness — not the tutor, mid-course, against the person in front of it.
+
+   **Where this is written normatively** (added 2026-09-12, closing issue #3):
+   `runner-protocol.md` section 8.8, the first two of the four guards; and
+   `state-lifecycle.md` section 9.2, under the `complete` lesson state, which states that
+   `complete` is terminal and that nothing later in the course reverses it.
 10. ~~**`optional: true` duplicates the manifest.**~~ **Settled 2026-09-12: keep it.** A
     lesson must be readable on its own. The runner opens one lesson file and does not open
     the manifest's optional block to teach it, so without the flag an opened lesson cannot
@@ -1239,6 +1263,14 @@ It also keeps `required_for` a real dependency rather than an advisory one. The 
 claim is "this failure genuinely blocks that lesson", and that claim is honoured. What is
 not honoured is the stronger claim "only my lesson may fix it", which no author should be
 making.
+
+**Where this is written normatively** (added 2026-09-12, closing issue #3): the author's
+side is `bundle-format.md` section 2, the `required_for` paragraph and the `required_for`
+row of the `optional_lessons` field table, with the worked example in section 12; the
+tutor's side is `runner-protocol.md` section 8.7, under *When the learner declines the
+gating lesson*. Section 13 of `bundle-format.md` now states that the completability
+invariant has **no** exception — an earlier wording called `required_for` "the single
+exception", which is the reading this decision rejects.
 
 **A gate on an optional lesson is a quality problem.** An author who writes `required_for`
 on an optional lesson has declared something load-bearing and then made it skippable. The
@@ -1320,6 +1352,66 @@ what has to exist before any policy can be chosen, and reporting is useful on it
 
 **Implementation note.** The stamp is defined in `state-lifecycle.md` and the resume path in
 `runner-protocol.md`. Neither is changed by this entry; this records the decision only.
+
+---
+
+## 15d. The `SKILL.md` size limit, and how it is measured
+
+**Decided 2026-09-12.** `SKILL.md` has a word limit, and the limit is meaningless without
+the command that checks it. Both are fixed here.
+
+### The method
+
+```
+wc -w skills/tutorail/SKILL.md
+```
+
+**The whole file, frontmatter and tables included. One command, no script, no exclusions.**
+
+This is the whole of the rule, and the reason is that the alternatives cannot be reproduced.
+Measured at `a5e8b5a`, the same file gives three different answers:
+
+| Method | Words at `a5e8b5a` |
+|---|---|
+| `wc -w` on the whole file | **2841** |
+| body only, frontmatter dropped | 2711 |
+| prose only — body, less table rows and fenced code | 2360 |
+
+The third is the one an earlier session used, and it is why issue #7 exists. It is a
+defensible measure of reading effort and it is not reproducible without shipping the script
+that computes it, so nobody could check the limit and nobody did. A limit that needs a
+private script is not a limit. The frontmatter and the tables are loaded into the host's
+context like everything else, so counting them is also the more honest measure of the cost
+the limit exists to control.
+
+### The correction
+
+**The previously stated ceiling of "about 2100 words" was never a measurement of this
+file.** By no method did the file ever hold about 2100 words. Before the work that prompted
+issue #7 it held 2542 by `wc -w`, 2412 as body, and 2084 as prose — and 2084 is a *floor*
+that was already reached, not a ceiling with room in it. The figure was wrong when it was
+written; it did not drift.
+
+### The limit
+
+> **`SKILL.md` MUST NOT exceed 3,000 words by `wc -w`.**
+
+At the time of writing it holds **2,744**, which is 256 words of headroom — reached by
+compressing two passages that restated a reference file the surrounding text had already
+told the tutor to load (`catalogue-format.md` sections 6, 7 and 9; `runner-protocol.md`
+sections 11 and 12). Nothing normative was removed, and no rule now lives only in the
+compressed text.
+
+**When the limit binds, move a section into a reference rather than raising the number.**
+`SKILL.md` is the control plane: a host loads it every time the skill fires, whatever the
+learner asked for. The references load on demand, so a word moved out of `SKILL.md` and
+into one of them costs nothing until it is needed.
+
+**The one thing that may not be moved is a load condition.** A reference is only reachable
+if `SKILL.md` names the circumstance that reaches it. Delete the sentence that says a course
+may declare `assumes`, and the row in *Reference files, and when to load each* that fires on
+`assumes` can never fire. So a section may be compressed to its trigger and its pointer; it
+may not be removed.
 
 ---
 

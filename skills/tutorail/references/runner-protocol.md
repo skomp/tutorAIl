@@ -799,10 +799,40 @@ and do not advance past it.
 the concept; the failure stands until the learner's own code stops producing it. That is
 why the first task on landing is the repair (8.6).
 
+#### When the learner declines the gating lesson
+
+This is the case the gate is most often read wrongly, so it is stated on its own.
+
+**Teach the repair inline. The gate is on the failure, and you are allowed to clear it.**
+The learner stays in the lesson they are standing in and you coach them through the failure
+exactly as section 3 describes — name the concept, hand back one correction, do not repair
+the work. No transition. No fresh offer: the anti-nag rule in 8.3 and 8.5 is not suspended
+because a gate is binding, and a learner who has now declined twice does not get asked a
+third time. When the failure clears, the gate opens and the lesson completes normally.
+
+| Do | Do not |
+|---|---|
+| coach the failure inside the current lesson | change `active_lesson`, or set `resume_at` |
+| advance the moment the failure clears | wait for the optional lesson to be taken |
+| say the optional lesson is still there, once, when the gate is first stated | raise it again each turn the failure persists |
+| hold the gated lesson's completion conditions until the failure clears | hold them after it clears, because the lesson was never taken |
+
+The optional lesson remains the better route — it teaches the model rather than one
+symptom's repair — and it stays available for as long as the learner wants it. It is never
+the only route. Treating it as the only route leaves the learner in a dead end whose sole
+exit is a lesson they have already refused twice, and that contradicts the invariant every
+course must hold: **a course must be completable by a learner who declines every offer**
+(`bundle-format.md` section 13).
+
+What the author's `required_for` claims is *this failure genuinely blocks that lesson*, and
+you honour it. What it does not claim, and what no author gets to claim, is *only my lesson
+may fix it*.
+
 Without `required_for` there is no gate. Coach through the failure as an ordinary failure,
 section 3, one correction at a time — which for most courses is the better answer, and
 inventing a gate the author did not declare gives this learner a course nobody else is
-taking.
+taking. Note what this means: **the coaching is identical either way.** The gate changes
+when the learner may advance, never who may teach the repair.
 
 ### 8.8 Loops, and lessons already taken
 
@@ -810,12 +840,20 @@ Four guards. Each has its own reason, and together they are the whole of what st
 recurring failure becoming a recurring offer:
 
 - **A `complete` optional lesson is NEVER offered again.** Not at another `offer_at` entry,
-  not when the same failure recurs, not when a different anticipated failure arrives. It
-  has been taught; what is left is coaching.
+  not when the same failure recurs, not when a different anticipated failure arrives, not
+  on the fifth recurrence any more than on the first. There is no count that turns "never"
+  into "once more". It has been taught; what is left is coaching.
 - **An anticipated failure still standing after the lesson completed is an ordinary
-  failure.** Handle it per section 3. Do **not** write a generated side lesson on the same
-  topic: section 7.2's test now reads *in the coverage list, and was already taught*, and
-  the optional lesson taught it.
+  failure, permanently.** Handle it per section 3, this turn and every later turn it
+  appears. "Permanently" is the whole of the rule: there is no state the course can reach
+  in which that failure becomes an offer again. Do **not** write a generated side lesson on
+  the same topic either: section 7.2's test now reads *in the coverage list, and was already
+  taught*, and the optional lesson taught it.
+
+  **A failure that keeps coming back is evidence about the lesson, not about the learner.**
+  It says the author's lesson did not land. That evidence is real and it is worth acting
+  on — by the quality checker that scores a bundle, and by the dry-run harness that walks
+  one. Neither of those is you, mid-course, with a person in front of you. You coach.
 - **A `deferred` lesson is re-offered at most once per newly observed occurrence.** The
   same failure still standing from last turn is not a new occurrence. A validator that
   keeps failing across five turns of coaching is one occurrence, not five.
