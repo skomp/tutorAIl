@@ -179,6 +179,23 @@ after the learner has chosen, and a mismatch is worth mentioning then.
 An entry missing a MUST field is malformed. The script skips it and names the entry and
 the field. Pass that on rather than pretending the catalogue was complete.
 
+**A field this document does not define is warned about, never rejected.** A catalogue is
+data that a newer runner may extend, and a validator that refused an unknown key would turn
+a valid newer catalogue into an unusable one — the same rule `bundle-format.md` section 13
+sets for bundles, where an older reader degrades rather than refuses.
+
+So the validator reports an unrecognised entry field as a **warning**, on check 3, and the
+catalogue stays usable. A key close to a field this document defines is called out as a
+likely misspelling, because that is the case with no other signal anywhere: a runner reads
+an entry by field name and ignores a name it does not know, so `optional_lesson_cnt` is
+silently absent rather than reported, and the entry simply advertises nothing by it.
+
+The check reads the **keys of the parsed entry**. It never searches the file's text. A
+generated catalogue's header comment names the fields it derives, and a text search would
+report those comments as unknown fields while missing a real one — the same arithmetic that
+makes a loose `grep -c` of a field name read as complete exactly when one entry is missing
+it.
+
 ### 5.1 `source`, and where a bundle path resolves from
 
 `source` is the **entire** provider boundary for a bundle. Everything else in this
