@@ -133,7 +133,7 @@ The change is in `tutorail-authoring`'s `catalog.py` and in `catalogue-format.md
 the runner. Nothing is blocked on it: an unlisted optional lesson is still offered at the
 point its bundle names.
 
-### Update `README.md`
+### Update `README.md` — DONE 2026-09-12
 
 The README describes the two-file model. Section "Register one by adding it to your
 catalogue" names `~/.config/tutorail/catalog.yaml` as the only user file. That file still

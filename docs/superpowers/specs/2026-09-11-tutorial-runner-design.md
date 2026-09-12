@@ -1156,8 +1156,9 @@ caches a *bundle* that a learner has not chosen.
    live has no reconciliation story. Deferred, documented.
 4. **Multiple concurrent tutorials in one workspace.** Not supported; `tutorial/` is
    singular. Deferred.
-5. **Remote repositories.** Both `tutorAIl` and `tutorail-bundles` are local-only. Nothing
-   has been created on GitHub. A `git` catalogue therefore has no real remote to point at
+5. ~~**Remote repositories.**~~ **Settled 2026-09-12.** All four repositories exist as
+   private GitHub repositories and are pushed, except `automaton-db`, whose remote exists
+   but is deliberately empty (see decision 1). A `git` catalogue therefore has no real remote to point at
    yet; it is exercised against local repositories over `file://` URLs, which uses the
    same clone, fetch and checkout path.
 6. ~~**`tutorail-bundles` has no `catalog.yaml` of its own.**~~ **Settled 2026-09-12.**
