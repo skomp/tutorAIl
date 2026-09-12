@@ -102,7 +102,8 @@ CHECKS: dict[int, str] = {
     20: "'optional: true' frontmatter agrees with the optional_lessons list",
     21: "[instance] STATE.md's '## Optional lessons' record is well-formed and "
     "agrees with active_lesson",
-    22: "supplies entries are well-formed, and every 'from' exists",
+    22: "supplies entries are well-formed, and every 'from' resolves where "
+        "the runner will look for it",
 }
 
 BUNDLE_ONLY = {12, 13}
@@ -333,7 +334,12 @@ LIMITATIONS = """What a pass does and does not mean
     check 6 proves that a lesson folder's material is NAMED by its
       LESSON.md. It does not prove the lesson says WHEN to use it, which the
       contract also asks for. A name in a code fence or a quoted example
-      counts as named.
+      counts as named. The naming rule is NOT absolute: a file covered by a
+      `supplies:` entry - from the manifest or from any lesson, not only the
+      one that owns the folder - is exempt and is never reported, because
+      the declaration already says what it is and where it goes. A green
+      check 6 therefore does not prove every material file is mentioned in
+      prose; it proves each one is either named or declared.
 
   There is deliberately no reverse material check ("LESSON.md names a file
   that does not exist"). It cannot tell a material reference from an
@@ -397,10 +403,21 @@ LIMITATIONS = """What a pass does and does not mean
       is silent, a malformed one (a bare scalar, or a mapping instead of a
       list) is loud and is always a finding.
     check 22 proves the entries are well-formed and every declared 'from'
-      exists. It says nothing about whether the supplied files are the
-      RIGHT files, and nothing about whether a lesson still tells the
-      learner to copy them by hand - that judgement is the course-quality
-      audit's, not this validator's."""
+      exists where the runner will look for it. It says nothing about
+      whether the supplied files are the RIGHT files, and nothing about
+      whether a lesson still tells the learner to copy them by hand - that
+      judgement is the course-quality audit's, not this validator's.
+    check 22 applies the 'from' rule BY SCOPE, because placement time
+      differs. A LESSON-scope 'from' must resolve under lessons/ and is
+      reported in BOTH modes when it does not: that lesson's files are
+      placed when it opens, from the instance, and materialization copies
+      only lessons/. A MANIFEST-scope 'from' is checked for existence in
+      BUNDLE MODE ONLY - it is placed during materialization while the
+      bundle source is still in reach, and nothing copies it into the
+      instance, so an instance that no longer carries it is correct. In
+      instance mode, therefore, a manifest-scope 'from' is not proved to
+      exist anywhere and its trailing-slash form is not proved either.
+      Validate the BUNDLE to prove those."""
 
 
 @dataclass(frozen=True)
@@ -2283,7 +2300,24 @@ def check_generated_resume(
 # (placed after materialization) or in a lesson's frontmatter (placed when
 # that lesson opens). `from` is always relative to the BUNDLE root, in both
 # scopes - one rule, no scope-dependent resolution.
+#
+# TIMING is what makes the two scopes differ in what a `from` may REACH:
+#
+#   manifest scope is placed DURING materialization, while the bundle source
+#     is still in reach, so its `from` may resolve anywhere in the bundle -
+#     including a `supplies/` directory at the bundle root, which is where
+#     both authoring references tell authors to put supplied files;
+#   lesson scope is placed when that lesson OPENS, long after materialization,
+#     from an instance that holds only tutorial.yaml, COURSE.md, DESIGN.md and
+#     lessons/. A lesson-scope `from` outside lessons/ names a file that will
+#     not exist when the tutor needs it, so it is a bundle defect in BOTH
+#     modes.
+#
+# The same timing is why a manifest-scope `from` that does not resolve is a
+# finding in BUNDLE mode only: the instance legitimately no longer carries it,
+# because placement already happened.
 SUPPLIES_KEYS = ("from", "to", "describe")
+LESSONS_DIR = "lessons"
 
 
 def _supplies_sites(
@@ -2392,7 +2426,12 @@ def _supplies_to_error(to: Any) -> str | None:
     for part in parts:
         if part in ("", ".", ".."):
             return f"path component {part!r} is not allowed"
-    if parts[0] == "tutorial":
+    if parts[0].lower() == "tutorial":
+        # Case-INSENSITIVE deliberately. macOS and Windows filesystems fold
+        # case, so a `to` of 'Tutorial/x' lands inside the instance exactly as
+        # 'tutorial/x' does; an exact-case test would pass the mis-cased form
+        # and let a supplies entry write into the course. Check 4 takes exact
+        # case seriously for the mirror-image reason.
         return (
             f"the 'to' path {to!r} begins with 'tutorial/'; 'tutorial/' is the "
             f"instance, not the learner's workspace, so a supplies entry must "
@@ -2411,10 +2450,22 @@ def check_supplies(
     """Check 22 - both modes.
 
     Proves that declared supplies entries are well-formed and that every
-    declared 'from' exists in the bundle. It says nothing about whether the
-    supplied files are the RIGHT files, and nothing about whether a lesson
-    still tells the learner to copy them by hand - that judgement belongs to
-    the course-quality audit, not this validator.
+    declared 'from' exists where the runner will look for it. It says
+    nothing about whether the supplied files are the RIGHT files, and
+    nothing about whether a lesson still tells the learner to copy them by
+    hand - that judgement belongs to the course-quality audit, not this
+    validator.
+
+    The 'from' rule is scope-dependent because PLACEMENT TIME is:
+
+      lesson scope  - the 'from' MUST resolve under lessons/, in BOTH modes.
+        The lesson's entries are placed when the lesson opens, from the
+        instance, and materialization copies only lessons/.
+      manifest scope - the 'from' may resolve anywhere in the bundle, and a
+        'from' that does not resolve is a finding in BUNDLE MODE ONLY.
+        Placement happened during materialization, while the bundle source
+        was still in reach; nothing copies the source into the instance, so
+        an instance that no longer carries it is correct, not broken.
 
     A site's raw `supplies` value falls into three buckets, matching the
     precedent check 18 already sets for `optional_lessons`: nothing under
@@ -2525,6 +2576,7 @@ def check_supplies(
 
             if "from" in entry:
                 from_ = entry.get("from")
+                is_lesson_scope = where != "tutorial.yaml"
                 if not isinstance(from_, str) or from_ == "":
                     report.add(
                         22,
@@ -2549,15 +2601,48 @@ def check_supplies(
                             f"the 'from' entry {from_!r} does not resolve: "
                             f"path component '' is not allowed",
                         )
+                    elif (
+                        is_lesson_scope
+                        and bare.split("/", 1)[0] != LESSONS_DIR
+                    ):
+                        # A lesson's entries are placed when the lesson OPENS,
+                        # from the instance - and materialization copies only
+                        # tutorial.yaml, COURSE.md, DESIGN.md and lessons/. A
+                        # lesson-scope 'from' outside lessons/ therefore names
+                        # a file that will not be there at placement time, in
+                        # both modes, whether or not the bundle still has it.
+                        report.add(
+                            22,
+                            where,
+                            f"the 'from' entry {from_!r} is declared by a "
+                            f"lesson but does not resolve under "
+                            f"'{LESSONS_DIR}/'. A lesson's supplies are placed "
+                            f"when that lesson opens, from the instance, and "
+                            f"materialization copies only '{LESSONS_DIR}/' - "
+                            f"so this file will not exist when the tutor needs "
+                            f"it. Move it into this lesson's folder, or declare "
+                            f"it in tutorial.yaml, where placement happens "
+                            f"while the bundle source is still in reach.",
+                        )
                     else:
                         resolved, reason = resolve_exact(root, bare)
                         if resolved is None:
-                            report.add(
-                                22,
-                                where,
-                                f"the 'from' entry {from_!r} does not "
-                                f"resolve: {reason}",
-                            )
+                            # A MANIFEST-scope 'from' is placed during
+                            # materialization and nothing copies it into the
+                            # instance, so an instance legitimately no longer
+                            # carries it: reporting it there would call a
+                            # correct bundle broken. In bundle mode the source
+                            # is the thing being validated, so it must be
+                            # there. A lesson-scope 'from' is under lessons/ by
+                            # the branch above, which the instance does carry,
+                            # so it must resolve in both modes.
+                            if is_lesson_scope or report.mode != "instance":
+                                report.add(
+                                    22,
+                                    where,
+                                    f"the 'from' entry {from_!r} does not "
+                                    f"resolve: {reason}",
+                                )
                         else:
                             is_dir = resolved.is_dir()
                             if has_trailing_slash and not is_dir:

@@ -148,7 +148,19 @@ Steps, in order:
    has opened yet, and this is the one moment manifest-scope entries are placed. `from`
    is relative to the **bundle** root, and a trailing `/` means that directory's
    contents, recursively; `to` is relative to the **workspace** root and never inside
-   `tutorial/`. Four rules govern the placement, and `bundle-format.md` section 2 states
+   `tutorial/`.
+
+   **Read each `from` from the bundle source, not from the instance, and finish this step
+   before you release the source.** That is why step 8 is *inside* materialization rather
+   than a step after it. Step 2 copies only `tutorial.yaml`, `COURSE.md`, `DESIGN.md` and
+   `lessons/`, so a manifest-scope `from` such as `supplies/Cargo.toml` exists in the
+   bundle and will never exist in the instance. Once the source is out of reach, a
+   manifest-scope entry can no longer be placed at all. This is also the reason a
+   **lesson-scope** `from` MUST resolve inside `lessons/`: those entries are placed when
+   the lesson opens, long after this step, and `lessons/` is the only thing the instance
+   carries (`bundle-format.md` section 2, **Where a `from` may point**).
+
+   Four rules govern the placement, and `bundle-format.md` section 2 states
    them in full:
 
    1. **Never overwrite.** A target that already exists is left exactly as it is.
@@ -173,7 +185,9 @@ Steps, in order:
    `unrestricted` needs no exemption at all. Under **every** policy, `unrestricted`
    included, you may **never modify** a target that already exists — placement never
    rewrites a file that is already there, whatever the policy would otherwise allow. The
-   exemption is create-only and covers declared paths only. Then start teaching.
+   exemption is create-only and covers declared paths only. A course written before the key
+   existed gets one other, narrower exemption, and `runner-protocol.md` section 10.1 is
+   where it is stated. Then start teaching.
 
 ### Workspace kinds
 

@@ -248,12 +248,18 @@ every session. Do not carry an assumption from a different tutorial.
 Before any change to a file, ask: does this path match a `learner_owned` glob? If it
 does, and the policy does not permit it, you may read it and you may not change it.
 
-**One exemption crosses that table, and only one.** Creating a file the bundle declares in
-`supplies` is placement, not editing, and it is not a change the learner has to be asked
-for: under `tutor-must-not-edit-learner-owned` **and** under `on-request` alike you MAY
-create a declared target that does not exist, without asking. It runs the other way under
-**every** policy, `unrestricted` included: a declared target that already exists is never
-modified. Section 10 states it in full, and `bundle-format.md` section 2 is the contract.
+**One exemption crosses that table for a bundle written to this format.** Creating a file
+the bundle declares in `supplies` is placement, not editing, and it is not a change the
+learner has to be asked for: under `tutor-must-not-edit-learner-owned` **and** under
+`on-request` alike you MAY create a declared target that does not exist, without asking.
+It runs the other way under **every** policy, `unrestricted` included: a declared target
+that already exists is never modified. Section 10 states it in full, and
+`bundle-format.md` section 2 is the contract.
+
+A second exemption exists for a bundle written **before** `supplies:` did, and it is
+narrower still: it reaches only a file the bundle itself already carries, whose own lesson
+prose tells you to put it in place. It is create-only, it is transitional, and section
+10.1 states it in full. There are no others.
 
 `tutor_owned` — typically `tutorial/STATE.md` and `tutorial/DESIGN.md` — is yours.
 Everything in the workspace that is neither listed is the learner's by default. When in
@@ -852,7 +858,9 @@ the cheaper mistake than writing a new one.
 - **Assigning a file copy as a task.** The tutor never writes a file-copying task. Moving
   files the bundle already carries into the learner's workspace is the runner's work,
   whether the bundle declares it in `supplies` or only says so in prose. Place them,
-  report it as setup, and spend the lesson on the subject. Section 10.
+  report it as setup, and spend the lesson on the subject. Section 10. What this refuses
+  is **handing the copy over**; doing it yourself and reporting it is what section 10.1
+  requires, and 10.1 draws the boundary between the two.
 - **Advancing on assertion.** When `advance_on` is `validated-evidence-only`, "it works
   now" is not evidence. Run the validators.
 - **Batching tasks to save turns.** The budget this protects is the learner's attention,
@@ -913,12 +921,16 @@ the cheaper mistake than writing a new one.
 A bundle MAY declare `supplies`: the files it hands the learner's workspace. You place
 them and you say so. You never assign them.
 
-Manifest-scope entries are placed once, at materialization — `state-lifecycle.md`
-section 3 carries that moment. **A lesson's own entries are placed when that lesson opens,
-before you state its first task**: when you advance into it (section 6), when a session
-resumes into it, and when the learner accepts an optional lesson that declares some. The
-four placement rules are the same ones materialization uses, and `bundle-format.md`
-section 2 states them in full:
+Manifest-scope entries are placed once, at materialization, while the bundle source is
+still in reach — `state-lifecycle.md` section 3 carries that moment. **A lesson's own
+entries are placed when that lesson opens, before you state its first task**: when you
+advance into it (section 6), when a session resumes into it, and when the learner accepts
+an optional lesson that declares some. By then you are reading the instance, which carries
+only `tutorial.yaml`, `COURSE.md`, `DESIGN.md` and `lessons/`, so a lesson-scope `from`
+resolves inside `tutorial/lessons/`. A lesson-scope `from` pointing anywhere else is a
+bundle defect: report it (section 9, "improvising around a broken bundle"), do not go
+looking for the file. The four placement rules are the same ones materialization uses, and
+`bundle-format.md` section 2 states them in full:
 
 1. **Never overwrite.** A target that already exists is left exactly as it is. Not
    compared, not merged, not renamed aside and replaced — left.
@@ -954,10 +966,12 @@ already there, whatever the policy would otherwise allow — which is rule 1 abo
 as an ownership rule so that no policy value reads as permission to ignore it.
 
 The exemption is create-only, and it covers declared paths only — an undeclared path gets
-none of it, however convenient it would be. The author is held to the matching limit: a
-`supplies` entry MUST NOT hand the learner what a lesson asks them to write, or the
-declaration list becomes the widening lever the policy was stopped from being
-(`bundle-format.md` section 2).
+none of *this* one, however convenient it would be. Section 10.1 grants the one other
+exemption there is, for a bundle that predates the key; it is narrower, it reaches nothing
+the bundle does not already ship, and it is create-only too. The author is held to the
+matching limit: a `supplies` entry MUST NOT hand the learner what a lesson asks them to
+write, or the declaration list becomes the widening lever the policy was stopped from
+being (`bundle-format.md` section 2).
 
 ### 10.1 A bundle written before the key existed
 
@@ -986,3 +1000,44 @@ in that sentence tells you which of the two it is.
 When the prose asks for something the bundle does **not** carry — a file to fetch from the
 internet, a tool to install, an account to create — this rule does not apply. That work is
 the learner's, and the lesson is right to ask for it.
+
+#### What this fallback permits, exactly
+
+The fallback is an ownership exemption, so state it to yourself before you act on it. It
+is **narrower** than the declared-supplies exemption above, not broader, and the reading
+that makes it broader is the dangerous one: a tutor that resolves the conflict by taking
+this section as written above and nothing else has just granted itself permission to
+create undeclared learner-owned files.
+
+1. **Create only.** You place a file where none exists. A target that already exists is
+   left exactly as it is — not compared, not merged, not renamed aside and replaced. That
+   is rule 1 of section 10, and this fallback does not soften it by one file.
+2. **Only files the bundle itself carries**, which you can see on disk in the instance.
+   It is not licence to fetch anything over the network, to install a toolchain, to run a
+   generator, or to write the file's contents from your own knowledge. If the bundle does
+   not ship it, this section does not reach it.
+3. **Under `tutor-must-not-edit-learner-owned` and under `on-request`**, as a narrow
+   exception for author-supplied files in a bundle written before the key existed. Under
+   `on-request` you do not ask first, for the same reason a declared supply does not:
+   placing the bundle's own file is not the tutor being asked for a change.
+   `unrestricted` needs no exemption at all.
+4. **Transitional.** The repair is for the bundle to declare these files in `supplies:`.
+   Say so when you use the fallback — one sentence to the learner, once — so that the
+   course gets fixed instead of every tutor rediscovering this rule for itself.
+
+What keeps it narrow is that you are moving the author's own file to where the author's
+own text says it goes. You add nothing, you choose nothing, and you overwrite nothing.
+
+#### The boundary against section 9
+
+Section 9 refuses "assigning a file copy as a task". This section requires performing that
+copy on the learner's behalf and reporting it. Same file, opposite actions — and once you
+know which of the two you are about to do, the two rules do not conflict at all:
+
+| About to | Which rule |
+|---|---|
+| ask the learner to copy, download or unzip a file the bundle already carries | refused — section 9 |
+| place it yourself, report it as setup, name the repair, and teach | required — this section |
+
+Section 9 names the failure of handing the work over. This section names the failure of
+leaving it undone. Neither permits you to create a file the bundle does not carry.

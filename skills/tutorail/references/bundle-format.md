@@ -43,6 +43,8 @@ A bundle is a directory:
 ├── COURSE.md             MUST exist
 ├── DESIGN.md             MUST exist
 ├── STATE.template.md     MUST exist
+├── supplies/             MAY exist: the files a MANIFEST-scope `supplies`
+│                         entry hands the learner's workspace
 └── lessons/              MUST exist, MUST contain at least one lesson
     ├── 00-<slug>.md              a lesson as a single file
     ├── 01-<slug>/                a lesson as a folder, when it has material
@@ -55,6 +57,12 @@ A bundle is a directory:
 
 Every lesson lives in `lessons/`, whether the learner reaches it by walking the course
 or by accepting an offer. There is no second lesson directory in a bundle.
+
+`supplies/` is optional and is a convention, not a reserved name: a manifest-scope
+`supplies` entry may take its `from` anywhere in the bundle, and `supplies/` is where
+authors are told to put those files. A **lesson-scope** entry is different — its `from`
+MUST resolve inside `lessons/`, so a lesson's own supplied files belong in that lesson's
+folder. Section 2, **Supplied files**, says why the two scopes differ.
 
 ### The rule that separates a bundle from an instance
 
@@ -216,6 +224,9 @@ declares, even where it falls under a `learner_owned` glob, and MAY **never modi
 that already exists. The exemption is create-only, and it covers declared paths only —
 an undeclared path gets none of it, whoever would find it convenient. **Supplied files**
 below states the rule in full and says why its narrowness is the whole of its value.
+(A runner carries one other, narrower exemption, for a course written before this key
+existed: `runner-protocol.md` section 10.1. It reaches only files the bundle already
+ships, and it is not something to author against — declare your supplies.)
 
 **`validators`** — a map of name to definition. Valid `kind` values:
 
@@ -414,7 +425,7 @@ always a misspelling of one of the three.
 
 | Field | Required | Meaning |
 |---|---|---|
-| `from` | MUST | The source, **relative to the bundle root**. A trailing `/` means the *contents* of that directory, recursively; without one it names a single file. It MUST resolve to something the bundle actually contains, and MUST NOT point inside `lessons.generated/`, which exists only in an instance. |
+| `from` | MUST | The source, **relative to the bundle root**. A trailing `/` means the *contents* of that directory, recursively; without one it names a single file. It MUST resolve to something the bundle actually contains, and MUST NOT point inside `lessons.generated/`, which exists only in an instance. A **manifest-scope** `from` may resolve anywhere in the bundle; a **lesson-scope** `from` MUST resolve inside `lessons/`. See **Where a `from` may point** below. |
 | `to` | MUST | The destination, relative to the **learner's workspace** root. It MUST be relative, MUST NOT contain `..`, and MUST NOT begin with `tutorial/`. Separate components with `/`. A `to` of `.` is the workspace root itself and is legal; with a directory `from` it scatters a whole tree across the learner's own files, which is the most collision-prone destination a bundle can choose. |
 | `describe` | MUST | One non-empty line, in your words, naming what these files are. The runner says it to the learner, which is the only reason the field exists. |
 
@@ -423,6 +434,26 @@ resolution to remember. A `from` of `assets/models/Duck.glb` means
 `<bundle>/assets/models/Duck.glb` whether it is declared in `tutorial.yaml` or in the
 frontmatter of `lessons/13-load-gltf-model/LESSON.md`. It is never relative to the lesson's
 own folder.
+
+#### Where a `from` may point
+
+Resolution is the same in both scopes; what each scope may *reach* is not, and **timing is
+what decides it**. A manifest-scope entry is placed **during** materialization, while the
+bundle source is still in reach, so its `from` may resolve anywhere in the bundle. A
+lesson-scope entry is placed when that lesson **opens** — long after materialization, from
+an instance that holds only `tutorial.yaml`, `COURSE.md`, `DESIGN.md` and `lessons/` — so
+its `from` MUST resolve inside `lessons/`.
+
+| Declared in | `from` may resolve | Because |
+|---|---|---|
+| `tutorial.yaml`, at the top level | anywhere in the bundle | placement happens while the bundle source is still in reach |
+| a lesson's frontmatter | inside `lessons/` only | placement happens from the instance, which carries only `lessons/` |
+
+A lesson-scope `from` pointing outside `lessons/` is a **bundle defect**, not a style
+choice: materialization does not copy it, so the file is simply not there when the tutor
+opens that lesson. Put a lesson's own supplied files in that lesson's folder, beside its
+`LESSON.md`. Manifest-scope files have no such constraint, and `supplies/` at the bundle
+root is where to keep them (section 1).
 
 **The trailing slash is not decoration.** `assets/shaders/` and `assets/shaders` are not
 interchangeable, and neither form is accepted for the other: a directory declared without
@@ -444,8 +475,9 @@ reported — a bare scalar, or, far the commonest, a single mapping written dire
 `optional_lessons` already gets, for the same reason: silence about nothing declared, noise
 about something declared wrongly.
 
-**Scope decides timing, and nothing else does.** An entry means the same thing wherever it
-is declared; the only thing the two scopes change is when the runner acts on it.
+**Scope decides timing, and timing decides the rest.** An entry means the same thing
+wherever it is declared. What the two scopes change is *when* the runner acts on it — and,
+because of that, where its `from` may point (above).
 
 | Declared in | Placed |
 |---|---|
@@ -483,8 +515,11 @@ each one of them is load-bearing.
 Under `ownership_policy: tutor-must-not-edit-learner-owned` the tutor MAY **create** a
 declared supplies target that does not exist, even where it falls under a `learner_owned`
 glob, and MAY **never modify** one that does. Declaring a path in `supplies` buys that one
-permission and nothing else. An undeclared path gets no exemption of any kind: the policy
-applies to it exactly as it did before this key existed.
+permission and nothing else. An undeclared path gets no part of *this* exemption: the
+policy applies to it exactly as it did before this key existed. The one other exemption a
+runner has is the transitional fallback in `runner-protocol.md` section 10.1, for a course
+written before the key; it is create-only, it reaches only files the bundle already ships,
+and the repair it names is this key.
 
 **`on-request` gets the same exemption, and needs it for the same reason.** That policy
 lets the tutor edit learner files when it is asked, and placing a declared supply is not
@@ -870,7 +905,7 @@ Material available if the learner asks. Not required.
 | `design_refs` | SHOULD | `DESIGN.md` anchors this lesson needs. MUST all resolve. |
 | `validators` | SHOULD | Validator names from `tutorial.yaml`. MUST all be declared. |
 | `optional` | MUST on an optional lesson | `true`, on every lesson listed in `optional_lessons` and on no other. |
-| `supplies` | MAY | Files this lesson hands the learner's workspace when it opens, in the same three-field form the manifest key uses. See section 2, **Supplied files**. |
+| `supplies` | MAY | Files this lesson hands the learner's workspace when it opens, in the same three-field form the manifest key uses. A lesson-scope `from` MUST resolve inside `lessons/` — put these files in this lesson's own folder. See section 2, **Supplied files**. |
 
 `design_refs` is how a lesson stays cheap. A lesson about splitting a file into a
 library declares only the anchors it truly needs. It does not pull in storage,
@@ -1151,6 +1186,9 @@ Confirm each of these by looking, not by remembering:
       frontmatter, and no main-path lesson declares it
 - [ ] every `supplies` entry names a `from` that exists in the bundle, a `to` that
       lands outside `tutorial/`, and a `describe` a learner would understand
+- [ ] every **lesson-scope** `supplies` entry names a `from` inside `lessons/` — a
+      lesson's own supplied files live in that lesson's folder, because the instance
+      carries nothing else
 - [ ] the course can be finished by a learner who declines every offer — unless a
       `required_for` gate says otherwise and you meant it (section 13)
 - [ ] neither `COURSE.md` nor any file under `lessons/` carries a progress marker in a

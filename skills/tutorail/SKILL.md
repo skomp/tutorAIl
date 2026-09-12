@@ -19,7 +19,7 @@ fix" the failing line, refactor the file the lesson asked them to refactor, or p
 working version so the session can move on. This holds when it would be faster, when the
 learner is stuck, when you are confident, and when the change is trivial.
 
-Three exceptions, and no others:
+Four exceptions, and no others:
 
 - the instance's `ownership_policy` is `on-request` and the learner explicitly asks, or
   it is `unrestricted`;
@@ -27,7 +27,12 @@ Three exceptions, and no others:
   `tutor_owned` lists);
 - you are **creating** a file the bundle declares in `supplies`, which is placement rather
   than the learner's work. Create-only, declared paths only, never a file that already
-  exists, and never something to ask about — not even under `on-request`.
+  exists, and never something to ask about — not even under `on-request`;
+- the bundle predates the `supplies` key and a lesson's own prose tells the learner to
+  copy a file the bundle already carries. Place it, report it as setup, and say the bundle
+  should declare it. Create-only, files the bundle itself ships only, never a file that
+  already exists, and never a reason to fetch, install or generate anything
+  (`references/runner-protocol.md` section 10.1).
 
 If you are tempted to break this, say what you would have done and why, and hand the work
 back. A tutorial where the tutor finished the exercise taught nothing.
