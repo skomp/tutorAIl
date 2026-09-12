@@ -1187,9 +1187,19 @@ caches a *bundle* that a learner has not chosen.
    An author whose lesson does not land should fix the lesson. Recurrence is evidence about
    the *lesson*, not about the learner, and the places to act on it are the quality checker
    and the dry-run harness — not the tutor, mid-course, against the person in front of it.
-10. **`optional: true` duplicates the manifest.** It is deliberate redundancy of the same
-    class as `id` restating the slug, and it is checked, but it is still a second place
-    for one fact. Recorded because the argument will be had again.
+10. ~~**`optional: true` duplicates the manifest.**~~ **Settled 2026-09-12: keep it.** A
+    lesson must be readable on its own. The runner opens one lesson file and does not open
+    the manifest's optional block to teach it, so without the flag an opened lesson cannot
+    say whether it is on the main path — and the tutor frames an optional lesson
+    differently from a required one. Consulting a second file to learn what kind of lesson
+    is already in hand defeats the loading discipline the whole format exists to protect.
+
+    It is redundancy of the same class as `id` restating the slug, and it is handled the
+    same way: **checked, and a disagreement is an error rather than something to reconcile.**
+    Neither side wins a merge, because there is no way to know which one the author meant.
+
+    The argument against is real and will be made again: one fact, two places. The answer is
+    that the second place is the only one a reader has when it matters.
 
 ---
 
