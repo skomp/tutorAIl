@@ -65,7 +65,7 @@ updated: 2026-09-11
 |---|---|---|
 | `tutorial_id` | which course this instance is | MUST equal `id` in the instance `tutorial.yaml` |
 | `active_lesson` | the lesson file to load now | MUST be a path, and MUST appear in the manifest's `lessons` list — unless it names a generated lesson, section 8 |
-| `resume_after` | where to return when a detour finishes | present **only** while `active_lesson` names a file under `lessons.generated/`; see section 8.3 |
+| `resume_at` | the lesson to make active when a detour finishes | present **only** while `active_lesson` names a file under `lessons.generated/`; see section 8.3 |
 | `status` | `not-started`, `in-progress`, `complete` | set by the runner |
 | `updated` | date of the last change | update whenever you change the file |
 
@@ -269,9 +269,9 @@ started lets the tutor assume it exists.
 
 - `active_lesson` names a path that is neither in the manifest's `lessons` list nor a
   file under `lessons.generated/` (section 8.3 permits the second, and only with
-  `resume_after` set);
+  `resume_at` set);
 - `active_lesson` names a generated lesson that is not there, or names one while
-  `resume_after` is absent or is not an entry in `lessons`;
+  `resume_at` is absent or is not an entry in `lessons`;
 - a file under `lessons.generated/` whose `after:` is not an entry in `lessons`, or which
   is missing any of the five provenance fields;
 - `tutorial_id` does not match the manifest's `id`;
@@ -326,7 +326,11 @@ ownership of this one path is settled by the runner and not by the manifest.
    lighter one. A lesson with no completion conditions is a lesson you cannot decide to
    leave.
 5. **Add the provenance frontmatter** below, alongside the ordinary lesson fields.
-6. **Say what you wrote and why, before teaching it.** A lesson that appears in the
+6. **Record the way back before you teach a word of it.** Set `active_lesson` to the
+   generated lesson and `resume_at` to the lesson the learner returns to — section 8.3.
+   Write it now, while you still know where the learner was standing; a session that
+   starts after the detour cannot recover it.
+7. **Say what you wrote and why, before teaching it.** A lesson that appears in the
    learner's workspace unannounced is indistinguishable from the course changing
    underneath them. For a `main-path-draft` this is not optional and not a footnote:
    `runner-protocol.md` section 7.4 says what the learner must be told, and when.
@@ -359,13 +363,35 @@ validators: [cargo-check]
 | `generated_at` | MUST | The date it was written. Orders two detours that share one `after:`. |
 | `kind` | MUST | `side-lesson` or `main-path-draft`. |
 | `reason` | MUST | One sentence, written for a bundle author who was not in the room. When the learner asked for this lesson rather than you judging it necessary, `reason` MUST say so and say what they asked for — the two mean different things about the course. This is the evidence `bundle-format.md` section 8 depends on. |
-| `after` | MUST | The lesson this one follows. MUST be an entry in the manifest's `lessons` list — an authored lesson, never another generated one. |
+| `after` | MUST | Where this lesson belongs in the course sequence: the authored lesson it follows. MUST be an entry in the manifest's `lessons` list — an authored lesson, never another generated one. |
 | `design_refs` | SHOULD | Anchors that already exist in the instance's `DESIGN.md`. |
 | `validators` | SHOULD | Names already declared in the manifest's `validators` map. |
 
 Never invent a validator name or a `DESIGN.md` anchor for a generated lesson. Either one
 manufactures exactly the defect `runner-protocol.md` section 7.2 tells you to report, and
 it would then be your own defect.
+
+#### `after:` is placement, not the way back
+
+`after:` answers one question only: **where does this lesson belong in the course?** A
+bundle author reading the instance later uses it to decide where a promoted lesson goes
+(`bundle-format.md` section 8), and the runner uses it to decide which detours are waiting
+at which point in `lessons`.
+
+It does **not** say where the detour returns to. That is `resume_at` in `STATE.md`, it is
+a separate field, and section 8.3 sets it explicitly. Do not compute one from the other in
+either direction.
+
+How to choose `after:`:
+
+| The detour starts | `after:` is |
+|---|---|
+| part-way through lesson L, because L needs a concept the course never taught | the last **completed** authored lesson — the detour belongs **before** L, because L depends on it |
+| part-way through lesson L, on a topic L does not depend on (a learner asked for it) | L — nothing in L needs it, so it belongs after L |
+| at a boundary, after L completed and before the next entry began | L |
+
+When the learner is part-way through the **first** entry in `lessons`, no authored lesson
+is complete and there is no earlier entry to name. Use that first entry.
 
 ### 8.3 `active_lesson` may point into `lessons.generated/`
 
@@ -375,7 +401,7 @@ While a detour is active, `STATE.md` looks like this:
 ---
 tutorial_id: rust-automaton-db
 active_lesson: lessons.generated/lifetimes-and-borrows.md
-resume_after: lessons/04-storage-engine.md
+resume_at: lessons/04-storage-engine.md
 status: in-progress
 updated: 2026-09-11
 ---
@@ -383,24 +409,48 @@ updated: 2026-09-11
 
 | Field | Meaning | Constraint |
 |---|---|---|
-| `resume_after` | the `lessons` entry to return to when the detour finishes | present exactly while `active_lesson` names a generated lesson; absent otherwise |
+| `resume_at` | the `lessons` entry to make active when the detour finishes | present exactly while `active_lesson` names a generated lesson; absent otherwise |
 
 **This is the one exception to "`active_lesson` MUST appear in the manifest's `lessons`
 list".** A path under `lessons.generated/` is deliberately not in the list, and the
-presence of `resume_after` is what says so. Everything else about the field is unchanged:
+presence of `resume_at` is what says so. Everything else about the field is unchanged:
 it is a path, it is the file a cold session opens, and it is still the single field that
 makes a conversation with no history work.
 
-Set `resume_after` when the detour becomes active, not when it finishes. Its value is the
-entry that would have become active had the detour not existed — the entry after the
-detour's `after:` in `lessons`. It MUST itself be an entry in `lessons`: a detour returns
-to the main path, never to another detour. Computing it once, at the moment you know it,
-is what stops a later session guessing.
+**The field names the lesson to make active, not a lesson to move past.** `resume_at:
+lessons/04-storage-engine.md` means lesson 04 becomes the active lesson. It does not mean
+"the lesson after 04". The example above is a detour taken part-way through lesson 04: the
+learner goes back into 04 and finishes it.
 
-When `after:` names the **last** entry in `lessons` there is nothing further to return to.
-Set `resume_after` to that last entry anyway, so the field stays a real lesson path, and
-when the detour completes set `active_lesson` to it with `status: complete` — the course
-is finished, per section 5, "Reaching the end". Do not re-teach it.
+#### Recording it
+
+**Write `resume_at` when the detour becomes active, not when it finishes**, and write the
+value you already know rather than one you derive. `after:` records placement and
+`resume_at` records the way back; they are independent fields and neither is computed from
+the other.
+
+| The detour starts | `resume_at` is |
+|---|---|
+| part-way through lesson L | **L** — the interrupted lesson. The learner has unfinished work in it |
+| at a boundary, after L completed and before the next entry began | the entry **after** L in `lessons` |
+
+`resume_at` MUST itself be an entry in `lessons`: a detour returns to the main path, never
+to another detour. Recording it once, at the moment you know it, is what stops a later
+session guessing.
+
+When there is nothing further to return to — a boundary detour off the **last** entry in
+`lessons` — set `resume_at` to that last entry anyway, so the field stays a real lesson
+path, and when the detour completes set `active_lesson` to it with `status: complete` —
+the course is finished, per section 5, "Reaching the end". Do not re-teach it.
+
+> **Do not derive `resume_at` from `after:`.** An earlier revision of this document said
+> the value was "the entry after the detour's `after:` in `lessons`". That rule silently
+> skips work. A learner who is halfway through lesson L and needs a prerequisite has only
+> one lesson they can be sent back to — L — and any rule that returns them to the entry
+> *after* L throws away the rest of a lesson they never finished, with nothing in
+> `STATE.md` recording that it happened. Mid-lesson detours are ordinary: being blocked on
+> an untaught prerequisite happens mid-lesson by definition, and a learner may ask for a
+> side lesson at any moment (`runner-protocol.md` section 7.1).
 
 ### 8.4 Completing a generated lesson
 
@@ -413,13 +463,19 @@ A detour completes like any other lesson, and then hands the learner back:
    instance's `DESIGN.md`, under an anchor that exists.
 3. **Record the lesson complete** in `STATE.md`, per section 8.5. This is what lets a
    cold session answer "is this generated lesson incomplete?" without reading every file.
-4. **Return to the main path.** Set `active_lesson` to `resume_after` and remove the
-   `resume_after` field. One exception: when another incomplete generated lesson shares
+4. **Return to the main path.** Set `active_lesson` to `resume_at` and remove the
+   `resume_at` field. One exception: when another incomplete generated lesson shares
    this detour's `after:` value, that one becomes `active_lesson` instead — oldest
-   `generated_at` first — and `resume_after` carries over unchanged, because both detours
-   return to the same place.
-5. **Reset the body for the new lesson**, per section 5 step 4. *Concepts demonstrated*
-   accumulates as usual; what the detour taught stays recorded.
+   `generated_at` first — and `resume_at` carries over unchanged. The learner has not
+   moved, so the place they come back to has not changed either.
+5. **Set the body for wherever the learner lands.** *Concepts demonstrated* accumulates as
+   usual either way; what the detour taught stays recorded.
+   - **Returning into an interrupted lesson** — `resume_at` names the lesson that was
+     active when the detour began. Do not reset the body. The learner has unfinished work
+     in that lesson, and *Next task* is the task the detour interrupted, restated with
+     whatever the detour changed about it.
+   - **Returning to a lesson not yet started** — reset the body for a new lesson, per
+     section 5 step 4.
 6. **`updated`** — set to today.
 
 **Never delete a generated lesson when it completes.** It stays in the instance as both

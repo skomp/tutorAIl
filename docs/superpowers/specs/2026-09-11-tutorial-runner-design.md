@@ -257,8 +257,40 @@ for every learner; a generated lesson is a learner-specific overlay discovered b
 reconcilable, and stops two learners' courses diverging structurally.
 
 `STATE.md`'s `active_lesson` may point into `lessons.generated/`. When it does, a
-`resume_after:` field records where to return, so completing a detour resumes the main
+`resume_at:` field records where to return, so completing a detour resumes the main
 path rather than guessing.
+
+**`after:` and `resume_at` are independent, and neither is derived from the other.**
+`after:` is placement — where the lesson belongs in the course sequence. `resume_at` is
+the way back — the `lessons` entry to make active when the detour finishes. The runner
+writes `resume_at` at the moment the detour becomes active.
+
+| The detour starts | `after:` | `resume_at` |
+|---|---|---|
+| part-way through lesson L, on a prerequisite L needs | the last **completed** authored lesson | **L** — the interrupted lesson |
+| part-way through lesson L, on a topic L does not depend on | L | **L** |
+| at a boundary, after L completed | L | the entry **after** L |
+| at a boundary off the last entry | that last entry | that last entry |
+
+> **Correction, 2026-09-12.** An earlier revision of this spec and of
+> `state-lifecycle.md` section 8.3 derived the return target: "the entry after the
+> detour's `after:` in `lessons`". **That rule was wrong and it silently lost work.**
+> A mid-lesson detour is the ordinary case, not an edge case — being blocked on an
+> untaught prerequisite happens inside a lesson by definition, and a learner may ask
+> for a side lesson at any moment. Under the derived rule the only placement the text
+> permitted for a detour taken during lesson L was `after: L`, which made the return
+> target the entry after L. The learner came back from the detour past the rest of the
+> lesson they had been in the middle of, with nothing recorded anywhere saying it had
+> been skipped. Recording the return target explicitly, when the detour starts, is what
+> fixes it. Do not reintroduce the derivation, and do not add a validator check that
+> asserts a relationship between the two fields. In the mid-lesson case `resume_at` is
+> the same entry as `after:` or a LATER one; at a boundary it is a later one or, off
+> the last entry, the same one. The table above is the whole rule.
+
+The field is named `resume_at`, not `resume_after`. It names the lesson to **make
+active**, and `resume_after: lessons/04` reads as "resume after lesson 04" — that is,
+lesson 05. A tutor reading the contract that way skips a lesson. The rename happened
+before anything shipped and before any real instance carried the field.
 
 **Ownership is a runner rule, not a manifest field.** `tutorial/lessons.generated/` is
 tutor-owned in **every** instance, whatever the manifest says. It cannot be a `tutor_owned`
@@ -288,14 +320,16 @@ carry it.
 
 **Advancement** on completing a lesson: if a generated lesson is `pending` and declares
 `after:` equal to the lesson just finished, it becomes active next; otherwise the next entry
-in `lessons`.
+in `lessons`. A detour can also start **part-way through** a lesson, which completes
+nothing: the lesson is interrupted, and `resume_at` names it so the learner comes back
+into it.
 
 **`active_lesson` may name a generated lesson** — it resolves either to an entry in
 `lessons` or to a file under `lessons.generated/`. It must resolve to one of the two; a path
 resolving to neither is a finding.
 
-**A detour off the final lesson** sets `resume_after` to that final entry. Completing the
-detour returns there, finds it already complete, and completes the course. `resume_after` is
+**A detour off the final lesson** sets `resume_at` to that final entry. Completing the
+detour returns there, finds it already complete, and completes the course. `resume_at` is
 therefore always present and always names an authored lesson, which keeps the rule uniform
 rather than adding an optional-field case.
 

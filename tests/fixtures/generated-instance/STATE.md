@@ -1,7 +1,7 @@
 ---
 tutorial_id: rust-cli-basics
 active_lesson: lessons.generated/lifetimes-and-borrows.md
-resume_after: lessons/01-subcommands/LESSON.md
+resume_at: lessons/01-subcommands/LESSON.md
 status: in-progress
 updated: 2026-09-11
 ---

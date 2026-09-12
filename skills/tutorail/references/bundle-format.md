@@ -543,6 +543,12 @@ A third route produces one: the learner asks for a side lesson outright, on a to
 the lesson they are in. Those carry the same provenance, and `reason:` records that the
 learner asked.
 
+**`after:` is placement, and placement only.** It tells you where the lesson belongs in
+the sequence, which is what step 7 of the promotion procedure below uses. It is not where
+the learner went back to: a detour often starts part-way through a lesson, and the way
+back is recorded separately, in the instance's `STATE.md`. So a detour placed after lesson
+03 may well have returned the learner into lesson 04, and that is not a contradiction.
+
 Whether a tutor may write a side lesson unprompted is decided against the coverage list
 your `COURSE.md` declares (section 3). A concept in your list that no lesson taught is a
 hole and gets a lesson; a concept your list does not name is reported to the learner as

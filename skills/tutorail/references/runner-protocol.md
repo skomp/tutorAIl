@@ -367,7 +367,13 @@ against your impression of what the lesson is about.
 A requested lesson is an ordinary generated lesson in every other respect: the same
 structure, the same provenance frontmatter, the same completion conditions, the same
 placement by `after:`. Record in `reason:` that the learner asked for it, and what they
-asked for. A bundle author reading these files later must be able to tell a detour the
+asked for.
+
+**The request usually arrives part-way through a lesson**, because that is when the
+learner notices what they are missing. Take the detour from where they are and send them
+back to the same place: section 7.3 is the mechanic, and it is the same one that covers
+being blocked on an untaught prerequisite. Do not make the learner finish the lesson first
+so the detour fits at a boundary. A bundle author reading these files later must be able to tell a detour the
 tutor judged necessary from one the learner chose, because only the first is evidence
 about the course (`bundle-format.md` section 8).
 
@@ -454,30 +460,62 @@ assumes or a difficulty the exercise intends — and say which you concluded, an
 the learner can disagree. A course that declares a coverage list takes that judgement out
 of your hands, which is the whole point of declaring one.
 
-### 7.3 Advancing when generated lessons exist
+### 7.3 Moving between lessons when generated lessons exist
 
 The manifest's `lessons` list is **never** modified — not to add a generated lesson, not
 for any other reason. `state-lifecycle.md` section 8 says why. Generated lessons are an
 overlay, positioned by their `after:` field and discovered by listing the directory.
 
 A generated lesson's `after:` always names an **authored** lesson — an entry in `lessons`,
-never another generated lesson. So there are two cases, and after the steps in section 6:
+never another generated lesson. Two fields carry the overlay, and they are independent:
 
-**On completing an authored lesson L**
+- **`after:`**, in the generated lesson's own frontmatter, is **placement** — where this
+  lesson belongs in the course;
+- **`resume_at`**, in `STATE.md`, is **the way back** — the `lessons` entry that becomes
+  active when the detour finishes.
+
+**Never compute one from the other.** `state-lifecycle.md` section 8.3 has the rule and
+the reason: a detour can start part-way through a lesson, and deriving the way back from
+the placement sends the learner past the rest of the lesson they were in the middle of.
+
+There are three moments, and the first two both write `resume_at`.
+
+**A detour starts part-way through a lesson L**
+
+This is the ordinary case for a side lesson. Being blocked on a concept the course never
+taught happens inside a lesson, not at its edge, and a learner may ask for a detour at any
+moment (section 7.1). Nothing about lesson L completes here — it is interrupted.
+
+1. `active_lesson` becomes the generated lesson;
+2. `resume_at` becomes **L**, the interrupted lesson;
+3. record the lesson in the *Generated lessons* section as pending
+   (`state-lifecycle.md` section 8.5).
+
+The detour's own `after:` is placement and is chosen separately —
+`state-lifecycle.md` section 8.2. Do not advance `active_lesson` past L, do not record
+L complete, and do not reset the `STATE.md` body: L is interrupted, not finished.
+
+**A detour starts at a boundary, on completing an authored lesson L**
+
+After the steps in section 6:
 
 1. list `tutorial/lessons.generated/`. If it does not exist, there is no overlay and
    nothing changes;
 2. if an **incomplete** generated lesson declares `after: L`, it becomes `active_lesson`,
-   and `resume_after` records the entry that follows L in `lessons`;
+   and `resume_at` becomes the entry that follows L in `lessons` — L is finished, so
+   there is nothing to go back into. When L is the **last** entry, `resume_at` is L
+   itself (`state-lifecycle.md` section 8.3);
 3. otherwise take the next entry in `lessons`, exactly as section 6 step 4 says.
 
-**On completing a generated lesson whose `after:` is L**
+**A generated lesson completes**
 
-1. if another incomplete generated lesson also declares `after: L`, it becomes
-   `active_lesson` and `resume_after` is left as it is — both detours return to the same
-   place;
-2. otherwise `active_lesson` becomes `resume_after`, and the `resume_after` field is
-   removed.
+1. if another incomplete generated lesson declares the same `after:` value, it becomes
+   `active_lesson` and `resume_at` is left as it is. The learner has not moved, so the
+   place they come back to has not changed;
+2. otherwise `active_lesson` becomes `resume_at`, and the `resume_at` field is removed.
+   When `resume_at` names the interrupted lesson, the learner lands back in unfinished
+   work: do not reset the `STATE.md` body, and make *Next task* the task the detour
+   interrupted (`state-lifecycle.md` section 8.4, step 5).
 
 A generated lesson is incomplete until `STATE.md` records it as finished, in the
 *Generated lessons* section (`state-lifecycle.md` section 8.5). The lesson files carry no
@@ -514,7 +552,7 @@ with it has learned something about you rather than about the subject.
 
 A `side-lesson` does not need this. Its nature is already plain: either the learner asked
 for it, or you announced the detour when you proposed it (`state-lifecycle.md` section 8.2,
-step 6). Saying it a second time is noise, and noise is what makes the announcement that
+step 7). Saying it a second time is noise, and noise is what makes the announcement that
 matters easy to miss.
 
 ---

@@ -811,7 +811,7 @@ def v_generated_dir_miscased(root: Path) -> None:
 
 
 def m_generated_after_not_a_lesson(root: Path) -> None:
-    edit(root / SIDE, "after: lessons/01-subcommands/LESSON.md", "after: lessons/99-nope.md")
+    edit(root / SIDE, "after: lessons/00-hello-args.md", "after: lessons/99-nope.md")
 
 
 def m_generated_after_names_a_generated_lesson(root: Path) -> None:
@@ -827,7 +827,7 @@ def m_generated_after_is_material(root: Path) -> None:
     """`after` points at a real file under lessons/ that is not a lesson."""
     edit(
         root / SIDE,
-        "after: lessons/01-subcommands/LESSON.md",
+        "after: lessons/00-hello-args.md",
         "after: lessons/01-subcommands/usage.txt",
     )
     assert (root / "lessons/01-subcommands/usage.txt").is_file()
@@ -858,27 +858,80 @@ def m_bundle_manifest_lists_generated_lesson(root: Path) -> None:
     assert "lessons.generated" not in os.listdir(root)
 
 
-# -- check 17: resume_after
+# -- check 17: resume_at
 
 
 def m_generated_active_without_resume(root: Path) -> None:
-    edit(root / "STATE.md", "resume_after: lessons/01-subcommands/LESSON.md\n", "")
+    edit(root / "STATE.md", "resume_at: lessons/01-subcommands/LESSON.md\n", "")
 
 
 def m_generated_resume_unlisted(root: Path) -> None:
     edit(
         root / "STATE.md",
-        "resume_after: lessons/01-subcommands/LESSON.md",
-        f"resume_after: {SIDE}",
+        "resume_at: lessons/01-subcommands/LESSON.md",
+        f"resume_at: {SIDE}",
     )
 
 
 def m_generated_resume_not_a_path(root: Path) -> None:
     edit(
         root / "STATE.md",
-        "resume_after: lessons/01-subcommands/LESSON.md",
-        "resume_after: 2",
+        "resume_at: lessons/01-subcommands/LESSON.md",
+        "resume_at: 2",
     )
+
+
+# -- check 17, negative direction: the shapes a detour is allowed to take.
+#
+# `after:` is placement in the course; `resume_at` is the lesson to make
+# active when the detour ends. They are independent fields, so no ordering
+# relationship between them may be asserted. The baseline itself is already
+# the mid-lesson PREREQUISITE shape - after: lessons/00-hello-args.md,
+# resume_at: lessons/01-subcommands/LESSON.md - so these two cover the other
+# two shapes.
+
+
+def m_detour_at_a_boundary(root: Path) -> None:
+    """Lesson 01 COMPLETED, then the detour. It returns to lesson 02.
+
+    The old derived rule produced exactly this pair, so this is the shape
+    that must keep working after the rule was removed.
+    """
+    edit(root / SIDE, "after: lessons/00-hello-args.md", "after: lessons/01-subcommands/LESSON.md")
+    edit(
+        root / "STATE.md",
+        "resume_at: lessons/01-subcommands/LESSON.md",
+        "resume_at: lessons/02-errors-and-tests.md",
+    )
+
+
+def m_detour_mid_lesson_placed_on_the_interrupted_lesson(root: Path) -> None:
+    """Part-way through lesson 01, on a topic lesson 01 does not depend on.
+
+    The learner asked for it, so it does not belong BEFORE 01; it belongs
+    after it. The learner still has unfinished work in 01, so that is where
+    they go back to. `after:` and `resume_at` therefore name the SAME entry,
+    which the derived rule `resume = the entry after after:` could not
+    produce: it would have returned lessons/02-errors-and-tests.md and thrown
+    away the rest of lesson 01.
+    """
+    edit(root / SIDE, "after: lessons/00-hello-args.md", "after: lessons/01-subcommands/LESSON.md")
+    text = (root / "STATE.md").read_text()
+    assert "resume_at: lessons/01-subcommands/LESSON.md" in text
+    side = (root / SIDE).read_text()
+    assert "after: lessons/01-subcommands/LESSON.md" in side
+    listed = _manifest_lessons(root)
+    assert listed.index("lessons/01-subcommands/LESSON.md") < len(listed) - 1, (
+        "the interrupted lesson must not be the last entry, or this fixture "
+        "would be the final-lesson special case instead"
+    )
+
+
+def _manifest_lessons(root: Path) -> list[str]:
+    parsed = vb._RestrictedYaml(
+        (root / "tutorial.yaml").read_text(), "tutorial.yaml"
+    ).parse()
+    return [str(entry) for entry in parsed["lessons"]]
 
 
 # -- check 11, in the presence of generated lessons
@@ -890,7 +943,7 @@ def m_active_lesson_resolves_to_neither(root: Path) -> None:
     COURSE.md exists and resolves. It is not a lesson of either kind.
     """
     edit(root / "STATE.md", f"active_lesson: {SIDE}", "active_lesson: COURSE.md")
-    edit(root / "STATE.md", "resume_after: lessons/01-subcommands/LESSON.md\n", "")
+    edit(root / "STATE.md", "resume_at: lessons/01-subcommands/LESSON.md\n", "")
     assert (root / "COURSE.md").is_file()
 
 
@@ -963,8 +1016,8 @@ def m_generated_shadows_an_authored_slug(root: Path) -> None:
     assert target.is_file()
 
 
-def m_stale_resume_after(root: Path) -> None:
-    """The detour finished, active_lesson moved back, resume_after stayed."""
+def m_stale_resume_at(root: Path) -> None:
+    """The detour finished, active_lesson moved back, resume_at stayed."""
     edit(
         root / "STATE.md",
         f"active_lesson: {SIDE}",
@@ -1212,18 +1265,26 @@ CASES: list[Case] = [
     Case("16: a bundle manifest lists a generated lesson", 16, "cli", "bundle",
          m_bundle_manifest_lists_generated_lesson,
          "'lessons.generated/detour.md' names a generated lesson"),
-    # ---- check 17: resume_after
-    Case("17: active_lesson is generated and resume_after is absent", 17,
+    # ---- check 17: resume_at
+    Case("17: active_lesson is generated and resume_at is absent", 17,
          "generated", "instance", m_generated_active_without_resume,
-         "must also carry 'resume_after'"),
-    Case("17: resume_after names a generated lesson, not the main path", 17,
+         "must also carry 'resume_at'"),
+    Case("17: resume_at names a generated lesson, not the main path", 17,
          "generated", "instance", m_generated_resume_unlisted,
          "which is not an entry in tutorial.yaml's 'lessons' list"),
-    Case("17: resume_after is not a path", 17, "generated", "instance",
-         m_generated_resume_not_a_path, "resume_after must be a lesson path"),
-    Case("17: resume_after is left behind after the detour finished", 17,
-         "generated", "instance", m_stale_resume_after,
+    Case("17: resume_at is not a path", 17, "generated", "instance",
+         m_generated_resume_not_a_path, "resume_at must be a lesson path"),
+    Case("17: resume_at is left behind after the detour finished", 17,
+         "generated", "instance", m_stale_resume_at,
          "is not a lesson in lessons.generated/"),
+    # ---- check 17, negative direction. `after:` and `resume_at` are
+    # independent, so every legitimate detour shape must validate clean.
+    Case("17: a boundary detour returning to the entry after its 'after:' is "
+         "NOT reported", 17, "generated", "instance", m_detour_at_a_boundary,
+         kind="silent"),
+    Case("17: a mid-lesson detour whose 'after:' and resume_at name the SAME "
+         "entry is NOT reported", 17, "generated", "instance",
+         m_detour_mid_lesson_placed_on_the_interrupted_lesson, kind="silent"),
     # ---- check 11: the relaxation must not become a hole
     Case("11: active_lesson resolves, but to neither kind of lesson", 11,
          "generated", "instance", m_active_lesson_resolves_to_neither,
@@ -1491,17 +1552,58 @@ def test_generated_baseline_is_expressible() -> None:
     front = vb._RestrictedYaml(state_fm, "STATE.md").parse()
     record(
         front["active_lesson"].startswith("lessons.generated/")
-        and front["resume_after"] in ["lessons/01-subcommands/LESSON.md"],
+        and front["resume_at"] in ["lessons/01-subcommands/LESSON.md"],
         "STATE.md sits ON a generated lesson and records where to resume",
         repr(front),
     )
-    listed = vb._RestrictedYaml(
-        (root / "tutorial.yaml").read_text(), "tutorial.yaml"
-    ).parse()["lessons"]
+    listed = [
+        str(e)
+        for e in vb._RestrictedYaml(
+            (root / "tutorial.yaml").read_text(), "tutorial.yaml"
+        ).parse()["lessons"]
+    ]
     record(
-        not any(str(e).startswith("lessons.generated") for e in listed),
+        not any(e.startswith("lessons.generated") for e in listed),
         "the manifest lessons list was not mutated to mention them",
         repr(listed),
+    )
+
+    # The baseline is a MID-LESSON detour, and this is the assertion that
+    # says so. The learner is part-way through lesson 01: the detour is
+    # PLACED after lesson 00, the last lesson they completed, and it returns
+    # them INTO lesson 01, which they never finished.
+    #
+    # The superseded rule derived the return target from `after:` and said it
+    # was "the entry after the detour's `after:` in lessons". Under it there
+    # was no way to record a return into an interrupted lesson at all: a
+    # detour taken during lesson L had to be placed `after: L`, and the
+    # learner then came back at the entry AFTER L, silently skipping the rest
+    # of the lesson they were in the middle of. So this is the positive proof
+    # that the fix enables the case, not merely that it stopped rejecting it.
+    side_fm, _ = vb.split_frontmatter(
+        (root / "lessons.generated" / "lifetimes-and-borrows.md").read_text()
+    )
+    assert side_fm is not None
+    side = vb._RestrictedYaml(side_fm, "lifetimes-and-borrows.md").parse()
+    placement = str(side["after"])
+    resume = str(front["resume_at"])
+    record(
+        placement in listed and resume in listed,
+        "the mid-lesson detour places itself, and returns, inside 'lessons'",
+        f"after = {placement!r}, resume_at = {resume!r}, lessons = {listed!r}",
+    )
+    record(
+        listed.index(resume) > listed.index(placement),
+        "the mid-lesson detour returns to a LATER lesson than the one it "
+        "follows - the interrupted lesson, not the one after it",
+        f"after = {placement!r} at index {listed.index(placement)}, "
+        f"resume_at = {resume!r} at index {listed.index(resume)}",
+    )
+    record(
+        resume != listed[-1] and listed.index(resume) > 0,
+        "and it is not the final-lesson special case, which would prove "
+        "nothing about mid-lesson detours",
+        f"resume_at = {resume!r}, lessons = {listed!r}",
     )
 
     # And it must still be rejected as a BUNDLE, on check 13.

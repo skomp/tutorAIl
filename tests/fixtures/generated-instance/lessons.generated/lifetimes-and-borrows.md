@@ -5,7 +5,7 @@ generated: true
 generated_at: 2026-09-11
 kind: side-lesson
 reason: "The learner cannot explain why count_lines takes &str rather than String"
-after: lessons/01-subcommands/LESSON.md
+after: lessons/00-hello-args.md
 design_refs: [io-boundary, counting-rules]
 validators: [cargo-check, explains-choice]
 ---

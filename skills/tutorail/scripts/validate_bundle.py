@@ -576,7 +576,7 @@ CHECKS: dict[int, str] = {
     14: "[instance] every generated lesson declares its provenance, with a known kind",
     15: "[instance] every generated lesson's 'after' names a lesson in the manifest list",
     16: "the manifest's lessons list names no generated lesson",
-    17: "[instance] resume_after is present exactly while active_lesson is "
+    17: "[instance] resume_at is present exactly while active_lesson is "
     "generated, and names a manifest lesson",
 }
 
@@ -803,7 +803,13 @@ LIMITATIONS = """What a pass does and does not mean
       against the disk. That is the stronger test - the list is what the
       runner walks - but it means a generated lesson placed after a file
       that exists and is simply unlisted reads as the same error as one
-      placed after a path that is not there at all."""
+      placed after a path that is not there at all.
+    nothing checks `resume_at` against the active detour's `after:`. The two
+      are independent by design: `after:` is where the lesson belongs in the
+      course, `resume_at` is the lesson to make active when the detour ends,
+      and a detour taken part-way through a lesson returns INTO that lesson.
+      Check 17 asserts only that `resume_at` is a path naming an entry in
+      `lessons`, and that it is present exactly while a detour is active."""
 
 
 @dataclass(frozen=True)
@@ -1916,7 +1922,15 @@ def check_generated_resume(
 
     Only applies while the learner is ON a generated lesson. A detour that does
     not record where it came from leaves the runner guessing which main-path
-    lesson to resume, and guessing is what `resume_after` exists to prevent.
+    lesson to resume, and guessing is what `resume_at` exists to prevent.
+
+    `resume_at` names the lesson to MAKE ACTIVE when the detour finishes. It is
+    deliberately NOT derived from, and NOT checked against, the generated
+    lesson's `after:` field. The two answer different questions - `after:` is
+    placement in the course, `resume_at` is the way back - and any assertion
+    tying them together would reject the ordinary case: a detour taken
+    part-way through a lesson places itself before that lesson and returns
+    INTO it, so `resume_at` is then LATER in `lessons` than `after:`.
     """
     if fm is None:
         report.blocked(17, "STATE.md frontmatter is missing or did not parse")
@@ -1924,16 +1938,16 @@ def check_generated_resume(
     active = fm.get("active_lesson")
     generated_rels = {lesson.rel for lesson in generated}
     listed = as_list(manifest.get("lessons")) if isinstance(manifest, dict) else None
-    resume = fm.get("resume_after")
+    resume = fm.get("resume_at")
     if not isinstance(active, str) or active not in generated_rels:
-        # `resume_after` is present EXACTLY while a detour is active. Left
+        # `resume_at` is present EXACTLY while a detour is active. Left
         # behind after one finished, it points a cold session at a lesson the
         # learner has already been through, with nothing to say it is stale.
         if resume is not None:
             report.add(
                 17,
                 "STATE.md",
-                f"resume_after is {resume!r}, but active_lesson "
+                f"resume_at is {resume!r}, but active_lesson "
                 f"{active!r} is not a lesson in {GENERATED_DIR}/. The field "
                 f"records where an active detour returns to, so it belongs in "
                 f"STATE.md only while one is active. Remove it.",
@@ -1942,25 +1956,27 @@ def check_generated_resume(
         else:
             report.na(17, "active_lesson is not a generated lesson")
         return
-    if "resume_after" not in fm or resume is None:
+    if "resume_at" not in fm or resume is None:
         report.add(
             17,
             "STATE.md",
             f"active_lesson {active!r} is a generated lesson, so STATE.md must "
-            f"also carry 'resume_after' naming the main-path lesson to return to "
-            f"when the detour ends.",
+            f"also carry 'resume_at' naming the main-path lesson to make active "
+            f"when the detour ends - the interrupted lesson when this detour "
+            f"started part-way through one, otherwise the entry after the "
+            f"lesson it followed.",
         )
     elif not isinstance(resume, str):
         report.add(
             17,
             "STATE.md",
-            f"resume_after must be a lesson path, not {type(resume).__name__}.",
+            f"resume_at must be a lesson path, not {type(resume).__name__}.",
         )
     elif listed is not None and resume not in listed:
         report.add(
             17,
             "STATE.md",
-            f"resume_after is {resume!r}, which is not an entry in "
+            f"resume_at is {resume!r}, which is not an entry in "
             f"tutorial.yaml's 'lessons' list. The detour has to return to the "
             f"main path, so it must name an authored lesson.",
         )

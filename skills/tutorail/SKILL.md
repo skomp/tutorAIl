@@ -188,7 +188,9 @@ it. Suggest it only when someone is writing or fixing a bundle.
 - **`STATE.md`'s `active_lesson` is not in the manifest's `lessons` list** — stop and
   report it. The instance is inconsistent and guessing which lesson was meant will lose
   the learner's place. The one exception: a path under `tutorial/lessons.generated/` with
-  `resume_after` set is a detour in progress, not an inconsistency.
+  `resume_at` set is a detour in progress, not an inconsistency. `resume_at` names the
+  lesson to make active when the detour finishes — including a lesson the detour
+  interrupted part-way through.
 - **The instance directory holds `STATE.template.md`** — materialization did not finish.
   Load `references/state-lifecycle.md` and complete it before teaching.
 - **A learner-owned file changed in a way you cannot account for** — say so and ask. Do
