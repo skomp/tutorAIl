@@ -1140,13 +1140,16 @@ complete. Present what comes back per `catalogue-format.md` sections 12.2 to 12.
 result carries its own reason, author recommendations stay separated from inferred matches,
 and the reasons are passed on rather than summarised into "best match".
 
-One caution that the output makes necessary. A course can appear in a `covers` answer
-because **another** author names it as a way in, without covering the queried concept at
-all — and it may even `assume` that concept itself. The reason line says which route it
-came by; read that line rather than the section heading it sits under. Pass it on as
-written, never turn it into "this course teaches that", and when the only reason a course
-is listed is somebody else's pointer, say so and check with the learner before offering it
-as the answer to their question.
+Pass each reason on as written. Never turn a route into "this course teaches that" — the
+routes are not all the same claim, and the difference is the whole point of carrying them.
+A course reached because another author names it as a way in is a pointer from that author,
+not a statement that this course covers the concept; say whose pointer it is when you offer
+it.
+
+A `covers` answer will not contain a course that merely `assumes` the queried concept —
+every route into that answer requires the course to cover it. That was once untrue and was
+fixed, so if you ever see one, it is a defect worth reporting rather than a case to work
+around.
 
 **Returning costs nothing, because nothing moved.** A digression before the first task
 writes no state: `active_lesson` still names the course's first lesson, `status` is
