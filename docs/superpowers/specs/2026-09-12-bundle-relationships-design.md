@@ -256,9 +256,29 @@ after normalisation; duplicate bundle ids within one recommendation list; missin
 unresolved bundle ids; one-way recommendations; two bundles covering one concept;
 overlapping aliases across authors.
 
-**Warn, never reject:** an alias colliding with another concept id in the same bundle; an
-unavailable recommended previous bundle or follow-up; a `covers` concept with no obvious
-corresponding phrase in `COURSE.md`, if checkable conservatively.
+**Warn, never reject:** an alias colliding with another concept id in the same bundle; a
+`covers` concept with no obvious corresponding phrase in `COURSE.md`, if checkable
+conservatively.
+
+**Not the validator's warning at all: an unavailable recommended bundle.** An earlier
+draft of this section listed it here, and that was wrong.
+
+Availability is not a property of a bundle. It is a property of one learner's
+configuration — the same bundle is complete for someone whose catalogues carry the target
+and incomplete for someone whose do not. A validator reads one bundle and no catalogue, so
+it would be asserting something it cannot know, and it would fail a correctly authored
+bundle for a reason its author cannot fix. That is the independent-distribution rule in
+§3 turned inside out.
+
+It belongs where the catalogues are, and `catalogs.py` already reports it there, in the
+right register:
+
+> `unresolved: durable-event-broker recommends 'distributed-log-broker' under
+> recommended_follow_ups, and no configured catalogue carries it. Say so; it is a pointer,
+> not a requirement.`
+
+The validator's own limitations text states the complement, so the two cannot drift:
+**an unresolved bundle id is correct and is never reported.**
 
 Cross-catalogue validation may report contradictory or malformed available targets but
 **must never fail an otherwise valid independently distributed bundle because another
