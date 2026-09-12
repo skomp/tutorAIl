@@ -204,10 +204,14 @@ material inlined in the lesson body, and the body is always loaded — so a long
 example would cost its full length every turn of that lesson. As a sibling file it costs
 nothing until the lesson asks for it. What makes this hold is a hard rule: **material
 loads only when `LESSON.md` names it**, the same progressive-disclosure discipline skills
-use. Two consequences the validator enforces rather than leaves to judgement:
+use. Two consequences, one of which the validator enforces rather than leaving to
+judgement:
 
 - material a `LESSON.md` never mentions is **unreachable** — the tutor cannot know it
-  exists — so it is dead weight shipped to every learner;
+  exists — so it is dead weight shipped to every learner. **Since `supplies:` landed this
+  is no longer absolute: a file a bundle declares under `supplies` is placed by the runner
+  and is exempt, and check 6 does not fire on it.** The rule still holds for material the
+  lesson neither names nor supplies;
 - a folder directly under `lessons/` with no `LESSON.md` hides its whole contents.
 
 `LESSON.md` must match that name in **exact case**. macOS and Windows resolve `lesson.md`
