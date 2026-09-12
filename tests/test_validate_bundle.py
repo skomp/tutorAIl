@@ -29,6 +29,7 @@ never mutated in place: each case works on a fresh copy in a temp directory.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -4208,6 +4209,25 @@ UNKNOWN_FIXTURES = {
     "comment": FIXTURES / "catalog-unknown-comment" / "catalog.yaml",
 }
 
+# The same phrase for the TOP-LEVEL report, shared for the same reason. The
+# top-level message is deliberately not a substring of the entry-level one:
+# a test that searched for "unknown field " would match both and could not
+# tell which half of the rule it had proved.
+UNKNOWN_TOP_LEVEL_PHRASE = "unknown top-level field "
+
+TOP_LEVEL_FIXTURES = {
+    # a key no known key is near: what a NEWER catalogue looks like here
+    "extension": FIXTURES / "catalog-toplevel-extension" / "catalog.yaml",
+    # key names in a comment and in a description, plus one real unknown key
+    "comment": FIXTURES / "catalog-toplevel-comment" / "catalog.yaml",
+    # the case softening must NOT reach: a required key is absent
+    "missing_version": (
+        FIXTURES / "catalog-toplevel-missing-version" / "catalog.yaml"
+    ),
+    # `tutorails`: warned about by check 1 AND missing per check 2
+    "misspelling": FIXTURES / "catalog-toplevel-misspelling" / "catalog.yaml",
+}
+
 REAL_CATALOGUE = Path.home() / "src/github.com/skomp/tutorail-bundles/catalog.yaml"
 
 
@@ -4408,6 +4428,278 @@ def test_catalog_unknown_field_reads_keys_not_text() -> None:
     )
 
 
+def test_top_level_near_miss_distance() -> None:
+    """The suggestion helper against the TOP-LEVEL field list.
+
+    Worth having even though there are only two known keys, and the two
+    cases below are why: `tutorails` and `catalogue_version` are the two
+    typos this format actually invites - one a transposition, one the
+    spelling used in every sentence of prose about catalogues - and each of
+    them ALSO removes a required key. Without the suggestion an author sees
+    "'tutorials' is missing" beside "unknown top-level field 'tutorails'"
+    and has to join the two up themselves.
+
+    The negative cases matter as much: with a list this short a suggestion
+    that fired for anything would mislabel a forward-compatible extension
+    as a misspelling, which is the opposite of what check 1 is now for.
+    """
+    print("\ncatalogue check 1: which unknown top-level keys are near misses:")
+    known = vb.CATALOG_KNOWN_TOP_LEVEL_FIELDS
+    expected = [
+        # a transposition, which plain Levenshtein scores as two
+        ("tutorails", ["tutorials"]),
+        ("tutorial", ["tutorials"]),
+        # the spelling this project uses in prose everywhere
+        ("catalogue_version", ["catalog_version"]),
+        # far from both: plausible forward-compatible extensions
+        ("generated_at", []),
+        ("catalog_notes", []),
+        ("catalog_defaults", []),
+        # the key `catalogs.yaml` is named for. Eight edits from
+        # `catalog_version`, so NOT a near miss - the plain message lists
+        # the known keys instead, which is the honest answer.
+        ("catalogs", []),
+    ]
+    for name, want in expected:
+        got = vb.near_misses(name, known)
+        record(got == want, f"{name!r} -> {want}", f"got {got}")
+    record(
+        set(known) == {"catalog_version", "tutorials"},
+        "the known top-level keys are exactly the two section 5 defines",
+        f"got {known}",
+    )
+    record(
+        all(not vb.near_misses(a, tuple(b for b in known if b != a)) for a in known),
+        "neither known top-level key is within the threshold of the other, "
+        "so a suggestion is never ambiguous between two real keys",
+        "; ".join(
+            f"{a}: {vb.near_misses(a, tuple(b for b in known if b != a))}"
+            for a in known
+            if vb.near_misses(a, tuple(b for b in known if b != a))
+        ),
+    )
+
+
+def test_catalog_unknown_top_level_field_warns_and_never_rejects() -> None:
+    """Issue #19: the top level now follows the rule the entries follow.
+
+    Check 1 used to REJECT a top-level key it did not recognise while
+    check 3 only warned about one inside an entry. bundle-format.md section
+    13 settles which of the two is right: an older reader degrades, it does
+    not refuse.
+    """
+    print("\ncatalogue check 1: an unknown top-level field is WARNED, not rejected:")
+    path = TOP_LEVEL_FIXTURES["extension"]
+    report = vb.validate_catalog(path, False)
+    warned = _warnings_for(report, 1)
+    record(
+        len(warned) == 1 and "'generated_at'" in warned[0].message,
+        "a top-level key nothing is near produces exactly one check-1 "
+        "warning that names it",
+        f"got {[str(w) for w in report.warnings]}",
+    )
+    if warned:
+        record(
+            "near miss" not in warned[0].message,
+            "and does NOT invent a spelling suggestion for it",
+            warned[0].message,
+        )
+        record(
+            "catalog_version, tutorials" in warned[0].message,
+            "it lists the top-level fields this document defines, so an "
+            "author can check the name against them",
+            warned[0].message,
+        )
+        record(
+            warned[0].where == path.name,
+            "and reports it against the FILE, which is where a top-level "
+            "key lives",
+            f"where = {warned[0].where!r}",
+        )
+    record(
+        not report.findings,
+        "the run produced NO finding at all - the unrecognised key is "
+        "reported through report.warn(), which exit_code() never consults",
+        "; ".join(str(f) for f in report.findings),
+    )
+    record(
+        report.exit_code() == 0,
+        "and the exit code is 0 - a warning must not reject a catalogue",
+        f"exit {report.exit_code()}: "
+        + ("; ".join(str(f) for f in report.findings) or f"blocked={report.blocked_checks}"),
+    )
+
+    # "Usable" is the claim, and exit 0 alone does not make it. The point of
+    # degrading rather than refusing is that the COURSES still come out, so
+    # assert the entries, not the verdict.
+    record(
+        not report.blocked_checks,
+        "no check was blocked, so the validator walked the whole file "
+        "rather than stopping at the unknown key",
+        f"blocked = {report.blocked_checks}",
+    )
+    document = vb.load_yaml(path.read_text(), path.name)
+    record(
+        [e["id"] for e in document["tutorials"]]
+        == ["rust-cli-basics", "durable-event-broker"],
+        "and both tutorials still parse out of the catalogue, so a runner "
+        "carrying this file can still offer them",
+        f"got {document}",
+    )
+    record(
+        document.get("generated_at") is not None
+        and document["tutorials"][0]["source"]["path"] == "../rust-cli-basics",
+        "with the unknown key sitting beside them, taking nothing away",
+        f"got {sorted(document)}",
+    )
+
+
+def test_catalog_missing_top_level_field_is_still_a_finding() -> None:
+    """The regression the softening is most likely to cause.
+
+    An unknown key is now a warning. A MISSING required key must not have
+    become one with it: that is the case where the file really is unusable,
+    and it is the reason no top-level key needed its unknown neighbours
+    rejected in the first place.
+    """
+    print("\ncatalogue: a MISSING required top-level field is still a finding:")
+
+    path = TOP_LEVEL_FIXTURES["missing_version"]
+    report = vb.validate_catalog(path, False)
+    version_hits = [
+        f for f in report.findings
+        if f.check == 1 and "'catalog_version' is missing" in f.message
+    ]
+    record(
+        len(version_hits) == 1,
+        "a catalogue with no 'catalog_version' is reported by check 1",
+        "; ".join(str(f) for f in report.findings) or "(no findings)",
+    )
+    record(
+        report.exit_code() != 0,
+        "and it does NOT pass - an unreadable document is not a degraded one",
+        f"exit {report.exit_code()}",
+    )
+    record(
+        not _warnings_for(report, 1),
+        "with no check-1 warning, because nothing unknown is present: the "
+        "two reports are independent",
+        "; ".join(str(w) for w in report.warnings),
+    )
+
+    # The misspelled key is the case that shows the two halves cooperating:
+    # `tutorails` warns, and the `tutorials` it displaced still finds.
+    path = TOP_LEVEL_FIXTURES["misspelling"]
+    report = vb.validate_catalog(path, False)
+    warned = _warnings_for(report, 1)
+    record(
+        len(warned) == 1
+        and "'tutorails'" in warned[0].message
+        and "'tutorials'" in warned[0].message,
+        "a misspelled 'tutorials' warns on check 1 and names the key it is "
+        "a near miss for",
+        f"got {[str(w) for w in report.warnings]}",
+    )
+    missing_hits = [
+        f for f in report.findings
+        if f.check == 2 and "'tutorials' is missing" in f.message
+    ]
+    record(
+        len(missing_hits) == 1,
+        "and the SAME run still reports the required key as missing, on "
+        "check 2 - the warning did not rescue the file",
+        "; ".join(str(f) for f in report.findings) or "(no findings)",
+    )
+    record(
+        report.exit_code() != 0,
+        "so the catalogue fails, which is correct: there is no tutorials list",
+        f"exit {report.exit_code()}",
+    )
+    record(
+        not any(UNKNOWN_TOP_LEVEL_PHRASE in f.message for f in report.findings),
+        "and the failure is the MISSING key, never the unknown one",
+        "; ".join(str(f) for f in report.findings),
+    )
+
+
+def test_catalog_top_level_check_reads_keys_not_text() -> None:
+    """The constraint check 3 is built around, applied to check 1.
+
+    A key name in a comment or a description must not produce a warning,
+    AND must not suppress one. Both halves get a positive control: the text
+    really does carry the names, and the file really does carry one real
+    unknown key.
+    """
+    print("\ncatalogue check 1: it matches KEYS, never the file's text:")
+    path = TOP_LEVEL_FIXTURES["comment"]
+    raw = path.read_text()
+    phantoms = ("catalog_defaults", "registry_url", "refreshed_at")
+
+    # The needle guard. Without it every assertion below could pass because
+    # the fixture lost the strings, which would prove nothing at all.
+    for name in phantoms:
+        occurrences = raw.count(f"{name}:")
+        record(
+            occurrences >= 1,
+            f"the fixture's TEXT really does contain {name + ':'!r} "
+            f"({occurrences} time(s)) - the control for a text search",
+            f"the fixture no longer carries {name!r}, so this test proves "
+            f"nothing",
+        )
+    document = vb.load_yaml(raw, path.name)
+    record(
+        all(name not in document for name in phantoms),
+        "and NO phantom name is a top-level KEY, which is the fact that "
+        "matters",
+        f"top-level keys = {sorted(document)}",
+    )
+
+    # The positive control for the text search itself. A naive check 1 -
+    # every identifier in the file that is followed by a colon, minus the
+    # known ones - reports the phantoms. Showing that it DOES is what makes
+    # the clean result below a real result.
+    scanned = {
+        name
+        for name in re.findall(r"([A-Za-z_][A-Za-z0-9_]*):", raw)
+        if name not in vb.CATALOG_KNOWN_TOP_LEVEL_FIELDS
+    }
+    record(
+        all(name in scanned for name in phantoms),
+        f"a text-scanning check 1 WOULD report every phantom "
+        f"({', '.join(phantoms)}), so the scan is a live instrument",
+        f"scanned = {sorted(scanned)}",
+    )
+
+    report = vb.validate_catalog(path, False)
+    warned = _warnings_for(report, 1)
+    record(
+        not any(name in w.message for w in warned for name in phantoms),
+        "check 1 says nothing about the names in the header comment and "
+        "the description, where a text search would have reported keys",
+        "; ".join(str(w) for w in warned),
+    )
+    record(
+        len(warned) == 1
+        and "'catalog_notes'" in warned[0].message
+        and warned[0].where == path.name,
+        "and the comment does not SUPPRESS the real unknown key: exactly "
+        "one warning, about 'catalog_notes'",
+        f"got {[str(w) for w in warned]}",
+    )
+    record(
+        report.exit_code() == 0 and not report.findings,
+        "exit 0 throughout, with no finding",
+        f"exit {report.exit_code()}: "
+        + ("; ".join(str(f) for f in report.findings) or f"blocked={report.blocked_checks}"),
+    )
+    record(
+        [e["id"] for e in document["tutorials"]]
+        == ["rust-cli-basics", "durable-event-broker"],
+        "and both tutorials still parse out of it",
+        f"got {[e.get('id') for e in document['tutorials']]}",
+    )
+
+
 def test_real_catalogue_gains_no_warning() -> None:
     """The best available regression, and its own positive control.
 
@@ -4457,6 +4749,34 @@ def test_real_catalogue_gains_no_warning() -> None:
         "and produces NO warning at all, the unknown-field report included",
         "; ".join(str(w) for w in report.warnings),
     )
+    record(
+        sorted(document) == sorted(vb.CATALOG_KNOWN_TOP_LEVEL_FIELDS),
+        "its top-level keys are exactly the two this document defines, "
+        "which is why check 1 has nothing to say about it",
+        f"top-level keys = {sorted(document)}",
+    )
+
+    # Both spellings, IN PLACE. Copying this file to a temp directory leaves
+    # its bundle directories behind, so check 6 fails for a reason that has
+    # nothing to do with check 1 - a copy has produced a false reading of
+    # this artefact more than once.
+    previous = Path.cwd()
+    try:
+        os.chdir(REAL_CATALOGUE.parent)
+        for spelling in (Path(REAL_CATALOGUE.name), REAL_CATALOGUE):
+            for portable in (False, True):
+                spelled = vb.validate_catalog(spelling, portable)
+                record(
+                    spelled.exit_code() == 0 and not spelled.warnings,
+                    f"exit 0 and no warning for {str(spelling)!r} "
+                    f"(portable={portable})",
+                    f"exit {spelled.exit_code()}: "
+                    + ("; ".join(str(f) for f in spelled.findings) or "")
+                    + " || "
+                    + ("; ".join(str(w) for w in spelled.warnings) or ""),
+                )
+    finally:
+        os.chdir(previous)
 
     # The positive control. A clean result from a check that cannot report
     # on this file would prove nothing, so plant a key and watch it fire.
@@ -4481,6 +4801,31 @@ def test_real_catalogue_gains_no_warning() -> None:
             "; ".join(str(f) for f in planted_report.findings),
         )
 
+        # The same control for check 1. The exit code is deliberately NOT
+        # asserted on this copy: the bundle directories stayed behind, so
+        # check 6 fails here for reasons that are nothing to do with the
+        # key. The warning list is the whole question.
+        planted_top = Path(tmpdir) / "toplevel.yaml"
+        planted_top.write_text(raw.replace(
+            "catalog_version: 1", "catalog_version: 1\ngenerated_at: today", 1
+        ))
+        top_report = vb.validate_catalog(planted_top, False)
+        warned_top = _warnings_for(top_report, 1)
+        record(
+            len(warned_top) == 1 and "'generated_at'" in warned_top[0].message,
+            "check 1 DOES warn when an unknown top-level key is planted in "
+            "that same real file, so its silence above is a real result",
+            f"got {[str(w) for w in top_report.warnings]}",
+        )
+        record(
+            not any(
+                UNKNOWN_TOP_LEVEL_PHRASE in f.message
+                for f in top_report.findings
+            ),
+            "and never as a finding",
+            "; ".join(str(f) for f in top_report.findings),
+        )
+
 
 def test_unknown_field_is_never_a_finding() -> None:
     """Swept, so the claim is about the check and not about one fixture.
@@ -4495,37 +4840,42 @@ def test_unknown_field_is_never_a_finding() -> None:
         FIXTURES / "catalog-relationships" / "catalog.yaml",
         FIXTURES / "catalog-optional-lessons" / "catalog.yaml",
         *UNKNOWN_FIXTURES.values(),
+        *TOP_LEVEL_FIXTURES.values(),
     ]
     if REAL_CATALOGUE.is_file():
         catalogues.append(REAL_CATALOGUE)
-    warned = 0
-    offenders: list[str] = []
-    for path in catalogues:
-        for portable in (False, True):
-            report = vb.validate_catalog(path, portable)
-            warned += sum(
-                1 for w in report.warnings if UNKNOWN_FIELD_PHRASE in w.message
-            )
-            offenders += [
-                f"{path.name}: {f}"
-                for f in report.findings
-                if UNKNOWN_FIELD_PHRASE in f.message
-            ]
-    record(
-        not offenders,
-        f"no finding carries {UNKNOWN_FIELD_PHRASE!r} across "
-        f"{len(catalogues)} catalogue(s), both --portable and not",
-        "; ".join(offenders),
-    )
-    # The negative result above is only worth something if the same sweep
-    # can produce a positive, so count what it warned about.
-    record(
-        warned > 0,
-        f"and the same sweep DID produce {warned} such warning(s), so the "
-        f"clean finding list is a real result and not an empty search",
-        "the sweep produced no unknown-field warning at all, so it proves "
-        "nothing about whether one would be a finding",
-    )
+    # Both phrases are swept, and each is counted separately: a top-level
+    # warning must not be able to stand in for the entry-level control, or
+    # either half could regress to a finding behind the other's positive.
+    for phrase in (UNKNOWN_FIELD_PHRASE, UNKNOWN_TOP_LEVEL_PHRASE):
+        warned = 0
+        offenders: list[str] = []
+        for path in catalogues:
+            for portable in (False, True):
+                report = vb.validate_catalog(path, portable)
+                warned += sum(
+                    1 for w in report.warnings if phrase in w.message
+                )
+                offenders += [
+                    f"{path.name}: {f}"
+                    for f in report.findings
+                    if phrase in f.message
+                ]
+        record(
+            not offenders,
+            f"no finding carries {phrase!r} across "
+            f"{len(catalogues)} catalogue(s), both --portable and not",
+            "; ".join(offenders),
+        )
+        # The negative result above is only worth something if the same
+        # sweep can produce a positive, so count what it warned about.
+        record(
+            warned > 0,
+            f"and the same sweep DID produce {warned} such warning(s), so "
+            f"the clean finding list is a real result, not an empty search",
+            f"the sweep produced no {phrase!r} warning at all, so it proves "
+            f"nothing about whether one would be a finding",
+        )
 
 
 def test_alias_normalisation_matches_the_runtime() -> None:
@@ -4824,6 +5174,10 @@ def main() -> int:
     test_near_miss_distance()
     test_catalog_unknown_field_warns_and_never_rejects()
     test_catalog_unknown_field_reads_keys_not_text()
+    test_top_level_near_miss_distance()
+    test_catalog_unknown_top_level_field_warns_and_never_rejects()
+    test_catalog_missing_top_level_field_is_still_a_finding()
+    test_catalog_top_level_check_reads_keys_not_text()
     test_real_catalogue_gains_no_warning()
     test_unknown_field_is_never_a_finding()
     test_run_case_checks_where()

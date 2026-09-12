@@ -25,7 +25,7 @@
 #
 # The second half of the fixture is the other direction: a comment must not
 # SUPPRESS a report either, so `durable-event-broker` below carries a real
-# unknown key and check 8 must warn about exactly that one.
+# unknown key and check 3 must warn about exactly that one.
 
 catalog_version: 1
 tutorials:

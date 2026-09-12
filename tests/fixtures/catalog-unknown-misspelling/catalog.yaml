@@ -3,7 +3,7 @@
 # `optional_lesson_cnt` is the exact mistake issue #18 was filed for. It is
 # two characters from `optional_lesson_count`, so the runner reads the entry,
 # does not recognise the name, and ignores it. The course then advertises no
-# optional lessons at all, and before check 8 nothing told anybody.
+# optional lessons at all, and before check 3 nothing told anybody.
 #
 # The catalogue MUST still pass. An unknown field is a warning, never a
 # finding: a catalogue is data a newer runner may extend, and an older reader

@@ -1,16 +1,21 @@
-# A catalogue carrying a field this validator has never heard of.
+# A catalogue carrying a TOP-LEVEL field this validator has never heard of.
 #
-# `estimated_hours` is not a near miss for anything section 5 defines. It is
-# what a NEWER catalogue looks like to an OLDER validator, and the whole
-# reason check 3 warns instead of rejecting: a validator that refused an
-# unrecognised key would turn a valid catalogue into an unusable one the day
-# the format grows. bundle-format.md section 13 settled that shape for
-# bundles, and a catalogue is the same argument.
+# `generated_at` is not a near miss for `catalog_version` or `tutorials`. It
+# is what a NEWER catalogue looks like to an OLDER validator, and the whole
+# reason check 1 warns instead of rejecting: a validator that refused an
+# unrecognised top-level key would turn a valid catalogue into an unusable
+# one the day the format grows. bundle-format.md section 13 settled that
+# shape for bundles, check 3 already follows it for an entry's fields, and
+# the top level is the same argument.
 #
-# The second entry carries no unknown field, so this fixture also shows the
-# check reporting about ONE entry rather than about the file.
+# Both entries are sound and both bundle paths resolve, so the run reaches
+# exit 0 rather than stopping at check 6. That is deliberate: this fixture
+# asserts a warning DOES NOT change the exit code, and that the tutorials
+# are still there to be offered, which a catalogue that already failed
+# could not show.
 
 catalog_version: 1
+generated_at: 2026-09-12T21:15:33Z
 tutorials:
   - id: rust-cli-basics
     title: Build a Command-Line Tool in Rust
@@ -22,7 +27,6 @@ tutorials:
     style: [project-driven]
     scope: "3 lessons; an afternoon"
     optional_lesson_count: 3
-    estimated_hours: 40
     workspace_kind: new-repository
     source:
       type: local

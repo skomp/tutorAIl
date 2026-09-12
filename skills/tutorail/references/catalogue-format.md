@@ -154,7 +154,8 @@ tutorials:
 
 | Field | Required | Meaning |
 |---|---|---|
-| `catalog_version` | MUST | `1` for this document. A version you do not recognise is an error, not a guess. |
+| `catalog_version` | MUST | Top level. `1` for this document. A version you do not recognise is an error, not a guess. |
+| `tutorials` | MUST | Top level. The list of entries. These two are the only top-level keys; every row below is a field of one entry. |
 | `id` | MUST | Stable identity, `[a-z0-9-]+`. Matches the bundle's `id`. |
 | `title` | MUST | Human-facing course name. |
 | `description` | MUST | One or two sentences. This is what a learner reads when choosing. |
@@ -190,11 +191,25 @@ likely misspelling, because that is the case with no other signal anywhere: a ru
 an entry by field name and ignores a name it does not know, so `optional_lesson_cnt` is
 silently absent rather than reported, and the entry simply advertises nothing by it.
 
-The check reads the **keys of the parsed entry**. It never searches the file's text. A
-generated catalogue's header comment names the fields it derives, and a text search would
-report those comments as unknown fields while missing a real one — the same arithmetic that
-makes a loose `grep -c` of a field name read as complete exactly when one entry is missing
-it.
+**The same rule applies at the top level.** A key beside `catalog_version` and
+`tutorials` that this document does not define is warned about, on check 1, and the
+catalogue still passes. The validator used to reject it, which contradicted the rule
+above and defeated the point of it: the file a newer runner writes is exactly the file an
+older validator has never seen, and refusing it is the one failure an additive format
+exists to prevent.
+
+**No top-level key needs its unknown neighbours rejected.** A catalogue is unusable when
+`catalog_version` or `tutorials` is **absent**, and absence is still a finding —
+check 1 for the version, check 2 for the list. A key nobody recognises sitting *beside*
+them takes nothing away. So a misspelled `tutorails` produces both reports in one run:
+the check 1 warning naming the spelling, and the check 2 finding that `tutorials` is not
+there. Softening the unknown key never softened the missing one.
+
+Both checks read the **keys of the parsed mapping** — the document's own for check 1,
+each entry's for check 3. Neither searches the file's text. A generated catalogue's header
+comment names the fields it derives, and a text search would report those comments as
+unknown fields while missing a real one — the same arithmetic that makes a loose
+`grep -c` of a field name read as complete exactly when one entry is missing it.
 
 ### 5.1 `source`, and where a bundle path resolves from
 

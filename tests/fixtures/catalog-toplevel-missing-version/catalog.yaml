@@ -1,0 +1,29 @@
+# The case that must NOT be softened: a REQUIRED top-level field is absent.
+#
+# Warning about an unknown top-level key says nothing about a missing one.
+# `catalog_version` is gone here, and gone is still a check 1 FINDING - a
+# reader that does not know which version of the format it is holding
+# cannot read the file, and that is what "unusable" actually means. An
+# unknown key sitting BESIDE a sound document takes nothing away; a
+# required key that is not there does.
+#
+# Nothing else is wrong with this file, so the only reason it fails is the
+# missing version. That is what makes it the regression: if softening check
+# 1 ever reached the required-field report, this fixture reaches exit 0 and
+# says so.
+
+tutorials:
+  - id: rust-cli-basics
+    title: Build a Command-Line Tool in Rust
+    description: >
+      A short project-driven course that builds a small command-line tool.
+    subjects: [rust, command-line-tools]
+    aliases: [cli, argument-parsing]
+    level: beginner
+    style: [project-driven]
+    scope: "3 lessons; an afternoon"
+    optional_lesson_count: 3
+    workspace_kind: new-repository
+    source:
+      type: local
+      path: ../rust-cli-basics

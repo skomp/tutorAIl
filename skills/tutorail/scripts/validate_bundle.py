@@ -3635,7 +3635,8 @@ def validate(target: Path, mode: str) -> Report:
 # the wrong kind.
 
 CATALOG_CHECKS: dict[int, str] = {
-    1: "the file parses, is a mapping, and catalog_version is known",
+    1: "the file parses, is a mapping, and catalog_version is known; "
+    "an unrecognised top-level field WARNS",
     2: "tutorials is a non-empty list of mappings",
     3: "every entry carries the required fields, with the right shapes; "
     "an unrecognised field WARNS",
@@ -3669,6 +3670,25 @@ CATALOG_COUNT_FIELDS = ("optional_lesson_count",)
 # This is a list of FIELD NAMES, and it is matched against the keys of the
 # PARSED entry mapping. It never searches the catalogue's text, and that is
 # not a style preference - see the docstring on unknown_entry_fields().
+# Every top-level key a catalogue document carries. Check 1 WARNS about a
+# key that is not in here, for the same reason check 3 warns about an
+# unrecognised ENTRY field, and the two are deliberately the same rule.
+#
+# Both of these are also REQUIRED, and that is what makes warning safe. The
+# question "is any top-level key structural enough that an unknown neighbour
+# makes the file unusable?" has a cleaner answer than it looks: a catalogue
+# is unusable when `catalog_version` or `tutorials` is ABSENT, and absence
+# is already a finding - check 1 for the version, check 2 for the list. A
+# key nobody recognises sitting BESIDE them takes nothing away. So there is
+# no top-level key whose unknown neighbour warrants rejection, and the
+# rejection that used to happen here only ever punished a newer catalogue.
+#
+# Matched against the keys of the PARSED mapping, never against the file's
+# text - see the docstring on unknown_entry_fields().
+CATALOG_KNOWN_TOP_LEVEL_FIELDS = (
+    "catalog_version",
+    "tutorials",
+)
 CATALOG_KNOWN_ENTRY_FIELDS = (
     "aliases",
     "assumes",
@@ -3721,8 +3741,9 @@ CATALOG_LIMITATIONS = """What a pass does and does not mean
   catalog.yaml that ships inside a bundles repository, where every bundle
   must travel with the catalogue.
 
-  Check 3 reports an unrecognised entry field as a WARNING and never as a
-  finding, so the catalogue still passes with one. That is deliberate: a
+  Check 1 reports an unrecognised TOP-LEVEL field as a WARNING, and check
+  3 reports an unrecognised ENTRY field the same way. Neither is ever a
+  finding, so the catalogue still passes with either. That is deliberate: a
   catalogue is data a newer runner may extend, and an older reader must
   degrade rather than refuse - bundle-format.md section 13, applied to the
   catalogue. So the warning is the only report you will get about a
@@ -3730,10 +3751,17 @@ CATALOG_LIMITATIONS = """What a pass does and does not mean
   it does not know, so a misspelling costs the entry that field silently and
   the course then advertises nothing by it.
 
-  That part of check 3 reads the KEYS of each parsed entry. A field name
-  written in a comment, or inside a description, is not a key and is never
-  reported - a generated catalogue names `optional_lesson_count` in its
-  header comment, and that comment is not a field.
+  Both parts read the KEYS of the parsed mapping - the document's own for
+  check 1, each entry's for check 3. A field name written in a comment, or
+  inside a description, is not a key and is never reported - a generated
+  catalogue names `optional_lesson_count` in its header comment, and that
+  comment is not a field.
+
+  Warning about an unknown top-level key does not excuse a MISSING one.
+  'catalog_version' missing is still a check 1 finding and 'tutorials'
+  missing is still a check 2 finding, so a misspelled required key produces
+  both: the finding that the key is gone, and the warning naming the
+  spelling that ate it.
 
   Nothing here checks a catalogue entry against the bundle's own
   tutorial.yaml. The two are allowed to differ - the bundle is authoritative
@@ -3828,6 +3856,19 @@ def unknown_entry_fields(entry: dict) -> list[str]:
     return sorted((str(key) for key in entry if str(key) not in known), key=str)
 
 
+def unknown_top_level_fields(document: dict) -> list[str]:
+    """The keys of a parsed catalogue that section 5 does not define.
+
+    The top-level twin of unknown_entry_fields(), and it carries the same
+    constraint for the same reason: READ THE KEYS OF THE PARSED MAPPING,
+    never the catalogue's text. A generated catalogue's header comment
+    names fields in prose, and a text search would report those while
+    missing a real one.
+    """
+    known = set(CATALOG_KNOWN_TOP_LEVEL_FIELDS)
+    return sorted((str(key) for key in document if str(key) not in known), key=str)
+
+
 def catalog_root(target: Path) -> Path:
     """The directory that holds `target`, as an absolute, normalised path.
 
@@ -3917,15 +3958,59 @@ def validate_catalog(target: Path, portable: bool) -> Report:
             f"{', '.join(str(v) for v in KNOWN_CATALOG_VERSIONS)}. A version "
             f"you do not recognise is an error, not a guess",
         )
-    unknown_top = sorted(set(document) - {"catalog_version", "tutorials"})
-    if unknown_top:
-        report.add(
-            1,
-            target.name,
-            f"unknown top-level field(s) {', '.join(unknown_top)}; a "
-            f"catalogue holds 'catalog_version' and 'tutorials'",
-        )
-    report.ran(1, f"catalog_version {version!r}")
+    # -- still check 1: a top-level key this document does not define.
+    #
+    # A WARNING and never a finding, exactly as check 3 treats an
+    # unrecognised key inside an entry. It used to be a finding, which
+    # contradicted that rule and contradicted the policy both follow:
+    # bundle-format.md section 13 says an older reader DEGRADES rather than
+    # refusing. A catalogue is data a newer runner may extend, so a
+    # validator that rejected a newer top-level key turned a valid
+    # catalogue into an unusable one - the one failure the additive-key
+    # policy exists to prevent.
+    #
+    # Softening this cannot soften the case that matters, because the keys
+    # a catalogue genuinely cannot do without are REQUIRED, and absence is
+    # still a finding: 'catalog_version' missing is reported here, and
+    # 'tutorials' missing is reported by check 2. A misspelled required key
+    # therefore produces BOTH - the finding that the key is gone, and this
+    # warning naming the spelling that ate it.
+    #
+    # It stays part of check 1 rather than becoming a number of its own
+    # because check 1 IS the question about the document's own shape, and
+    # because a check that can only ever warn would be a number in the
+    # table that can never change the verdict.
+    unknown_top = unknown_top_level_fields(document)
+    for name in unknown_top:
+        suggestions = near_misses(name, CATALOG_KNOWN_TOP_LEVEL_FIELDS)
+        if suggestions:
+            report.warn(
+                1,
+                target.name,
+                f"unknown top-level field {name!r}, which is a near miss "
+                f"for {' or '.join(repr(s) for s in suggestions)}. A runner "
+                f"reads a catalogue by field name and ignores a name it "
+                f"does not know, so a misspelling is silently absent rather "
+                f"than reported. Correct the spelling. This is a WARNING "
+                f"and the catalogue is still usable",
+            )
+        else:
+            report.warn(
+                1,
+                target.name,
+                f"unknown top-level field {name!r}. A runner ignores a "
+                f"field name it does not know, so this catalogue carries "
+                f"nothing by it. That is correct for a field a newer "
+                f"catalogue adds, which is why this is a WARNING and the "
+                f"catalogue is still usable. The top-level fields this "
+                f"document defines are "
+                f"{', '.join(CATALOG_KNOWN_TOP_LEVEL_FIELDS)}",
+            )
+    report.ran(
+        1,
+        f"catalog_version {version!r}, "
+        f"{len(unknown_top)} unknown top-level field(s)",
+    )
 
     listed = document.get("tutorials")
     if listed is None:

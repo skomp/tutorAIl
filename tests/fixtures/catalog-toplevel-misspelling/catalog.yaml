@@ -1,0 +1,35 @@
+# A catalogue whose `tutorials` key is misspelled, and nothing else wrong.
+#
+# `tutorails` is a transposition, which plain Levenshtein scores as two
+# edits, so check 1 names `tutorials` as the near miss. This is the fixture
+# that shows the two halves of the top-level rule working TOGETHER rather
+# than one replacing the other:
+#
+#   check 1 WARNS   `tutorails` is a key nobody defines, and here is the key
+#                   it was probably meant to be
+#   check 2 FINDS   `tutorials` is missing, so the file is unusable
+#
+# The warning did not rescue the file, and it was never meant to. Every key
+# a catalogue genuinely cannot do without is REQUIRED, and absence is
+# caught by the required-field checks - which is exactly why an unknown
+# neighbour never had to be rejected.
+#
+# The entries below are sound. They are unreachable only because the list
+# they sit in is not called `tutorials`.
+
+catalog_version: 1
+tutorails:
+  - id: rust-cli-basics
+    title: Build a Command-Line Tool in Rust
+    description: >
+      A short project-driven course that builds a small command-line tool.
+    subjects: [rust, command-line-tools]
+    aliases: [cli, argument-parsing]
+    level: beginner
+    style: [project-driven]
+    scope: "3 lessons; an afternoon"
+    optional_lesson_count: 3
+    workspace_kind: new-repository
+    source:
+      type: local
+      path: ../rust-cli-basics

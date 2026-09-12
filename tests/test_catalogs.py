@@ -1371,13 +1371,6 @@ CATALOG_CASES: list[tuple[str, int, str, str, bool]] = [
         False,
     ),
     (
-        "1: an unknown top-level field",
-        1,
-        "catalog_version: 1\ncatalogs: []\ntutorials: []\n",
-        "unknown top-level field(s) catalogs",
-        False,
-    ),
-    (
         "2: tutorials is missing",
         2,
         "catalog_version: 1\n",
