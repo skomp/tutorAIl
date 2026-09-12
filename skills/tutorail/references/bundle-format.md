@@ -84,7 +84,12 @@ to do when you find one, and how to promote a lesson out of it properly.
 
 ## 2. `tutorial.yaml`
 
-Keep it shallow. One level of nesting at most.
+Keep it shallow. Most fields are a scalar or a flat list, and a field that nests does so
+because the shape it describes really is nested: `optional_lessons` and `failure_modes`
+are a map of maps, `optional_lessons` reaching a list at the third level, and `covers` and
+`assumes` are a map of concept id to that concept's definition. Nesting deeper than those
+is a sign the field wants to be a list of mappings instead, the way `supplies` and the two
+recommendation lists are.
 
 ```yaml
 bundle_format: 1
@@ -150,6 +155,10 @@ advance_on: validated-evidence-only
 | `optional_lessons` | MAY | Authored lessons off the main path, offered rather than sequenced. See **Optional lessons** below. |
 | `failure_modes` | MAY | Stable ids for the ways a learner's work goes wrong. See **Failure modes** below. |
 | `supplies` | MAY | Files the bundle hands the learner's workspace, placed by the runner and never assigned as a task. See **Supplied files** below. |
+| `covers` | MAY | The concepts this course teaches, each with a summary. See **Concepts and relationships** below. |
+| `assumes` | MAY | The concepts this course uses without teaching from first principles, each with a level and a summary. Never a gate. See **Concepts and relationships** below. |
+| `recommended_follow_ups` | MAY | Bundles worth taking after this one, in display order, each with a reason. Advisory only. |
+| `recommended_previous_bundles` | MAY | Bundles worth taking before this one, in display order, each with a reason. Advisory only. |
 | `workspace_kind` | MUST | See below. |
 | `tutor_owned` | MUST | Globs the tutor may modify. |
 | `learner_owned` | MUST | Globs the tutor must not modify. |
@@ -588,6 +597,248 @@ that is **detect and report, never auto-apply**. Nothing in this format re-place
 that is already there, and nothing in it currently detects the drift either. Do not write a
 course that depends on a supplied file being refreshed part-way through a learner's run.
 
+### Concepts and relationships — `covers`, `assumes` and the two recommendation lists
+
+> A bundle **MAY** declare what it teaches (`covers`), what it assumes (`assumes`), and
+> which other bundles are worth taking before and after it
+> (`recommended_previous_bundles`, `recommended_follow_ups`).
+
+One rule decides every question this section can raise, and it is worth keeping even if you
+keep nothing else from it:
+
+> **Named bundles are recommendations. Concepts are the educational contract. Neither one
+> gates access to a tutorial or requires proof that another bundle was completed.**
+
+Nothing here stops a learner starting a course. There is no `requires_completion`, no
+`requires_bundle`, and no spelling of either — a recommendation is something a learner reads
+and decides about, and an assumed concept is something they judge themselves against. A
+runner shows `assumes` before the first task and shows recommendations at the end, and in
+both cases the learner decides what happens next.
+
+```yaml
+covers:
+  retained-event-logs:
+    summary: >
+      Records remain available after they are delivered, and can be replayed from a
+      logical offset rather than resent by the producer.
+    aliases: [append-only-log, replayable-log]
+
+assumes:
+  go-programming:
+    level: working          # awareness | conceptual | working | advanced
+    summary: >
+      Write, test, and refactor ordinary Go programs using packages, goroutines,
+      channels, errors, and contexts.
+
+recommended_follow_ups:
+  - bundle: distributed-log-broker
+    because: >
+      Extend the broker with multi-node placement, replication, acknowledgement policies,
+      and recovery from the loss of a node.
+
+recommended_previous_bundles:
+  - bundle: durable-event-broker
+    because: >
+      It teaches the retained-log, topic-partition and offset model used here.
+```
+
+#### Concept identifiers
+
+A concept id matches `[a-z0-9-]+`. It names a **technical concept**, never a lesson
+filename: `partition-offsets`, not `04-offsets`. It is stable once published, because other
+authors' bundles quote it, and it is deliberately usable across independently written
+courses. **There is no central registry.** Two authors who both teach retained logs and both
+call the concept `retained-event-logs` have interoperated, and nothing had to coordinate
+them.
+
+#### `covers` — what the course teaches
+
+`summary` is required; `aliases` is optional. This is machine-readable discovery metadata,
+and it is more precise than `subjects`, which keeps its current meaning for broad
+classification. A learner searching for a concept is matched against `covers`; a learner
+browsing a topic is matched against `subjects`. Both stay.
+
+Not every minor topic belongs here. List the concepts that are meaningful for discovery and
+for another author's `assumes` — the ones a learner would name when saying what they want to
+learn, or what they already know.
+
+A `covers` concept should also be recognisable in `COURSE.md`, and the coverage list is the
+natural place for it. The validator warns, conservatively, when a concept appears nowhere in
+`COURSE.md` under any spelling; it never rejects, because a course whose prose uses different
+words is not a broken course. **Use one name in both places**, which is the same rule the
+coverage list already asks for, or add the course's wording to that concept's `aliases`.
+
+#### `assumes` — what the course does not teach
+
+`level` and `summary` are both required. The summary is written for a **prospective learner
+deciding whether this course is for them**, so it has to be specific enough to self-assess
+against. "Knows Go" is not; the example above is.
+
+| Level | Means |
+|---|---|
+| `awareness` | recognise the concept and its purpose |
+| `conceptual` | explain the model and its major consequences |
+| `working` | apply it in ordinary implementation or diagnosis |
+| `advanced` | reason about difficult edge cases and trade-offs without introduction |
+
+**`assumes` is never an access-control or completion gate.** A runner shows it, the learner
+reads it and continues, asks about a concept, or asks which bundles cover one. Continuing
+acknowledges the wish to proceed and nothing else: it asserts no mastery and marks no other
+course complete. Nothing inspects licences, completion records or prior instances to decide
+whether a learner may begin.
+
+**A concept may appear in both `covers` and `assumes`, and that is legal.** A course that
+assumes a baseline and then teaches the same concept deeper is describing itself accurately,
+and saying so is better than being forced to pick one key. `tests/fixtures/streaming-query-engine`
+does exactly this with `windowed-aggregation`: `awareness` assumed, and the real treatment
+taught.
+
+#### Aliases
+
+`aliases` is the other terms a learner might say for one concept. Two aliases are the same
+alias when they differ only in case or punctuation: every run of non-letter, non-digit text
+is one separator, so `append-only-log`, `Append Only Log` and `append_only_log` are one alias
+written three ways and declaring two of them is reported. `node.js` and `nodejs` are one
+alias too, which is what a learner typing either of them means. This is the same folding a
+concept query uses at runtime, which is why the rule is worth knowing: an alias is written to
+be matched against a concept id, and a concept id is `[a-z0-9-]+`, so punctuation cannot
+survive into one anyway. Two bundles by different authors are free
+to use the same alias for different things — that is expected, and nothing reports it. Within
+**one** bundle, an alias that is also a concept id, or that two concepts share, makes an exact
+search ambiguous; the validator warns and the bundle stays valid.
+
+#### The recommendation lists
+
+`bundle` and `because` are both required, and the entry has no other keys. `because` is the
+sentence a learner reads when deciding what to do next, so write it for them. **Author order
+is display order.**
+
+| Rule | Why |
+|---|---|
+| A referenced bundle **need not exist** | A bundle is distributed on its own. It must never become invalid because another bundle is missing, unpublished, or not installed here. |
+| Reciprocity is **not** required | A third party attaches itself to an established course by naming it, without that author changing anything. |
+| A bundle **may not** recommend itself | A recommendation points at a different course. |
+| One bundle **may not** appear twice in one list | Author order is display order, so a duplicate shows one course twice. |
+| A recommendation implies **nothing** about ownership, purchase, installation or completion | It is a sentence, not a dependency. |
+
+`recommended_previous_bundles` is the half that makes the design open-ended. A bundle that
+names an earlier one attaches itself to that course **without modifying it**, and discovery
+finds it through the reverse index. The established author never has to agree, or know.
+
+**Starting a recommended follow-up is exactly like starting any other bundle.** No completion
+proof, no earlier instance, no earlier licence. Where the learner's baseline source code comes
+from is the workspace and template contract's job (`workspace_kind`), never something inferred
+from a recommendation: `recommended_previous_bundles` says *this is a good course to take
+earlier*, never *copy that course's workspace into this one*.
+
+#### The normative example
+
+Three bundles, as the smallest complete ones that can carry the relationships. They live in
+`tests/` rather than in `examples/`, deliberately — three materialisable courses would bloat
+every plugin install to illustrate a documentation point.
+
+`tests/fixtures/durable-event-broker/tutorial.yaml` covers four concepts and points forward
+at two courses, neither of which exists anywhere:
+
+```yaml
+id: durable-event-broker
+
+covers:
+  retained-event-logs:
+    summary: >
+      Records remain available after they are delivered, and can be replayed from a
+      logical offset rather than resent by the producer.
+    aliases: [append-only-log, replayable-log]
+  partition-offsets:
+    summary: >
+      A partition is an ordered sequence, and a reader's position in it is one integer
+      the broker never advances on the reader's behalf.
+    aliases: [stream-offsets]
+  topic-partitions:
+    summary: >
+      A topic is divided into partitions so writers and readers scale independently.
+      Order is promised per partition, never across a topic.
+  group-commit:
+    summary: >
+      Many appends are made durable in one fsync, so throughput rises without weakening
+      the durability each individual writer was promised.
+
+recommended_follow_ups:
+  - bundle: distributed-log-broker
+    because: >
+      Extend the broker with multi-node placement, replication, acknowledgement policies,
+      and recovery from the loss of a node.
+  - bundle: streaming-query-engine
+    because: >
+      Run continuous queries over the log this course builds, instead of writing a
+      bespoke consumer for every question.
+```
+
+`tests/fixtures/streaming-query-engine/tutorial.yaml` points back at the broker, and assumes
+the concepts the broker covers:
+
+```yaml
+id: streaming-query-engine
+
+assumes:
+  retained-event-logs:
+    level: working
+    summary: >
+      Read and append to a log whose records stay available after delivery, and reason
+      about replay from an offset.
+    aliases: [append-only-log]
+  windowed-aggregation:
+    level: awareness
+    summary: >
+      Recognise that a stream aggregate is computed over a bounded window rather than
+      over the whole stream.
+
+covers:
+  windowed-aggregation:            # assumed at 'awareness', taught properly here
+    summary: >
+      Compute an aggregate over a bounded window of time or count, and decide what a
+      late record does to a window that has already emitted.
+
+recommended_previous_bundles:
+  - bundle: durable-event-broker
+    because: >
+      It teaches the retained-log, topic-partition and offset model this engine queries,
+      and you finish it holding a broker to point this engine at.
+```
+
+`tests/fixtures/event-stream-recipes/tutorial.yaml` is the case the whole design exists for.
+It is by a third party, it names the broker, and **the broker says nothing about it**:
+
+```yaml
+id: event-stream-recipes
+
+recommended_previous_bundles:
+  - bundle: durable-event-broker
+    because: >
+      It builds the broker these recipes operate on, and it teaches the retained-log and
+      offset model every recipe here assumes.
+```
+
+A learner finishing `durable-event-broker` is still shown these recipes, found through the
+reverse index. The broker's author changed nothing, agreed to nothing, and does not need to
+know the recipes exist.
+
+#### An empty declaration is silent; a malformed one is not
+
+`covers:` with nothing under it, `covers: {}`, `recommended_follow_ups: []` and the absent
+key all declare nothing and all mean the same thing. A value that is present and is the
+wrong **shape** is always reported: `covers` as a bare list of ids loses the summaries that
+make a concept mean anything, and a recommendation written as a mapping straight under the
+key, with the `- ` left off, is the commonest typo of the four. This is the same treatment
+`optional_lessons` and `supplies` already get, for the same reason.
+
+#### What the validator will not do
+
+It never reports an unresolved bundle id. It sees one bundle and no catalogue, so it checks
+that a referenced id is *well formed* and stops there — and an unresolved id is correct, not
+tolerated. It makes no judgement about whether the course really teaches what `covers` claims,
+whether a level is honestly chosen, or whether a summary is specific enough. Those are yours.
+
 ---
 
 ## 3. `COURSE.md`
@@ -667,6 +918,15 @@ authored lesson gets offered or improvised over.
 
 So the list does two jobs at once: it records what the course owes, and it tells every
 tutor teaching your course where your course stops.
+
+**The coverage list and `covers` are the same claim to two readers.** The list is prose a
+tutor matches a blocking concept against; `covers` is the machine-readable form another
+bundle's `assumes` and a learner's search are matched against. Write both, and word them
+the same way. The validator warns when a `covers` concept appears nowhere in `COURSE.md`
+under any spelling — its id, a plain-words form of it, or one of its aliases — and it warns
+rather than rejects because a course whose prose uses different words is not broken, only
+harder to find. Either name the concept in the coverage list, or add the words `COURSE.md`
+already uses to that concept's `aliases`.
 
 **A bundle with no coverage list still works.** The tutor falls back to its own judgement
 of whether a blocking concept is a missing prerequisite or intended difficulty, and makes
@@ -1147,7 +1407,21 @@ why it is written for you rather than for the learner.
     learner stands. The way back is recorded in the instance when the detour starts.
 22. **Recording in the bundle that a learner deferred something.** An offer and a
     deferral are progress. They belong in the instance's `STATE.md`.
-23. **Naming a foldered lesson's body anything but `LESSON.md`.** `index.md` and
+23. **Putting a concept in `assumes` and expecting it to stop anyone.** It stops nobody.
+    It is shown to the learner, who decides. If a later lesson genuinely cannot be done
+    without something, teach it on the main path.
+24. **Naming a lesson file as a concept id.** A concept id names a technical concept, not
+    a file: `partition-offsets`, never `04-offsets`. Another author's bundle quotes it.
+25. **Writing a `because` for yourself instead of for the learner.** It is the sentence
+    they read when deciding what to do next, and it is all they have to go on.
+26. **Expecting a recommendation to install, order, unlock or require anything.** It is
+    advisory. A referenced bundle need not even exist, and one that does not is not an
+    error to be fixed.
+27. **Renaming a concept id after publication.** Another author's `assumes` names it, and
+    nothing coordinates the two. It is as stable as `id`.
+28. **Replacing `subjects` with `covers`.** They answer different questions — broad
+    browsing and precise concept matching — and both stay.
+29. **Naming a foldered lesson's body anything but `LESSON.md`.** `index.md` and
     `README.md` are not recognised. `lesson.md` is worse than not recognised: macOS and
     Windows filesystems are case-insensitive, so it appears to work locally and then
     fails on Linux. Match the case exactly.
@@ -1189,6 +1463,17 @@ Confirm each of these by looking, not by remembering:
 - [ ] every **lesson-scope** `supplies` entry names a `from` inside `lessons/` — a
       lesson's own supplied files live in that lesson's folder, because the instance
       carries nothing else
+- [ ] every `covers` and `assumes` concept id matches `[a-z0-9-]+` and names a technical
+      concept rather than a lesson file
+- [ ] every `covers` and `assumes` concept carries a non-empty `summary`, and every
+      `assumes` concept a `level` of `awareness`, `conceptual`, `working` or `advanced`
+- [ ] every `assumes` summary is specific enough for a learner to self-assess against,
+      and nothing in the course treats `assumes` as a gate
+- [ ] every `covers` concept is recognisable in `COURSE.md` — in the coverage list, or by
+      an alias naming it the way `COURSE.md` does
+- [ ] every recommendation names a `bundle` id spelled as that bundle spells its own `id`,
+      and a `because` written for the learner
+- [ ] no recommendation names this bundle, and no bundle id appears twice in one list
 - [ ] the course can be finished by a learner who declines every offer — unless a
       `required_for` gate says otherwise and you meant it (section 13)
 - [ ] neither `COURSE.md` nor any file under `lessons/` carries a progress marker in a
@@ -1410,7 +1695,8 @@ Reach for the gate only when the blocked lesson genuinely cannot be finished.
 
 ## 13. Older runners, and bundles that predate this
 
-`bundle_format` stays `1`. `optional_lessons`, `failure_modes` and `supplies` are
+`bundle_format` stays `1`. `optional_lessons`, `failure_modes`, `supplies`, `covers`,
+`assumes`, `recommended_follow_ups` and `recommended_previous_bundles` are all
 additive: a bundle written before this section existed is valid exactly as it stands,
 nothing in this document changes what it means, and no edit is implied. Run the
 validator over it and see.
@@ -1426,6 +1712,11 @@ keys, and ignores them. The effect on a learner is precise, and worth stating pl
 - **no supplied file is placed.** The learner is told to put it there by hand, or the
   lesson fails to find it — which is the position every course that predates `supplies`
   is in already;
+- **no `assumes` review is shown, and no recommendation is offered.** This is the cheapest
+  of the four to lose: the learner starts the course and finishes it, exactly as they would
+  have done, and simply never sees the two screens. Nothing was gating anything, so nothing
+  is unlocked by their absence — which is the clearest statement of what the relationship
+  keys are worth and what they are not;
 - **nothing is taught wrongly.** The main path is untouched by `optional_lessons`, because
   an optional lesson is never in it. An unplaced supply is not the same case — a
   manifest-scope entry IS on the main path — but it costs the learner the toil the key

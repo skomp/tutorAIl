@@ -1,0 +1,53 @@
+bundle_format: 1
+id: event-stream-recipes
+title: Event Stream Recipes
+description: >
+  Short, self-contained recipes for the operational problems an event log
+  hands you once it is carrying real traffic.
+subjects: [go, event-streaming, operations]
+aliases: [broker-cookbook]
+level: intermediate
+style: [exercise-based, interactive]
+
+covers:
+  dead-letter-handling:
+    summary: >
+      Route a record a consumer cannot process into a separate stream, so one
+      poison record stops neither the partition nor the consumer.
+    aliases: [poison-messages]
+  replay-tooling:
+    summary: >
+      Build the operator-facing tools that replay a range of offsets into a
+      consumer without disturbing the rest of the topic.
+
+assumes:
+  retained-event-logs:
+    level: working
+    summary: >
+      Read and append to a log whose records stay available after delivery, and
+      reason about replay from an offset.
+  partition-offsets:
+    level: working
+    summary: >
+      Track a reading position per partition and move it deliberately.
+
+recommended_previous_bundles:
+  - bundle: durable-event-broker
+    because: >
+      It builds the broker these recipes operate on, and it teaches the
+      retained-log and offset model every recipe here assumes.
+
+lessons:
+  - lessons/00-dead-letter-stream.md
+
+workspace_kind: existing-or-new-repository
+tutor_owned:   [tutorial/STATE.md, tutorial/DESIGN.md]
+learner_owned: [cmd/**, internal/**, go.mod]
+ownership_policy: tutor-must-not-edit-learner-owned
+
+validators:
+  go-test: { kind: command, command: [go, test, ./...] }
+
+one_task_at_a_time: true
+solution_code: on-request-only
+advance_on: validated-evidence-only

@@ -1,0 +1,84 @@
+bundle_format: 1
+id: streaming-query-engine
+title: Build a Streaming Query Engine
+description: >
+  Build a query engine that runs bounded and continuous queries over a
+  partitioned event log, in Go.
+subjects: [go, databases, event-streaming]
+aliases: [stream-processor, continuous-queries]
+level: advanced
+style: [project-driven, interactive]
+
+covers:
+  stream-query-parsing:
+    summary: >
+      Turn a query string into a plan a stream operator tree can execute,
+      rejecting what the engine cannot promise to run.
+    aliases: [query-parsing]
+  bounded-stream-queries:
+    summary: >
+      Answer a query over a finite offset range and stop, which is the case
+      every continuous query is built on top of.
+  continuous-stream-queries:
+    summary: >
+      Keep a query running as new records arrive, emitting results as the
+      answer changes rather than once at the end.
+  windowed-aggregation:
+    summary: >
+      Compute an aggregate over a bounded window of time or count, and decide
+      what a late record does to a window that has already emitted.
+
+assumes:
+  go-programming:
+    level: working
+    summary: >
+      Write, test, and refactor ordinary Go programs using packages,
+      goroutines, channels, errors, and contexts.
+  retained-event-logs:
+    level: working
+    summary: >
+      Read and append to a log whose records stay available after delivery, and
+      reason about replay from an offset.
+    aliases: [append-only-log]
+  partition-offsets:
+    level: working
+    summary: >
+      Track a reading position per partition, and explain why the engine, not
+      the log, is what advances it.
+  topic-partitions:
+    level: conceptual
+    summary: >
+      Explain why order is promised per partition and what that costs a query
+      that needs a total order.
+  consumer-offsets:
+    level: awareness
+    summary: >
+      Recognise that a consumer's committed position is separate state from
+      the records themselves.
+  windowed-aggregation:
+    level: awareness
+    summary: >
+      Recognise that a stream aggregate is computed over a bounded window
+      rather than over the whole stream.
+
+recommended_previous_bundles:
+  - bundle: durable-event-broker
+    because: >
+      It teaches the retained-log, topic-partition and offset model this engine
+      queries, and you finish it holding a broker to point this engine at.
+
+lessons:
+  - lessons/00-parse-a-query.md
+
+workspace_kind: new-repository
+tutor_owned:   [tutorial/STATE.md, tutorial/DESIGN.md]
+learner_owned: [cmd/**, internal/**, go.mod]
+ownership_policy: tutor-must-not-edit-learner-owned
+
+validators:
+  go-build: { kind: command, command: [go, build, ./...] }
+  go-test:  { kind: command, command: [go, test, ./...] }
+
+one_task_at_a_time: true
+solution_code: on-request-only
+advance_on: validated-evidence-only

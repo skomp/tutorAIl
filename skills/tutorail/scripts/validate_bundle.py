@@ -23,6 +23,11 @@ Exit codes:
     2  usage or I/O error
     3  indeterminate - a check could not run, so a clean result cannot be certified
 
+A run may also print WARNINGS. A warning never changes the exit code and
+never makes a bundle invalid: it is for a rule that is real but whose only
+available evidence is circumstantial, where reporting a finding would fail
+bundles that are correct. Checks 23 and 25 are where they come from.
+
 Stdlib only. Python 3.11. PyYAML is used when importable; otherwise a
 restricted reader parses the deliberately shallow subset the format uses and
 *rejects* anything outside it rather than guessing.
@@ -104,10 +109,26 @@ CHECKS: dict[int, str] = {
     "agrees with active_lesson",
     22: "supplies entries are well-formed, and every 'from' resolves where "
         "the runner will look for it",
+    23: "covers and assumes are well-formed: concept ids, summaries, levels "
+        "and aliases",
+    24: "the recommendation lists are well-formed, and no entry recommends "
+        "this bundle",
+    25: "every covers concept is recognisable somewhere in COURSE.md",
 }
 
 BUNDLE_ONLY = {12, 13}
 INSTANCE_ONLY = {11, 14, 15, 17, 21}
+
+# Checks that can only ever WARN, never produce a finding.
+#
+# Check 25's rule - a `covers` concept should be recognisable in COURSE.md -
+# is real, but the only evidence available for it is textual. A bundle whose
+# COURSE.md names a concept in words the manifest does not use is correct,
+# and failing it would be exactly the cry-wolf behaviour checks 5 and 6 are
+# shaped to avoid. The suite's coverage meta-test reads this set, so a check
+# named here must be demonstrated WARNING and one not named here must be
+# demonstrated FINDING; neither stands in for the other.
+WARNING_ONLY = {25}
 
 RAN = "ran"
 NOT_APPLICABLE = "n/a"
@@ -417,7 +438,41 @@ LIMITATIONS = """What a pass does and does not mean
       instance, so an instance that no longer carries it is correct. In
       instance mode, therefore, a manifest-scope 'from' is not proved to
       exist anywhere and its trailing-slash form is not proved either.
-      Validate the BUNDLE to prove those."""
+      Validate the BUNDLE to prove those.
+
+  Relationships (covers / assumes / the two recommendation lists):
+    an ABSENT key, a key with nothing under it, and an explicitly empty one
+      are all silent and all report "n/a". Checks 23, 24 and 25 report
+      "n/a" when there is nothing to check, which is not the same as
+      passing.
+    AN UNRESOLVED BUNDLE ID IS CORRECT AND IS NEVER REPORTED. Check 24
+      proves a referenced id is WELL FORMED and stops there. A bundle is
+      distributed independently, so it must not be invalidated because
+      another bundle is missing, unpublished or not installed here - that
+      is the whole point of the design. Whether a recommended bundle is
+      AVAILABLE is a question about a catalogue, and this mode has no
+      catalogue: nothing here reports an unavailable target, in either
+      direction. Reciprocity is not required and is not reported either.
+    a concept in BOTH covers and assumes is legal and is never reported. A
+      course may assume a baseline and then teach it deeper.
+    nothing checks whether the course really teaches what `covers` claims,
+      whether an `assumes` summary is specific enough for a learner to
+      self-assess against, or whether a level is honestly chosen. Those are
+      judgement, and this validator makes none.
+    check 25 is WARNINGS ONLY and is textual. It asks whether a `covers`
+      concept is recognisable ANYWHERE in COURSE.md - as its id, as a
+      plain-words spelling, or as one of its aliases - and warns when no
+      spelling of it appears at all. It searches the whole file rather than
+      the coverage list, because the coverage list has no fixed heading and
+      a guess that missed it would warn about a concept that is listed. A
+      course can name a concept once and never teach it, and this check
+      would be satisfied: it is evidence of shared vocabulary, never of
+      coverage.
+    check 23's alias collisions are WARNINGS for the same reason. An alias
+      that is also a concept id, or that two concepts share, makes one
+      search result ambiguous; it does not make the bundle wrong. Aliases
+      overlapping ACROSS bundles by different authors are expressly allowed
+      and are not reported at all."""
 
 
 @dataclass(frozen=True)
@@ -435,6 +490,20 @@ class Report:
     mode: str
     target: Path
     findings: list[Finding] = field(default_factory=list)
+    # Warnings are NOT findings and never change the exit code.
+    #
+    # They exist for the checks whose rule is real but whose evidence is
+    # circumstantial: an alias that collides with a concept id, a `covers`
+    # concept that no phrase in COURSE.md resembles. Reporting those as
+    # findings would fail bundles that are correct, and a validator that
+    # fails correct bundles gets ignored - which is the reasoning that
+    # already shapes checks 5 and 6. Reporting them as nothing would hide a
+    # real authoring mistake. So they are reported, loudly, and the run
+    # still passes.
+    #
+    # A warning is never the right home for a rule the format actually
+    # requires. If a bundle is wrong, say so with a finding.
+    warnings: list[Finding] = field(default_factory=list)
     status: dict[int, tuple[str, str]] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     # Which check table this report is against. A catalogue is a different
@@ -445,6 +514,15 @@ class Report:
 
     def add(self, check: int, where: str, message: str) -> None:
         self.findings.append(Finding(check, where, message))
+
+    def warn(self, check: int, where: str, message: str) -> None:
+        """Report something worth an author's attention that is NOT an error.
+
+        Deliberately a separate list from `findings`: exit_code() never
+        consults it, so a warning cannot fail a bundle by accident, however
+        many of them a run produces.
+        """
+        self.warnings.append(Finding(check, where, message))
 
     def ran(self, check: int, detail: str = "") -> None:
         self.status[check] = (RAN, detail)
@@ -2694,6 +2772,619 @@ def check_supplies(
     report.ran(22, detail)
 
 
+# Bundle relationships (checks 23, 24, 25).
+#
+# Four optional manifest keys let a bundle say what it TEACHES, what it
+# ASSUMES, and which other bundles it recommends before and after itself.
+# They are additive to bundle_format 1: a manifest declaring none of them is
+# valid exactly as it stands.
+#
+# ONE RULE SHAPES EVERY DECISION BELOW:
+#
+#   Named bundles are recommendations. Concepts are the educational
+#   contract. Neither one gates access to a tutorial or requires proof that
+#   another bundle was completed.
+#
+# Two consequences are easy to get backwards, and both are deliberate:
+#
+#   A concept in BOTH `covers` and `assumes` is LEGAL. A course may assume a
+#     baseline and then teach it deeper, and saying so is more honest than
+#     picking one key.
+#   An UNRESOLVED bundle id is LEGAL. A bundle is distributed independently
+#     and must never be invalidated because another bundle is missing,
+#     unpublished or simply not installed here - that is the whole point.
+#     This validator sees one bundle and no catalogue, so it checks that a
+#     referenced id is WELL FORMED and says nothing whatever about whether
+#     it resolves. See LIMITATIONS.
+CONCEPT_KEYS: dict[str, tuple[str, ...]] = {
+    # key -> the keys one concept's body may carry
+    "covers": ("summary", "aliases"),
+    "assumes": ("level", "summary", "aliases"),
+}
+CONCEPT_REQUIRED: dict[str, tuple[str, ...]] = {
+    "covers": ("summary",),
+    "assumes": ("level", "summary"),
+}
+ASSUMES_LEVELS = ("awareness", "conceptual", "working", "advanced")
+RECOMMENDATION_KEYS = ("recommended_follow_ups", "recommended_previous_bundles")
+RECOMMENDATION_ENTRY_KEYS = ("bundle", "because")
+_CONCEPT_ID_RE = re.compile(r"[a-z0-9-]+")
+# Alias normalisation. Every run of non-alphanumeric text is one separator and
+# case never distinguishes two aliases, so `append-only-log`, `append_only_log`
+# and `Append Only Log` are one alias written three ways, and declaring two of
+# them is a duplicate rather than a pair.
+#
+# THIS MUST STAY IDENTICAL TO catalogs.normalise(). That function is what a
+# RUNTIME concept query folds a learner's words with, and this one is what
+# tells an author at authoring time what the runtime will do; two definitions
+# of "the same alias" would make the validator pass a pair the index then
+# silently merges. The agreement is pinned by a test, because a comment
+# cannot notice when one of them changes.
+#
+# Folding punctuation to a separator is the right rule rather than merely the
+# compatible one: a concept id is [a-z0-9-]+, so punctuation cannot appear in
+# one at all, and an alias exists to be matched against an id. It also makes
+# `node.js` and `nodejs` one alias, which is what a learner typing either
+# means.
+_ALIAS_WORD_RE = re.compile(r"[a-z0-9]+")
+# Prose normalisation, for check 25 only. EVERY run of non-alphanumeric text
+# becomes one separator, so a concept id can be matched against a sentence
+# that ends in a comma or a full stop.
+_PROSE_SEPARATOR_RE = re.compile(r"[^a-z0-9]+")
+
+
+def normalise_alias(text: str) -> str:
+    """The comparable form of one alias or concept id.
+
+    Returns "" for a string with no alphanumeric content at all, which is an
+    alias that cannot match anything and is reported rather than compared.
+    """
+    return "-".join(_ALIAS_WORD_RE.findall(str(text).lower()))
+
+
+def concept_aliases(body: Any) -> list[str]:
+    """The well-formed alias strings of one concept body, as written.
+
+    Anything malformed - a non-list `aliases`, a non-string entry, an entry
+    with no content - is skipped here and reported by check 23. Callers that
+    only need the aliases that can actually match something use this;
+    check 23 walks the raw list itself, because it has to report what this
+    one drops.
+    """
+    if not isinstance(body, dict):
+        return []
+    raw = body.get("aliases")
+    if not isinstance(raw, list):
+        return []
+    return [a for a in raw if isinstance(a, str) and normalise_alias(a)]
+
+
+def concept_declarations(manifest: Any) -> dict[str, dict[str, Any]]:
+    """The concept mappings under `covers` and `assumes`, ids stringified.
+
+    A key whose value is not a mapping contributes nothing: it is malformed,
+    check 23 reports it, and every other caller would only propagate the
+    malformation. Concept BODIES are returned raw, because check 23 has to
+    report a body that is not a mapping and check 25 has to skip one.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    if not isinstance(manifest, dict):
+        return out
+    for key in CONCEPT_KEYS:
+        raw = manifest.get(key)
+        if isinstance(raw, dict) and raw:
+            out[key] = {str(k): v for k, v in raw.items()}
+    return out
+
+
+def check_concepts(manifest: Any, report: Report) -> None:
+    """Check 23 - both modes.
+
+    Proves that `covers` and `assumes` are well-formed: every concept id
+    matches [a-z0-9-]+, every concept carries a non-empty summary, every
+    assumed concept declares one of the four known levels, and every alias
+    list is a list of distinct non-empty strings.
+
+    It says NOTHING about whether the bundle really teaches what `covers`
+    claims, whether a summary is specific enough for a learner to
+    self-assess against, or whether a level is honestly chosen. Those are
+    judgement, and this validator makes none. Check 25 is the one
+    conservative textual test available, and it only ever warns.
+
+    An ABSENT key, a key with nothing under it, and an explicitly empty
+    mapping are all silent and all report n/a - the same treatment
+    `optional_lessons` and `supplies` already get, for the same reason: a
+    scaffolded bundle, or one an authoring tool is part-way through editing,
+    carries an empty declaration legitimately. A key that is PRESENT and is
+    neither a mapping nor empty is always a finding.
+    """
+    live: dict[str, dict[str, Any]] = {}
+    malformed: list[tuple[str, Any]] = []
+    for key in CONCEPT_KEYS:
+        if not isinstance(manifest, dict) or key not in manifest:
+            continue
+        raw = manifest.get(key)
+        if raw is None:
+            continue  # 'covers:' with nothing under it - nothing declared
+        if isinstance(raw, dict):
+            if raw:
+                live[key] = {str(k): v for k, v in raw.items()}
+            # else: 'covers: {}' - present, valid, nothing declared
+            continue
+        malformed.append((key, raw))
+
+    if not live and not malformed:
+        report.na(23, "the bundle declares no covers or assumes concepts")
+        return
+
+    for key, raw in malformed:
+        report.add(
+            23,
+            f"tutorial.yaml ({key})",
+            f"'{key}' must be a mapping of concept id to its definition, not "
+            f"{type(raw).__name__}. Each concept is a key with its own "
+            f"'summary' underneath; a bare list of concept ids is the "
+            f"common mistake, and it loses the summaries that make a "
+            f"concept mean something to a learner.",
+        )
+
+    counted = 0
+    for key in CONCEPT_KEYS:
+        for cid, body in live.get(key, {}).items():
+            counted += 1
+            where = f"tutorial.yaml ({key}.{cid})"
+
+            if not _CONCEPT_ID_RE.fullmatch(cid):
+                report.add(
+                    23,
+                    where,
+                    f"concept id {cid!r} must match [a-z0-9-]+ - lowercase "
+                    f"letters, digits and hyphens only. A concept id names a "
+                    f"technical concept and is quoted by other authors' "
+                    f"bundles, so it is spelled the way an id is, not the "
+                    f"way a heading is.",
+                )
+
+            if not isinstance(body, dict):
+                report.add(
+                    23,
+                    where,
+                    f"a concept must be a mapping of "
+                    f"{', '.join(repr(k) for k in CONCEPT_KEYS[key])}, not "
+                    f"{type(body).__name__}: {body!r}. A concept id on its "
+                    f"own says nothing a learner or another bundle can use.",
+                )
+                continue
+
+            for extra in sorted(set(body) - set(CONCEPT_KEYS[key])):
+                if key == "covers" and extra == "level":
+                    detail = (
+                        "'level' says how well a learner must ALREADY know a "
+                        "concept, which is an 'assumes' question. A course "
+                        "teaches what it covers; there is no level to declare."
+                    )
+                else:
+                    detail = (
+                        f"only "
+                        f"{', '.join(repr(k) for k in CONCEPT_KEYS[key])} "
+                        f"are recognised here"
+                    )
+                report.add(
+                    23,
+                    where,
+                    f"the concept carries an unknown key {extra!r}; {detail}",
+                )
+
+            for missing in CONCEPT_REQUIRED[key]:
+                if missing not in body:
+                    report.add(
+                        23,
+                        where,
+                        f"the concept is missing required key {missing!r}",
+                    )
+
+            if "summary" in body and not _is_text(body.get("summary")):
+                report.add(
+                    23,
+                    where,
+                    f"'summary' must be a non-empty description of the "
+                    f"concept, not {body.get('summary')!r}. It is written "
+                    f"for a prospective learner deciding whether this course "
+                    f"is for them, so the concept id alone is not enough.",
+                )
+
+            if key == "assumes" and "level" in body:
+                level = body.get("level")
+                if level not in ASSUMES_LEVELS:
+                    report.add(
+                        23,
+                        where,
+                        f"level {level!r} is not one of "
+                        f"{', '.join(ASSUMES_LEVELS)}",
+                    )
+
+            _check_alias_list(key, cid, body, report)
+
+    _warn_about_alias_collisions(live, report)
+
+    word = "concept" if counted == 1 else "concepts"
+    parts = [f"{len(live.get(k, {}))} {k}" for k in CONCEPT_KEYS if k in live]
+    detail = f"{counted} {word}"
+    if parts:
+        detail += " (" + ", ".join(parts) + ")"
+    if malformed:
+        malformed_word = "key" if len(malformed) == 1 else "keys"
+        detail += f", {len(malformed)} malformed {malformed_word}"
+    report.ran(23, detail)
+
+
+def _check_alias_list(key: str, cid: str, body: dict, report: Report) -> None:
+    """The `aliases` half of check 23, for one concept."""
+    if "aliases" not in body:
+        return
+    where = f"tutorial.yaml ({key}.{cid})"
+    raw = body.get("aliases")
+    if raw is None or raw == []:
+        # 'aliases:' with nothing under it, and 'aliases: []', both declare
+        # nothing and mean what the absent key means.
+        return
+    if not isinstance(raw, list):
+        report.add(
+            23,
+            where,
+            f"'aliases' must be a list of the other terms a learner might "
+            f"say for this concept, not {type(raw).__name__}. One alias is "
+            f"still a list: 'aliases: [replayable-log]'.",
+        )
+        return
+    seen: dict[str, str] = {}
+    for alias in raw:
+        if not isinstance(alias, str):
+            report.add(
+                23,
+                where,
+                f"alias {alias!r} is {type(alias).__name__}, not a string",
+            )
+            continue
+        normalised = normalise_alias(alias)
+        if not normalised:
+            report.add(
+                23,
+                where,
+                f"alias {alias!r} has no searchable content, so nothing a "
+                f"learner types can ever match it",
+            )
+            continue
+        if normalised in seen:
+            report.add(
+                23,
+                where,
+                f"aliases {seen[normalised]!r} and {alias!r} are the same "
+                f"alias written twice: case, spaces, underscores and hyphens "
+                f"do not distinguish two aliases, and both normalise to "
+                f"{normalised!r}",
+            )
+            continue
+        seen[normalised] = alias
+
+
+def _warn_about_alias_collisions(
+    live: dict[str, dict[str, Any]], report: Report
+) -> None:
+    """The two alias-ambiguity WARNINGS of check 23.
+
+    Neither is an error. An alias is discovery metadata: a collision makes a
+    search result ambiguous, it does not make the bundle wrong, and two
+    bundles by different authors are expressly allowed to share aliases.
+    Within ONE bundle, though, both shapes below make an exact-alias match
+    point at two different concepts, which is worth telling the author.
+    """
+    ids: dict[str, str] = {}
+    for key in CONCEPT_KEYS:
+        for cid in live.get(key, {}):
+            ids.setdefault(normalise_alias(cid), cid)
+
+    owners: dict[str, list[tuple[str, str, str]]] = {}
+    for key in CONCEPT_KEYS:
+        for cid, body in live.get(key, {}).items():
+            for alias in concept_aliases(body):
+                owners.setdefault(normalise_alias(alias), []).append(
+                    (key, cid, alias)
+                )
+
+    for normalised, holders in sorted(owners.items()):
+        # An alias that is ALSO a concept id in this bundle. Its own id does
+        # not count: `covers` and `assumes` may legally name one concept, so
+        # the comparison is by concept id, never by which key declared it.
+        other = ids.get(normalised)
+        for key, cid, alias in holders:
+            if other is not None and other != cid:
+                report.warn(
+                    23,
+                    f"tutorial.yaml ({key}.{cid})",
+                    f"alias {alias!r} is also the concept id {other!r} "
+                    f"declared by this bundle, so an exact search for it "
+                    f"matches two different concepts. This is legal and the "
+                    f"bundle is valid; rename the alias if the two are not "
+                    f"the same idea.",
+                )
+
+        distinct = sorted({cid for _, cid, _ in holders})
+        if len(distinct) > 1:
+            # Once per HOLDER, not once for the alias. An author reading the
+            # report is looking at one concept's declaration and needs the
+            # note there; a single warning attached to whichever concept
+            # happened to be declared first sends them to the wrong place.
+            for key, cid, alias in holders:
+                report.warn(
+                    23,
+                    f"tutorial.yaml ({key}.{cid})",
+                    f"alias {alias!r} is declared by more than one concept "
+                    f"in this bundle ({', '.join(distinct)}), so an exact "
+                    f"search for it cannot choose between them. This is "
+                    f"legal and the bundle is valid; give each concept an "
+                    f"alias only it uses.",
+                )
+
+
+def check_recommendations(manifest: Any, report: Report) -> None:
+    """Check 24 - both modes.
+
+    Proves that `recommended_follow_ups` and `recommended_previous_bundles`
+    are well-formed: a list of mappings, each naming one well-formed bundle
+    id and saying why, with no duplicate and no entry naming this bundle.
+
+    It deliberately says NOTHING about whether a referenced bundle exists.
+    A recommendation is advisory, a bundle is distributed independently, and
+    failing one because another is missing, unpublished, or simply not
+    installed on this machine would defeat the whole design. An unresolved
+    id is CORRECT, not tolerated. Availability is a question for a catalogue,
+    which this mode does not have - see LIMITATIONS.
+
+    Reciprocity is neither required nor reported: a third-party bundle
+    naming an established one under `recommended_previous_bundles` is how it
+    attaches itself to that course WITHOUT the other author changing
+    anything, and one-way is the ordinary case.
+    """
+    live: list[tuple[str, list]] = []
+    malformed: list[tuple[str, Any]] = []
+    for key in RECOMMENDATION_KEYS:
+        if not isinstance(manifest, dict) or key not in manifest:
+            continue
+        raw = manifest.get(key)
+        if raw is None:
+            continue  # the key with nothing under it - nothing declared
+        if isinstance(raw, list):
+            if raw:
+                live.append((key, raw))
+            continue
+        malformed.append((key, raw))
+
+    if not live and not malformed:
+        report.na(24, "the bundle recommends no other bundles")
+        return
+
+    for key, raw in malformed:
+        report.add(
+            24,
+            f"tutorial.yaml ({key})",
+            f"'{key}' must be a list of entries, not {type(raw).__name__}. "
+            f"Each entry needs its own '- ' list marker; a single mapping "
+            f"written directly under the key is the common typo.",
+        )
+
+    bundle_id = manifest.get("id") if isinstance(manifest, dict) else None
+    counted = 0
+    named: dict[str, list[str]] = {}
+    for key, raw in live:
+        seen: dict[str, int] = {}
+        for index, entry in enumerate(raw):
+            counted += 1
+            where = f"tutorial.yaml ({key}[{index}])"
+            if not isinstance(entry, dict):
+                report.add(
+                    24,
+                    where,
+                    f"a recommendation is not a mapping of 'bundle' and "
+                    f"'because', it is {type(entry).__name__}: {entry!r}. A "
+                    f"bare bundle id is the common mistake, and it drops the "
+                    f"one sentence the learner actually reads.",
+                )
+                continue
+
+            for extra in sorted(set(entry) - set(RECOMMENDATION_ENTRY_KEYS)):
+                report.add(
+                    24,
+                    where,
+                    f"a recommendation carries an unknown key {extra!r}; only "
+                    f"'bundle' and 'because' are recognised. This format has "
+                    f"no field that requires, installs, orders or gates "
+                    f"another bundle, by any spelling.",
+                )
+
+            for missing in RECOMMENDATION_ENTRY_KEYS:
+                if missing not in entry:
+                    report.add(
+                        24,
+                        where,
+                        f"a recommendation is missing required key {missing!r}",
+                    )
+
+            if "because" in entry and not _is_text(entry.get("because")):
+                report.add(
+                    24,
+                    where,
+                    f"'because' must be a non-empty sentence saying what the "
+                    f"other bundle gives this learner, not "
+                    f"{entry.get('because')!r}. The runner shows it beside "
+                    f"the recommendation, and a learner choosing what to do "
+                    f"next has nothing else to go on.",
+                )
+
+            if "bundle" not in entry:
+                continue
+            other = entry.get("bundle")
+            if not _is_text(other):
+                report.add(
+                    24,
+                    where,
+                    f"'bundle' must be a non-empty bundle id, not {other!r}",
+                )
+                continue
+            if not _CONCEPT_ID_RE.fullmatch(other):
+                report.add(
+                    24,
+                    where,
+                    f"bundle id {other!r} must match [a-z0-9-]+ - lowercase "
+                    f"letters, digits and hyphens only, exactly as that "
+                    f"bundle's own 'id' field is spelled. A title, a path or "
+                    f"a URL is not a bundle id.",
+                )
+                continue
+            if isinstance(bundle_id, str) and other == bundle_id:
+                report.add(
+                    24,
+                    where,
+                    f"the bundle recommends itself ({other!r}). A "
+                    f"recommendation points a learner at a DIFFERENT course, "
+                    f"before or after this one.",
+                )
+                continue
+            if other in seen:
+                report.add(
+                    24,
+                    where,
+                    f"bundle {other!r} is listed twice in '{key}' (also at "
+                    f"index {seen[other]}). Author order is display order, so "
+                    f"a duplicate shows the learner one course twice; give "
+                    f"the better reason once.",
+                )
+                continue
+            seen[other] = index
+            named.setdefault(other, []).append(key)
+
+    # A WARNING, not a finding: naming one bundle as both a follow-up and a
+    # previous bundle is contradictory, but it is a contradiction about
+    # DISPLAY ORDER rather than about correctness, and nothing a runner does
+    # with it is unsafe. The learner sees one course recommended twice, in
+    # two places, for two reasons.
+    for other, keys in sorted(named.items()):
+        if len(set(keys)) > 1:
+            report.warn(
+                24,
+                "tutorial.yaml",
+                f"bundle {other!r} is recommended both as a follow-up and as "
+                f"a previous bundle. Both are advisory and the bundle is "
+                f"valid, but a learner is being told to take one course both "
+                f"before and after this one; keep the recommendation that is "
+                f"true.",
+            )
+
+    word = "recommendation" if counted == 1 else "recommendations"
+    detail = f"{counted} {word} across {len(live)} list"
+    if len(live) != 1:
+        detail += "s"
+    if malformed:
+        malformed_word = "key" if len(malformed) == 1 else "keys"
+        detail += f", {len(malformed)} malformed {malformed_word}"
+    report.ran(24, detail)
+
+
+def concept_spellings(cid: str, aliases: list[str]) -> list[str]:
+    """Every normalised spelling check 25 will accept for one concept.
+
+    The id, each alias, and a singular/plural variant of each - `-s` added
+    to the last word and, where it ends in one, removed. That last pair is
+    what stops a coverage list reading "partition offset" from being
+    reported for a concept id of `partition-offsets`.
+
+    Deliberately generous. A false warning about a course whose COURSE.md is
+    perfectly good is worse than a missed one: the author learns to skip the
+    warnings, and then misses the real case.
+    """
+    out: list[str] = []
+    for term in [cid, *aliases]:
+        base = normalise_alias(term)
+        if not base:
+            continue
+        for variant in (base, base + "s", base[:-1] if base.endswith("s") else base):
+            if variant and variant not in out:
+                out.append(variant)
+    return out
+
+
+def check_course_coverage(root: Path, manifest: Any, report: Report) -> None:
+    """Check 25 - both modes. WARNINGS ONLY; it never produces a finding.
+
+    A `covers` concept should also be recognisable in COURSE.md, which is
+    where a learner reads what the course teaches and where the coverage
+    list tells a tutor what the course owes them. A concept claimed in the
+    manifest and named nowhere in COURSE.md is usually one of two ordinary
+    authoring mistakes: a coverage list that was never updated, or a concept
+    id spelled in a vocabulary the course itself does not use.
+
+    THE TEST IS TEXTUAL AND CONSERVATIVE ON PURPOSE, and its limits are the
+    point of it:
+
+      It searches the WHOLE of COURSE.md, not the coverage list alone. The
+        coverage list has no fixed heading - the format asks only for a
+        heading that says what it is - so locating it would mean guessing,
+        and a guess that missed would warn about a concept that is listed.
+      It accepts the concept id, any alias, and a singular/plural variant of
+        each, compared with punctuation and case removed. A course that says
+        "retained event logs" satisfies a concept id of
+        `retained-event-logs`.
+      It proves NOTHING about teaching. A course can name a concept in one
+        sentence and never teach it; this check would be satisfied and the
+        course would be wrong. It is evidence that the author has used the
+        same vocabulary in both places, and nothing more.
+
+    That is why it warns rather than rejects. Semantic proof of coverage is
+    not available to a structural validator, the spec forbids attempting it,
+    and a check that failed a correct bundle on a vocabulary difference
+    would be ignored within a week.
+    """
+    covers = {
+        cid: body
+        for cid, body in concept_declarations(manifest).get("covers", {}).items()
+        if isinstance(body, dict)
+    }
+    if not covers:
+        report.na(25, "the bundle declares no covers concepts")
+        return
+    resolved, _ = resolve_exact(root, "COURSE.md")
+    text = read_text(resolved) if resolved is not None else None
+    if text is None:
+        report.na(
+            25, "COURSE.md is missing or unreadable; check 9 reports that"
+        )
+        return
+
+    haystack = "-" + _PROSE_SEPARATOR_RE.sub("-", text.casefold()).strip("-") + "-"
+    unmatched = 0
+    for cid, body in sorted(covers.items()):
+        spellings = concept_spellings(cid, concept_aliases(body))
+        if any(f"-{spelling}-" in haystack for spelling in spellings):
+            continue
+        unmatched += 1
+        report.warn(
+            25,
+            "COURSE.md",
+            f"the covers concept {cid!r} appears nowhere in COURSE.md - not "
+            f"as its id, not as a plain-words spelling of it, and not as any "
+            f"of its aliases. The bundle is valid. Either name it in the "
+            f"coverage list, or add the words COURSE.md already uses for it "
+            f"to that concept's 'aliases', so a learner searching either "
+            f"vocabulary finds this course.",
+        )
+
+    word = "concept" if len(covers) == 1 else "concepts"
+    detail = f"{len(covers)} covers {word}"
+    if unmatched:
+        detail += f", {unmatched} not found in COURSE.md"
+    report.ran(25, detail)
+
+
 # --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
@@ -2810,6 +3501,14 @@ def validate(target: Path, mode: str) -> Report:
         else set()
     ) | optional_keys
     check_supplies(target, manifest_dict, all_lessons, listed_rels, report)
+    # Relationship metadata. All three run in BOTH modes: the four keys are
+    # copied into the instance with the rest of tutorial.yaml, and a runner
+    # reads `assumes` before the first task and the recommendation lists at
+    # completion, so an instance carrying a malformed one is as broken as a
+    # bundle carrying it.
+    check_concepts(manifest_dict, report)
+    check_recommendations(manifest_dict, report)
+    check_course_coverage(target, manifest_dict, report)
     if mode == "bundle":
         check_no_generated_dir(target, report)
         check_state_template(target, manifest_dict, report)
@@ -3183,6 +3882,20 @@ def render(report: Report, stream=sys.stdout) -> None:
         print(f"FAIL - {len(report.findings)} finding(s):", file=stream)
         for finding in sorted(report.findings, key=lambda f: (f.check, f.where)):
             print(f"  {finding}", file=stream)
+    if report.warnings:
+        # Printed whether or not there are findings, and never counted with
+        # them. A warning does not change the exit code and does not make a
+        # bundle invalid; it is something worth an author's eye.
+        if report.findings:
+            print("", file=stream)
+        print(
+            f"{len(report.warnings)} warning(s) - these do not make the "
+            f"bundle invalid:",
+            file=stream,
+        )
+        for warning in sorted(report.warnings, key=lambda f: (f.check, f.where)):
+            print(f"  {warning}", file=stream)
+        print("", file=stream)
     blocked = report.blocked_checks
     if blocked:
         print("", file=stream)
@@ -3196,6 +3909,13 @@ def render(report: Report, stream=sys.stdout) -> None:
         if blocked:
             print(
                 "INDETERMINATE - no findings, but not every check ran.", file=stream
+            )
+        elif report.warnings:
+            print(
+                f"PASS - every applicable check ran and found nothing that "
+                f"makes this bundle invalid. {len(report.warnings)} "
+                f"warning(s) above are worth a look.",
+                file=stream,
             )
         else:
             print(

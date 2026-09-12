@@ -58,6 +58,31 @@ BASELINES = {
     # Hand-built: one single-file lesson, one foldered lesson with nested
     # material, workspace_kind: none with an empty learner_owned.
     "foldered": FIXTURES / "foldered-bundle",
+    # The three relationship baselines - the normative example from
+    # 2026-09-12-bundle-relationships-design.md section 10, as the smallest
+    # bundles that can carry it. They are deliberately NOT in
+    # skills/tutorail/examples/: three materialisable courses would bloat
+    # every plugin install to illustrate a documentation point.
+    #
+    # Together they are the positive control the relationship checks would
+    # otherwise lack. All three validate clean, in bundle mode and as
+    # instances, with no warnings - so it is demonstrably possible to express
+    # a valid bundle using all four keys, and the rejections below are
+    # rejections of something rather than of everything.
+    #
+    # `broker` covers four concepts and recommends two follow-ups, NEITHER OF
+    #   WHICH EXISTS ANYWHERE. That is correct and is the point: a bundle is
+    #   distributed independently and an unresolved id never invalidates it.
+    # `engine` names the broker as a previous bundle, and both ASSUMES and
+    #   COVERS `windowed-aggregation` - the overlap the spec makes legal.
+    # `recipes` is the third-party bundle. It names the broker under
+    #   `recommended_previous_bundles` while the broker says nothing about
+    #   it, which is the whole reason the design is open-ended: a third
+    #   party attaches itself to an established course without that course's
+    #   author changing one line.
+    "broker": FIXTURES / "durable-event-broker",
+    "engine": FIXTURES / "streaming-query-engine",
+    "recipes": FIXTURES / "event-stream-recipes",
 }
 
 # Baselines that are already INSTANCES and must not be run through
@@ -139,6 +164,23 @@ def m_bad_design_ref(root: Path) -> None:
 
 def m_anchor_renamed(root: Path) -> None:
     edit(root / "DESIGN.md", "{#row-cell-model}", "{#row-and-cell-model}")
+
+
+def m_bad_design_ref_in_05(root: Path) -> None:
+    """The PROBE mutator for test_run_case_checks_where.
+
+    Deliberately the same defect as m_bad_design_ref, in a DIFFERENT lesson,
+    so a case written as though lesson 03 were the one mutated still sees a
+    check-1 finding with a matching message. That is the false pass the
+    location assertion exists to catch, and it is not hypothetical: two of
+    these lessons carry `partition-key`, so an edit aimed at one and landing
+    on the other reads identically in the report.
+    """
+    edit(
+        root / "lessons" / "05-canonical-ordered-keys.md",
+        "design_refs: [key-ordering, partition-key,",
+        "design_refs: [key-ordreing, partition-key,",
+    )
 
 
 def m_design_refs_not_a_list(root: Path) -> None:
@@ -1788,6 +1830,331 @@ supplies:
 """)
 
 
+# -- checks 23, 24, 25: bundle relationships
+#
+# Every mutator below works on one of the three relationship baselines, which
+# are the normative example from the design spec: `durable-event-broker`
+# covers four concepts and recommends two follow-ups, `streaming-query-engine`
+# names the broker as a previous bundle and both assumes and covers
+# `windowed-aggregation`, and `event-stream-recipes` is the third-party
+# bundle that attaches itself to the broker WITHOUT the broker naming it.
+#
+# The three of them validate clean as shipped, which is the positive control
+# the rejections below would otherwise be missing: it has to be possible to
+# express a valid bundle that uses all four keys.
+
+
+def m_concept_id_not_a_slug(root: Path) -> None:
+    """A concept id spelled the way a heading is, not the way an id is."""
+    edit(
+        root / "tutorial.yaml",
+        "  retained-event-logs:\n",
+        "  Retained_Event_Logs:\n",
+    )
+
+
+def m_covers_summary_missing(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        """  topic-partitions:
+    summary: >
+      A topic is divided into partitions so writers and readers scale
+      independently. Order is promised per partition, never across a topic.
+""",
+        "  topic-partitions:\n    aliases: [topic-splitting]\n",
+    )
+
+
+def m_covers_summary_empty(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        """  topic-partitions:
+    summary: >
+      A topic is divided into partitions so writers and readers scale
+      independently. Order is promised per partition, never across a topic.
+""",
+        '  topic-partitions:\n    summary: "   "\n',
+    )
+
+
+def m_covers_is_a_list(root: Path) -> None:
+    """The commonest shape mistake: concept ids with no summaries under them."""
+    start = "covers:\n"
+    text = (root / "tutorial.yaml").read_text()
+    assert start in text
+    head, rest = text.split(start, 1)
+    _, tail = rest.split("\nassumes:\n", 1)
+    (root / "tutorial.yaml").write_text(
+        head
+        + "covers: [retained-event-logs, partition-offsets, topic-partitions, "
+        "group-commit]\n\nassumes:\n"
+        + tail
+    )
+
+
+def m_concept_body_is_a_scalar(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        """  topic-partitions:
+    summary: >
+      A topic is divided into partitions so writers and readers scale
+      independently. Order is promised per partition, never across a topic.
+""",
+        "  topic-partitions: a topic is split into partitions\n",
+    )
+
+
+def m_covers_carries_a_level(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "  group-commit:\n    summary: >",
+        "  group-commit:\n    level: working\n    summary: >",
+    )
+
+
+def m_assumes_level_unknown(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "  go-programming:\n    level: working",
+        "  go-programming:\n    level: expert",
+    )
+
+
+def m_assumes_level_missing(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "  go-programming:\n    level: working\n",
+        "  go-programming:\n",
+    )
+
+
+def m_aliases_not_a_list(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "    aliases: [append-only-log, replayable-log]",
+        "    aliases: append-only-log",
+    )
+
+
+def m_alias_is_empty(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "    aliases: [append-only-log, replayable-log]",
+        '    aliases: [append-only-log, "  "]',
+    )
+
+
+def m_aliases_duplicated_after_normalising(root: Path) -> None:
+    """`Append Only Log` and `append-only-log` are one alias, twice."""
+    edit(
+        root / "tutorial.yaml",
+        "    aliases: [append-only-log, replayable-log]",
+        '    aliases: [append-only-log, "Append Only Log"]',
+    )
+
+
+def m_alias_shadows_another_concept_id(root: Path) -> None:
+    """WARNING, not a finding: an exact alias search now matches two concepts."""
+    edit(
+        root / "tutorial.yaml",
+        "    aliases: [append-only-log, replayable-log]",
+        "    aliases: [append-only-log, group-commit]",
+    )
+
+
+def m_two_concepts_share_an_alias(root: Path) -> None:
+    """WARNING, not a finding."""
+    edit(
+        root / "tutorial.yaml",
+        "    aliases: [stream-offsets]",
+        "    aliases: [stream-offsets, replayable-log]",
+    )
+
+
+def m_covers_also_assumed(root: Path) -> None:
+    """LEGAL. A course may assume a baseline and then teach it deeper.
+
+    The shipped `streaming-query-engine` already does this with
+    `windowed-aggregation`; this does it to the broker as well, so the
+    allowance is proved on a bundle where it was not designed in.
+    """
+    edit(
+        root / "tutorial.yaml",
+        "assumes:\n  go-programming:",
+        """assumes:
+  group-commit:
+    level: awareness
+    summary: >
+      Recognise that a batch of writes can share one fsync, without having
+      implemented it.
+  go-programming:""",
+    )
+
+
+def m_covers_is_empty(root: Path) -> None:
+    """LEGAL and silent: an empty declaration means what an absent key means."""
+    text = (root / "tutorial.yaml").read_text()
+    head, rest = text.split("covers:\n", 1)
+    _, tail = rest.split("\nassumes:\n", 1)
+    (root / "tutorial.yaml").write_text(head + "covers: {}\n\nassumes:\n" + tail)
+
+
+def m_aliases_is_an_empty_list(root: Path) -> None:
+    """LEGAL and silent, for the same reason."""
+    edit(
+        root / "tutorial.yaml",
+        "    aliases: [append-only-log, replayable-log]",
+        "    aliases: []",
+    )
+
+
+def m_recommendations_not_a_list(root: Path) -> None:
+    """A recommendation list written as a bare bundle id.
+
+    The whole block is replaced rather than just the '- ' removed: dropping
+    the list marker alone leaves the folded `because: >` at an indentation
+    the restricted reader refuses, so check 8 would fire first and check 24
+    would never see a manifest at all.
+    """
+    text = (root / "tutorial.yaml").read_text()
+    head, rest = text.split("recommended_follow_ups:\n", 1)
+    _, tail = rest.split("\nlessons:\n", 1)
+    (root / "tutorial.yaml").write_text(
+        head
+        + "recommended_follow_ups: distributed-log-broker\n\nlessons:\n"
+        + tail
+    )
+
+
+def m_recommendation_is_a_bare_id(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        """  - bundle: distributed-log-broker
+    because: >
+      Extend the broker with multi-node placement, replication, acknowledgement
+      policies, and recovery from the loss of a node.
+""",
+        "  - distributed-log-broker\n",
+    )
+
+
+def m_recommendation_has_no_because(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        """  - bundle: distributed-log-broker
+    because: >
+      Extend the broker with multi-node placement, replication, acknowledgement
+      policies, and recovery from the loss of a node.
+""",
+        "  - bundle: distributed-log-broker\n",
+    )
+
+
+def m_recommendation_because_is_empty(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        """  - bundle: distributed-log-broker
+    because: >
+      Extend the broker with multi-node placement, replication, acknowledgement
+      policies, and recovery from the loss of a node.
+""",
+        '  - bundle: distributed-log-broker\n    because: ""\n',
+    )
+
+
+def m_recommendation_has_no_bundle(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "  - bundle: distributed-log-broker\n    because: >",
+        "  - because: >",
+    )
+
+
+def m_recommended_id_is_a_title(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "  - bundle: distributed-log-broker",
+        "  - bundle: Distributed Log Broker",
+    )
+
+
+def m_recommends_itself(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "  - bundle: distributed-log-broker",
+        "  - bundle: durable-event-broker",
+    )
+
+
+def m_recommendation_duplicated(root: Path) -> None:
+    edit(
+        root / "tutorial.yaml",
+        "  - bundle: streaming-query-engine",
+        "  - bundle: distributed-log-broker",
+    )
+
+
+def m_recommendation_has_an_unknown_key(root: Path) -> None:
+    """No spelling of a gate exists in this format, and a typo is not one."""
+    edit(
+        root / "tutorial.yaml",
+        "  - bundle: distributed-log-broker\n    because: >",
+        "  - bundle: distributed-log-broker\n    requires_completion: true\n    because: >",
+    )
+
+
+def m_bundle_recommended_both_ways(root: Path) -> None:
+    """WARNING, not a finding: advisory in both directions, and contradictory."""
+    append(
+        root / "tutorial.yaml",
+        """
+recommended_previous_bundles:
+  - bundle: distributed-log-broker
+    because: >
+      It covers the replication model, which makes this course easier to
+      follow.
+""",
+    )
+
+
+def m_recommendations_are_empty(root: Path) -> None:
+    """LEGAL and silent."""
+    text = (root / "tutorial.yaml").read_text()
+    head, rest = text.split("recommended_follow_ups:\n", 1)
+    _, tail = rest.split("\nlessons:\n", 1)
+    (root / "tutorial.yaml").write_text(
+        head + "recommended_follow_ups: []\n\nlessons:\n" + tail
+    )
+
+
+def m_covers_concept_absent_from_course(root: Path) -> None:
+    """WARNING, not a finding: COURSE.md never uses the word.
+
+    The concept id stays valid and the bundle stays valid; what is gone is
+    any sign that the course and the manifest are talking about one thing.
+    """
+    edit(root / "COURSE.md", "- group commit\n", "")
+    # COURSE.md only. Check 25 reads nothing else - not DESIGN.md, not the
+    # lessons - because COURSE.md is the one document written for a learner
+    # who has not started, and the coverage list lives in it.
+    assert "group commit" not in (root / "COURSE.md").read_text().casefold(), (
+        "COURSE.md still names the concept somewhere else, so this fixture "
+        "would prove nothing"
+    )
+
+
+def m_course_names_a_concept_only_by_its_alias(root: Path) -> None:
+    """SILENT. An alias is a spelling of the concept, and this is what
+    aliases are for: the course's vocabulary and the id's may differ."""
+    edit(root / "COURSE.md", "- retained event logs\n", "- replayable logs\n")
+
+
+def m_course_names_a_concept_in_the_singular(root: Path) -> None:
+    """SILENT. `partition offset` satisfies `partition-offsets`."""
+    edit(root / "COURSE.md", "- partition offsets\n", "- partition offset\n")
+
+
+
 # --------------------------------------------------------------------------
 # The case table
 # --------------------------------------------------------------------------
@@ -1819,8 +2186,21 @@ class Case:
     verify: Mutator | None = None
     #  "fires"         - the named check must report, exit 1
     #  "silent"        - the named check must NOT report, exit 0
+    #  "warns"         - the named check must WARN and not report, exit 0
     #  "indeterminate" - no findings, but a check did not run, exit 3
     kind: str = "fires"
+    # The expected Finding.where - the file, or the manifest key, the finding
+    # is ABOUT. When it is set, exactly ONE finding must satisfy BOTH `expect`
+    # and this location.
+    #
+    # Leaving it unset is the old behaviour and is a weaker test than it
+    # looks. `hits` is filtered by check number alone, and the message
+    # assertion accepted ANY hit, so a case that mutated file A passed when
+    # the check fired on file B with a similar message - the mutation and the
+    # finding never had to be about the same thing. test_run_case_checks_where
+    # below constructs exactly that case and proves it is now caught. Set
+    # `where` on every case whose mutation targets one identifiable place.
+    where: str = ""
 
 
 CASES: list[Case] = [
@@ -2265,6 +2645,112 @@ CASES: list[Case] = [
     Case("22: a supplies 'to' points inside a mis-cased 'Tutorial/'", 22,
          "automaton", "bundle", m_supplies_to_is_inside_a_miscased_instance,
          "'tutorial/' is the instance"),
+    # ---- check 23: covers and assumes
+    #
+    # Every case below sets `where`, because every one of them mutates one
+    # identifiable concept and the finding must be about THAT concept. The
+    # manifest is one file, so without `where` a case here would be pinned
+    # to nothing at all: "tutorial.yaml" is the location of every finding
+    # check 23 can produce.
+    Case("23: a concept id is not a slug", 23, "broker", "bundle",
+         m_concept_id_not_a_slug, "must match [a-z0-9-]+",
+         where="tutorial.yaml (covers.Retained_Event_Logs)"),
+    Case("23: a covers concept has no summary", 23, "broker", "bundle",
+         m_covers_summary_missing, "missing required key 'summary'",
+         where="tutorial.yaml (covers.topic-partitions)"),
+    Case("23: a covers summary is blank", 23, "broker", "bundle",
+         m_covers_summary_empty, "'summary' must be a non-empty description",
+         where="tutorial.yaml (covers.topic-partitions)"),
+    Case("23: covers is a list of ids, not a mapping", 23, "broker", "bundle",
+         m_covers_is_a_list, "must be a mapping of concept id",
+         where="tutorial.yaml (covers)"),
+    Case("23: a concept body is a bare sentence", 23, "broker", "bundle",
+         m_concept_body_is_a_scalar, "a concept must be a mapping",
+         where="tutorial.yaml (covers.topic-partitions)"),
+    Case("23: a covers concept declares a level", 23, "broker", "bundle",
+         m_covers_carries_a_level, "unknown key 'level'",
+         where="tutorial.yaml (covers.group-commit)"),
+    Case("23: an assumed concept declares an unknown level", 23, "broker",
+         "bundle", m_assumes_level_unknown,
+         "level 'expert' is not one of awareness, conceptual, working, advanced",
+         where="tutorial.yaml (assumes.go-programming)"),
+    Case("23: an assumed concept declares no level", 23, "broker", "bundle",
+         m_assumes_level_missing, "missing required key 'level'",
+         where="tutorial.yaml (assumes.go-programming)"),
+    Case("23: aliases is a bare string", 23, "broker", "bundle",
+         m_aliases_not_a_list, "'aliases' must be a list",
+         where="tutorial.yaml (covers.retained-event-logs)"),
+    Case("23: an alias is blank", 23, "broker", "bundle",
+         m_alias_is_empty, "has no searchable content",
+         where="tutorial.yaml (covers.retained-event-logs)"),
+    Case("23: one alias is declared twice in two spellings", 23, "broker",
+         "bundle", m_aliases_duplicated_after_normalising,
+         "are the same alias written twice",
+         where="tutorial.yaml (covers.retained-event-logs)"),
+    # ---- check 23, the allowances. Each of these is legal and MUST be
+    # silent; a validator that rejected any of them would break the design.
+    Case("23: a concept in BOTH covers and assumes is legal", 23, "broker",
+         "bundle", m_covers_also_assumed, kind="silent"),
+    Case("23: 'covers: {}' declares nothing and is silent", 23, "broker",
+         "bundle", m_covers_is_empty, kind="silent"),
+    Case("23: 'aliases: []' declares nothing and is silent", 23, "broker",
+         "bundle", m_aliases_is_an_empty_list, kind="silent"),
+    # ---- check 23, the warnings. Ambiguous, not wrong: exit code stays 0.
+    Case("23: an alias is also another concept's id", 23, "broker", "bundle",
+         m_alias_shadows_another_concept_id,
+         "is also the concept id 'group-commit'", kind="warns",
+         where="tutorial.yaml (covers.retained-event-logs)"),
+    Case("23: two concepts share one alias", 23, "broker", "bundle",
+         m_two_concepts_share_an_alias,
+         "is declared by more than one concept in this bundle", kind="warns",
+         where="tutorial.yaml (covers.partition-offsets)"),
+    # ---- check 24: the recommendation lists
+    Case("24: a recommendation list is a single mapping", 24, "broker",
+         "bundle", m_recommendations_not_a_list, "must be a list of entries",
+         where="tutorial.yaml (recommended_follow_ups)"),
+    Case("24: a recommendation is a bare bundle id", 24, "broker", "bundle",
+         m_recommendation_is_a_bare_id, "is not a mapping of 'bundle' and 'because'",
+         where="tutorial.yaml (recommended_follow_ups[0])"),
+    Case("24: a recommendation has no 'because'", 24, "broker", "bundle",
+         m_recommendation_has_no_because, "missing required key 'because'",
+         where="tutorial.yaml (recommended_follow_ups[0])"),
+    Case("24: a recommendation's 'because' is blank", 24, "broker", "bundle",
+         m_recommendation_because_is_empty, "'because' must be a non-empty sentence",
+         where="tutorial.yaml (recommended_follow_ups[0])"),
+    Case("24: a recommendation has no 'bundle'", 24, "broker", "bundle",
+         m_recommendation_has_no_bundle, "missing required key 'bundle'",
+         where="tutorial.yaml (recommended_follow_ups[0])"),
+    Case("24: a recommended id is a title, not an id", 24, "broker", "bundle",
+         m_recommended_id_is_a_title, "must match [a-z0-9-]+",
+         where="tutorial.yaml (recommended_follow_ups[0])"),
+    Case("24: the bundle recommends itself", 24, "broker", "bundle",
+         m_recommends_itself, "the bundle recommends itself",
+         where="tutorial.yaml (recommended_follow_ups[0])"),
+    Case("24: one bundle is listed twice in one list", 24, "broker", "bundle",
+         m_recommendation_duplicated, "is listed twice in 'recommended_follow_ups'",
+         where="tutorial.yaml (recommended_follow_ups[1])"),
+    Case("24: a recommendation carries a gating key", 24, "broker", "bundle",
+         m_recommendation_has_an_unknown_key,
+         "unknown key 'requires_completion'",
+         where="tutorial.yaml (recommended_follow_ups[0])"),
+    # ---- check 24, the allowances.
+    Case("24: 'recommended_follow_ups: []' is silent", 24, "broker", "bundle",
+         m_recommendations_are_empty, kind="silent"),
+    # ---- check 24, the warning.
+    Case("24: one bundle is recommended both before and after", 24, "broker",
+         "bundle", m_bundle_recommended_both_ways,
+         "both as a follow-up and as a previous bundle", kind="warns",
+         where="tutorial.yaml"),
+    # ---- check 25: covers against COURSE.md. Warnings only, always.
+    Case("25: a covers concept is named nowhere in COURSE.md", 25, "broker",
+         "bundle", m_covers_concept_absent_from_course,
+         "the covers concept 'group-commit' appears nowhere in COURSE.md",
+         kind="warns", where="COURSE.md"),
+    Case("25: COURSE.md naming a concept by an alias is enough", 25, "broker",
+         "bundle", m_course_names_a_concept_only_by_its_alias, kind="silent"),
+    Case("25: COURSE.md naming a concept in the singular is enough", 25,
+         "broker", "bundle", m_course_names_a_concept_in_the_singular,
+         kind="silent"),
 ]
 
 
@@ -2276,6 +2762,10 @@ _failures: list[str] = []
 _notes: list[str] = []
 _passed = 0
 _fired_checks: set[int] = set()
+# Checks demonstrated producing a WARNING. A warning-only check can never
+# appear in _fired_checks, so the coverage meta-test tracks the two
+# separately rather than accepting either as proof of the other.
+_warned_checks: set[int] = set()
 
 
 def note(text: str) -> None:
@@ -2292,6 +2782,60 @@ def record(ok: bool, label: str, detail: str = "") -> None:
         print(f"  FAIL {label}")
         if detail:
             print(f"       {detail}")
+
+
+def _message_matches(reported, case: Case) -> bool:
+    """Does one reported Finding carry the message this case expects?"""
+    return case.expect in reported.message or case.expect in str(reported)
+
+
+def _one_matching(reported: list, case: Case) -> bool:
+    """Is this case satisfied by what the named check reported?
+
+    Without `case.where` this is the historical rule and its historical
+    weakness: ANY of the check's reports carrying the expected message is
+    enough, so the report never has to be ABOUT the thing the case mutated.
+
+    With `case.where` set, EXACTLY ONE report must carry both the expected
+    message and the expected location. Exactly one, not at least one: two
+    reports about one mutated file mean the case is no longer pinning down
+    which of them it is asserting, and that is the ambiguity this field
+    exists to remove.
+    """
+    if not case.where:
+        return any(_message_matches(r, case) for r in reported)
+    located = [
+        r for r in reported if r.where == case.where and _message_matches(r, case)
+    ]
+    return len(located) == 1
+
+
+def _mismatch_detail(case: Case, reported: list, verb: str) -> str:
+    listing = " || ".join(f"{r.where}: {r.message}" for r in reported) or "(none)"
+    if not case.where:
+        return (
+            f"check {case.check} {verb} but no message contained "
+            f"{case.expect!r}. Messages: {listing}"
+        )
+    right_place = [r for r in reported if r.where == case.where]
+    if not right_place:
+        return (
+            f"check {case.check} {verb}, but NOT about {case.where!r} - the "
+            f"place this case mutated. It reported about "
+            f"{sorted({r.where for r in reported})} instead, which is the "
+            f"false pass this field exists to catch. Messages: {listing}"
+        )
+    matched = [r for r in right_place if _message_matches(r, case)]
+    if not matched:
+        return (
+            f"check {case.check} {verb} about {case.where!r} but no message "
+            f"there contained {case.expect!r}. Messages: {listing}"
+        )
+    return (
+        f"check {case.check} {verb} about {case.where!r} {len(matched)} times "
+        f"with a message containing {case.expect!r}; a case must pin down "
+        f"exactly one. Messages: {listing}"
+    )
 
 
 def run_case(case: Case) -> None:
@@ -2365,6 +2909,40 @@ def run_case(case: Case) -> None:
             record(True, case.name)
             return
 
+        if case.kind == "warns":
+            # A warning never rejects a bundle, so the exit code must stay 0
+            # and the check must NOT have produced a finding.
+            warned = [w for w in report.warnings if w.check == case.check]
+            if hits:
+                record(
+                    False,
+                    case.name,
+                    f"check {case.check} produced a FINDING where only a "
+                    f"warning is permitted: "
+                    + "; ".join(f"{h.where}: {h.message[:110]}" for h in hits),
+                )
+                return
+            if not _one_matching(warned, case):
+                record(
+                    False,
+                    case.name,
+                    _mismatch_detail(case, warned, "warned"),
+                )
+                return
+            if report.exit_code() != 0:
+                record(
+                    False,
+                    case.name,
+                    f"a warning must not change the exit code; expected 0, "
+                    f"got {report.exit_code()}: "
+                    + "; ".join(str(f) for f in report.findings),
+                )
+                return
+            assert case.check is not None
+            _warned_checks.add(case.check)
+            record(True, case.name)
+            return
+
         # kind == "fires"
         if not hits:
             record(
@@ -2374,14 +2952,8 @@ def run_case(case: Case) -> None:
                 + ("; ".join(str(f) for f in report.findings) or "(none)"),
             )
             return
-        if not any(case.expect in h.message or case.expect in str(h) for h in hits):
-            record(
-                False,
-                case.name,
-                f"check {case.check} fired but no message contained "
-                f"{case.expect!r}. Messages: "
-                + " || ".join(f"{h.where}: {h.message}" for h in hits),
-            )
+        if not _one_matching(hits, case):
+            record(False, case.name, _mismatch_detail(case, hits, "fired"))
             return
         if report.exit_code() != 1:
             record(False, case.name, f"expected exit 1, got {report.exit_code()}")
@@ -3275,15 +3847,153 @@ def test_supplies_scope_rule() -> None:
         del root
 
 
-def test_check_coverage() -> None:
-    print("\nmeta: every check has a fixture that makes it fire:")
-    for number, description in sorted(vb.CHECKS.items()):
+def test_alias_normalisation_matches_the_runtime() -> None:
+    """The validator and the catalogue must agree on "the same alias".
+
+    validate_bundle.normalise_alias() decides, at authoring time, whether two
+    aliases are a duplicate and therefore a finding. catalogs.normalise()
+    decides, at RUNTIME, whether a learner's words hit an alias and whether
+    two aliases collapse in the index. If the two ever disagree, the
+    validator passes a pair the index silently merges - and the author is
+    told, by the tool whose whole job is to tell them, that their bundle is
+    fine.
+
+    They diverged once already, and not on an exotic input: this validator
+    collapsed only whitespace, underscores and hyphens, so `node.js` and
+    `nodejs` were two aliases here and one there. The inputs below are the
+    ones that separate the two rules, so this fails if either side changes.
+    """
+    print("\nmeta: the validator and the catalogue fold aliases identically:")
+    try:
+        import catalogs as cg
+    except ImportError:  # pragma: no cover
+        record(False, "catalogs.py is importable for the agreement check")
+        return
+    inputs = [
+        "append-only-log", "Append Only Log", "append_only_log",
+        "APPEND--ONLY--LOG", "  append only log  ", "retained event logs",
+        # the four that separated the two rules, plus the empty case
+        "node.js", "go1.21", "c++", "a.b", "---", "",
+    ]
+    divergent = [
+        (text, vb.normalise_alias(text), cg.normalise(text))
+        for text in inputs
+        if vb.normalise_alias(text) != cg.normalise(text)
+    ]
+    record(
+        not divergent,
+        "normalise_alias() and catalogs.normalise() agree on every input",
+        "; ".join(f"{t!r}: validator={a!r} catalogue={b!r}" for t, a, b in divergent),
+    )
+    # The control. An agreement test passes trivially if both sides return
+    # the same constant, so prove the function under test actually folds.
+    record(
+        vb.normalise_alias("Append Only Log") == "append-only-log"
+        and vb.normalise_alias("node.js") == "node-js"
+        and vb.normalise_alias("---") == "",
+        "the control: normalise_alias() really folds, so agreement means "
+        "something",
+        f"got {vb.normalise_alias('Append Only Log')!r}, "
+        f"{vb.normalise_alias('node.js')!r}, {vb.normalise_alias('---')!r}",
+    )
+
+
+def test_run_case_checks_where() -> None:
+    """Prove the harness's own location assertion is not a false oracle.
+
+    `run_case` filters findings by CHECK NUMBER alone. Before `Case.where`
+    existed, the message assertion then accepted ANY of those findings - so a
+    case that mutated one file passed when the check fired about a different
+    file with a similar message. The mutation and the finding never had to be
+    about the same thing, and nothing in the suite could tell the two apart.
+
+    A fix to an oracle that cannot be shown failing is just another oracle, so
+    this builds the false pass deliberately and asserts three things about the
+    same broken tree: the probe really is a false pass, the OLD rule accepted
+    it, and the NEW rule rejects it. The control at the end is the other half
+    that a probe needs - the new rule saying YES when the case is aimed right,
+    which proves it is discriminating rather than merely strict.
+    """
+    print("\nmeta: the harness checks WHERE a finding is, not only its text:")
+
+    message = "which is not an anchor in DESIGN.md"
+    misaimed = Case(
+        "probe: misaimed case", 1, "automaton", "bundle",
+        m_bad_design_ref_in_05, message,
+        where="lessons/03-first-refactor.md",
+    )
+    aimed = Case(
+        "probe: correctly aimed case", 1, "automaton", "bundle",
+        m_bad_design_ref_in_05, message,
+        where="lessons/05-canonical-ordered-keys.md",
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("automaton", Path(tmpdir))
+        misaimed.mutate(root)
+        report = vb.validate(root, "bundle")
+        hits = [f for f in report.findings if f.check == 1]
+
         record(
-            number in _fired_checks,
-            f"check {number} was demonstrated firing  ({description[:58]})",
-            "NO fixture in this suite makes this check report a finding, so it "
-            "is a false oracle: it can only be shown passing.",
+            bool(hits) and all(h.where != misaimed.where for h in hits),
+            "the probe is a genuine false pass: check 1 fires, and about a "
+            "file the misaimed case never touched",
+            f"hits = {[str(h) for h in hits]}",
         )
+        record(
+            any(_message_matches(h, misaimed) for h in hits),
+            "the OLD message-only rule ACCEPTED the misaimed case - which is "
+            "the defect, demonstrated rather than asserted",
+            f"no hit contained {message!r}: {[h.message for h in hits]}",
+        )
+        record(
+            not _one_matching(hits, misaimed),
+            "the NEW rule REJECTS the misaimed case",
+            "the location assertion passed a case whose finding is about "
+            f"{sorted({h.where for h in hits})}, not {misaimed.where!r}",
+        )
+        record(
+            _one_matching(hits, aimed),
+            "the control: the NEW rule ACCEPTS the same case aimed correctly",
+            f"hits = {[str(h) for h in hits]}",
+        )
+        detail = _mismatch_detail(misaimed, hits, "fired")
+        record(
+            misaimed.where in detail and "05-canonical-ordered-keys" in detail,
+            "the failure message names both the expected and the actual place",
+            detail,
+        )
+
+
+def test_check_coverage() -> None:
+    """Every check must be demonstrated REPORTING, not merely passing.
+
+    A check in vb.WARNING_ONLY can never produce a finding, so it is proved
+    by a fixture that makes it WARN. The two are tracked separately and
+    NEITHER STANDS IN FOR THE OTHER: accepting "fired or warned" for every
+    check would let a check that is supposed to reject be proved by a
+    warning, which is the weaker claim and the one that hides a check that
+    cannot actually fail a bundle.
+    """
+    print("\nmeta: every check has a fixture that makes it report:")
+    for number, description in sorted(vb.CHECKS.items()):
+        warning_only = number in vb.WARNING_ONLY
+        proved = _warned_checks if warning_only else _fired_checks
+        verb = "warning" if warning_only else "firing"
+        record(
+            number in proved,
+            f"check {number} was demonstrated {verb}  ({description[:58]})",
+            f"NO fixture in this suite makes this check report a "
+            f"{'warning' if warning_only else 'finding'}, so it is a false "
+            f"oracle: it can only be shown passing.",
+        )
+        if warning_only and number in _fired_checks:
+            record(
+                False,
+                f"check {number} is declared WARNING_ONLY but produced a finding",
+                "either the check or vb.WARNING_ONLY is wrong; a warning-only "
+                "check must never change a bundle's exit code",
+            )
 
 
 # --------------------------------------------------------------------------
@@ -3311,6 +4021,8 @@ def main() -> int:
     test_check6_supplies_exemption()
     test_supplies_status_text()
     test_supplies_scope_rule()
+    test_run_case_checks_where()
+    test_alias_normalisation_matches_the_runtime()
     test_check_coverage()
 
     if _notes:

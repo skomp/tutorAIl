@@ -1,0 +1,68 @@
+bundle_format: 1
+id: durable-event-broker
+title: Build a Durable Event Broker
+description: >
+  Build a single-node event broker in Go: a retained log, partitioned topics,
+  consumer offsets, and a durability story you can defend.
+subjects: [go, distributed-systems, event-streaming]
+aliases: [message-broker, commit-log]
+level: intermediate
+style: [project-driven, interactive]
+
+covers:
+  retained-event-logs:
+    summary: >
+      Records remain available after they are delivered, and can be replayed
+      from a logical offset rather than resent by the producer.
+    aliases: [append-only-log, replayable-log]
+  partition-offsets:
+    summary: >
+      A partition is an ordered sequence, and a reader's position in it is one
+      integer the broker never advances on the reader's behalf.
+    aliases: [stream-offsets]
+  topic-partitions:
+    summary: >
+      A topic is divided into partitions so writers and readers scale
+      independently. Order is promised per partition, never across a topic.
+  group-commit:
+    summary: >
+      Many appends are made durable in one fsync, so throughput rises without
+      weakening the durability each individual writer was promised.
+
+assumes:
+  go-programming:
+    level: working
+    summary: >
+      Write, test, and refactor ordinary Go programs using packages,
+      goroutines, channels, errors, and contexts.
+  file-system-durability:
+    level: conceptual
+    summary: >
+      Explain why a successful write() is not yet durable, and what fsync
+      changes about that.
+
+recommended_follow_ups:
+  - bundle: distributed-log-broker
+    because: >
+      Extend the broker with multi-node placement, replication, acknowledgement
+      policies, and recovery from the loss of a node.
+  - bundle: streaming-query-engine
+    because: >
+      Run continuous queries over the log this course builds, instead of
+      writing a bespoke consumer for every question.
+
+lessons:
+  - lessons/00-retained-log.md
+
+workspace_kind: new-repository
+tutor_owned:   [tutorial/STATE.md, tutorial/DESIGN.md]
+learner_owned: [cmd/**, internal/**, go.mod]
+ownership_policy: tutor-must-not-edit-learner-owned
+
+validators:
+  go-build: { kind: command, command: [go, build, ./...] }
+  go-test:  { kind: command, command: [go, test, ./...] }
+
+one_task_at_a_time: true
+solution_code: on-request-only
+advance_on: validated-evidence-only
