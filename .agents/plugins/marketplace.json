@@ -8,7 +8,7 @@
       "name": "tutorail",
       "source": {
         "source": "local",
-        "path": "./"
+        "path": "./codex"
       },
       "category": "Developer Tools"
     }
