@@ -631,3 +631,35 @@ reported as a `metadata problem` line. Pass those on to whoever can fix the entr
   nothing here may depend on a service being reachable. Section 12.2.
 - **Inventing a concept id an entry does not carry**, or reading a course's content to
   guess at one. Section 1 still holds: discovery loads metadata only.
+
+---
+
+## The reader is tolerant; the validator is strict
+
+Relationship metadata (`covers`, `assumes`, `recommended_follow_ups`,
+`recommended_previous_bundles`) is optional. **A typo in optional metadata must never remove
+a working course from the catalogue.**
+
+So the two sides of this feature deliberately disagree about malformed input:
+
+| | Behaviour on malformed relationship metadata |
+|---|---|
+| **the catalogue reader**, at discovery time | drops the offending concept or recommendation, records a note, and **keeps the tutorial discoverable** |
+| **`validate_bundle.py`**, at authoring time | rejects it, because an author is asking to be told |
+
+A learner searching for a course must not lose it because its author mistyped one alias.
+An author running the validator wants every one of those mistakes named.
+
+The notes are not silent: each dropped item records why, and the tutorial still appears with
+its sound metadata intact. Proven by `test_relationship_metadata_never_removes_a_tutorial`,
+which fires all five note kinds and asserts a sound concept beside them still matches.
+
+Two consequences worth stating, because both look like bugs otherwise:
+
+- **Normalisation is `lowercase -> runs of [a-z0-9] -> joined with '-'`.** "Partition Offsets"
+  and `partition-offsets` are the same query. This is what lets the exact-match tiers be
+  string equality, with no fuzzy matcher and no service.
+- **Question words are a second pass, and it is announced.** A query runs verbatim first; only
+  if that finds nothing is it retried with question words removed, and the result says so.
+  An exact id or alias can never be damaged by it, because the first pass would already have
+  matched.
