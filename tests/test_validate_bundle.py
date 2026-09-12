@@ -2895,6 +2895,19 @@ def test_supplies_status_text() -> None:
         )
 
     with tempfile.TemporaryDirectory() as tmpdir:
+        # The singular form, alongside the plural above: "1 ... entry ...
+        # site", not "1 ... entries ... sites".
+        root = fresh("automaton", Path(tmpdir))
+        m_supplies_describe_is_empty(root)
+        report = vb.validate(root, "bundle")
+        record(
+            report.status.get(22)
+            == (vb.RAN, "1 supplies entry across 1 declaration site"),
+            "one entry at one site is pluralised as singular, not plural",
+            f"got {report.status.get(22)}",
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
         # The third repro from fix round 1's Critical finding: 'supplies: []'
         # is PRESENT (so not n/a) and is already a well-formed, empty list
         # (so it is not a malformed-key finding either) - it just has
