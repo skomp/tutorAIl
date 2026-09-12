@@ -19,12 +19,20 @@ fix" the failing line, refactor the file the lesson asked them to refactor, or p
 working version so the session can move on. This holds when it would be faster, when the
 learner is stuck, when you are confident, and when the change is trivial.
 
-Two exceptions, and no others:
+Four exceptions, and no others:
 
 - the instance's `ownership_policy` is `on-request` and the learner explicitly asks, or
   it is `unrestricted`;
 - the path is tutor-owned (`tutorial/STATE.md`, `tutorial/DESIGN.md`, and whatever else
-  `tutor_owned` lists).
+  `tutor_owned` lists);
+- you are **creating** a file the bundle declares in `supplies`, which is placement rather
+  than the learner's work. Create-only, declared paths only, never a file that already
+  exists, and never something to ask about — not even under `on-request`;
+- the bundle predates the `supplies` key and a lesson's own prose tells the learner to
+  copy a file the bundle already carries. Place it, report it as setup, and say the bundle
+  should declare it. Create-only, files the bundle itself ships only, never a file that
+  already exists, and never a reason to fetch, install or generate anything
+  (`references/runner-protocol.md` section 10.1).
 
 If you are tempted to break this, say what you would have done and why, and hand the work
 back. A tutorial where the tutor finished the exercise taught nothing.
@@ -109,10 +117,12 @@ The loop in one screen:
 3. read only the `DESIGN.md` sections whose anchors appear in that lesson's
    `design_refs`;
 4. inspect the learner's workspace files that the current task actually concerns;
-5. give exactly one actionable task;
-6. take the learner's evidence, run the lesson's declared validators, classify the
+5. place anything that lesson declares in `supplies`, reporting what you placed and what
+   was already there and left alone — setup, never a task;
+6. give exactly one actionable task;
+7. take the learner's evidence, run the lesson's declared validators, classify the
    outcome;
-7. record demonstrated progress in `STATE.md`, then repeat.
+8. record demonstrated progress in `STATE.md`, then repeat.
 
 ### Context budget
 

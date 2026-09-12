@@ -102,6 +102,8 @@ CHECKS: dict[int, str] = {
     20: "'optional: true' frontmatter agrees with the optional_lessons list",
     21: "[instance] STATE.md's '## Optional lessons' record is well-formed and "
     "agrees with active_lesson",
+    22: "supplies entries are well-formed, and every 'from' resolves where "
+        "the runner will look for it",
 }
 
 BUNDLE_ONLY = {12, 13}
@@ -332,7 +334,12 @@ LIMITATIONS = """What a pass does and does not mean
     check 6 proves that a lesson folder's material is NAMED by its
       LESSON.md. It does not prove the lesson says WHEN to use it, which the
       contract also asks for. A name in a code fence or a quoted example
-      counts as named.
+      counts as named. The naming rule is NOT absolute: a file covered by a
+      `supplies:` entry - from the manifest or from any lesson, not only the
+      one that owns the folder - is exempt and is never reported, because
+      the declaration already says what it is and where it goes. A green
+      check 6 therefore does not prove every material file is mentioned in
+      prose; it proves each one is either named or declared.
 
   There is deliberately no reverse material check ("LESSON.md names a file
   that does not exist"). It cannot tell a material reference from an
@@ -384,7 +391,33 @@ LIMITATIONS = """What a pass does and does not mean
       is the ordinary case for an anticipated failure.
     check 21 validates the SHAPE of STATE.md's `## Optional lessons` record,
       not its truth. It cannot tell whether the learner was really offered
-      anything, really deferred it, or really finished it."""
+      anything, really deferred it, or really finished it.
+
+  Supplies (`supplies:`):
+    an ABSENT key and a PRESENT-but-empty one (`supplies:` with nothing
+      under it, or `supplies: []`) are both silent and both report "n/a" -
+      a freshly scaffolded bundle, or a bundle mid-edit by the authoring
+      toolkit, may carry an empty declaration before its first real entry.
+      Check 22 cannot tell an author who meant to declare nothing from one
+      who wrote an empty key by accident, and it does not try: an empty key
+      is silent, a malformed one (a bare scalar, or a mapping instead of a
+      list) is loud and is always a finding.
+    check 22 proves the entries are well-formed and every declared 'from'
+      exists where the runner will look for it. It says nothing about
+      whether the supplied files are the RIGHT files, and nothing about
+      whether a lesson still tells the learner to copy them by hand - that
+      judgement is the course-quality audit's, not this validator's.
+    check 22 applies the 'from' rule BY SCOPE, because placement time
+      differs. A LESSON-scope 'from' must resolve under lessons/ and is
+      reported in BOTH modes when it does not: that lesson's files are
+      placed when it opens, from the instance, and materialization copies
+      only lessons/. A MANIFEST-scope 'from' is checked for existence in
+      BUNDLE MODE ONLY - it is placed during materialization while the
+      bundle source is still in reach, and nothing copies it into the
+      instance, so an instance that no longer carries it is correct. In
+      instance mode, therefore, a manifest-scope 'from' is not proved to
+      exist anywhere and its trailing-slash form is not proved either.
+      Validate the BUNDLE to prove those."""
 
 
 @dataclass(frozen=True)
@@ -1112,25 +1145,38 @@ def names_file(text: str, rel_in_folder: str) -> bool:
     return False
 
 
-def check_material_reachable(lessons: list[Lesson], report: Report) -> None:
+def check_material_reachable(
+    root: Path, manifest: Any, lessons: list[Lesson], report: Report
+) -> None:
     """Check 6 - forward direction only.
 
     The reverse check ("LESSON.md names a file that does not exist") was
     implemented and deleted: it cannot tell a material reference from an
     ordinary prose mention of DESIGN.md, src/lib.rs or Cargo.toml. Do not
     reintroduce it.
+
+    A file is exempt from the "named in LESSON.md" rule when some declared
+    `supplies:` entry - from the manifest OR from any lesson, not only the
+    one that owns the folder - covers it. A supplies entry says more than a
+    prose mention does: it states what the file is and where it goes, so a
+    tutor already knows it exists without LESSON.md repeating that. This is
+    an EXEMPTION, not a loosening - a file no supplies entry covers must
+    still be named, exactly as before.
     """
     foldered = [lesson for lesson in lessons if lesson.folder is not None]
     if not foldered:
         report.na(6, "no foldered lessons")
         return
+    supplies_entries = [entry for _, entry in collect_supplies(root, manifest, lessons)]
     checked = 0
+    supplied = 0
     for lesson in foldered:
         text = read_text(lesson.path)
         if text is None:
             continue
         folder = lesson.folder
         assert folder is not None
+        folder_rel = folder.relative_to(root).as_posix()
         for path in sorted(folder.rglob("*")):
             if not path.is_file():
                 continue
@@ -1140,6 +1186,10 @@ def check_material_reachable(lessons: list[Lesson], report: Report) -> None:
             if any(part.startswith(".") for part in path.relative_to(folder).parts):
                 continue
             checked += 1
+            bundle_rel = f"{folder_rel}/{rel_in_folder}"
+            if supplies_covers(supplies_entries, bundle_rel):
+                supplied += 1
+                continue
             if not names_file(text, rel_in_folder):
                 report.add(
                     6,
@@ -1150,8 +1200,8 @@ def check_material_reachable(lessons: list[Lesson], report: Report) -> None:
                 )
     report.ran(
         6,
-        f"{checked} material files in {len(foldered)} lesson folders; "
-        f"names only, not intent",
+        f"{checked} material files in {len(foldered)} lesson folders "
+        f"({supplied} cleared by a supplies declaration); names only, not intent",
     )
 
 
@@ -2242,6 +2292,408 @@ def check_generated_resume(
     report.ran(17, f"active_lesson is {kind}")
 
 
+# Supplies (check 22).
+#
+# `supplies:` is a bundle's way to hand the learner's workspace files it
+# never assigns as a task: the runner places them and reports them. It is
+# additive to bundle_format 1, declared either at the top of tutorial.yaml
+# (placed after materialization) or in a lesson's frontmatter (placed when
+# that lesson opens). `from` is always relative to the BUNDLE root, in both
+# scopes - one rule, no scope-dependent resolution.
+#
+# TIMING is what makes the two scopes differ in what a `from` may REACH:
+#
+#   manifest scope is placed DURING materialization, while the bundle source
+#     is still in reach, so its `from` may resolve anywhere in the bundle -
+#     including a `supplies/` directory at the bundle root, which is where
+#     both authoring references tell authors to put supplied files;
+#   lesson scope is placed when that lesson OPENS, long after materialization,
+#     from an instance that holds only tutorial.yaml, COURSE.md, DESIGN.md and
+#     lessons/. A lesson-scope `from` outside lessons/ names a file that will
+#     not exist when the tutor needs it, so it is a bundle defect in BOTH
+#     modes.
+#
+# The same timing is why a manifest-scope `from` that does not resolve is a
+# finding in BUNDLE mode only: the instance legitimately no longer carries it,
+# because placement already happened.
+SUPPLIES_KEYS = ("from", "to", "describe")
+LESSONS_DIR = "lessons"
+
+
+def _supplies_sites(
+    root: Path, manifest: Any, lessons: list[Lesson]
+) -> list[tuple[str, Any]]:
+    """Every place a `supplies:` key is PRESENT, as (where, raw value).
+
+    `where` is "tutorial.yaml" for the manifest, or a lesson's `rel`. The
+    raw value is exactly what the manifest or frontmatter holds under
+    `supplies` - a list when the author got the shape right, but possibly a
+    bare string, a mapping or anything else a typo produces. It is
+    deliberately NOT filtered to lists here: a key that is PRESENT but not a
+    list is a malformed declaration, and a caller that only ever saw
+    filtered-out sites would have no way to tell "nothing declared" from
+    "declared badly" - which is exactly the defect check_supplies used to
+    have (a `supplies:` typo silently validated as if there were no
+    `supplies:` key at all). Only the ABSENCE of the key at every site means
+    nothing was declared.
+
+    Shared by collect_supplies (which keeps only the well-formed lists and
+    mapping entries, for A2 and Part B) and check_supplies (which also has
+    to report a site that is present but is not a list at all).
+
+    `root` is accepted for interface symmetry with collect_supplies, whose
+    exact signature A2 and Part B depend on; a lesson's own `path` is
+    already absolute, so it is not needed to read lesson text.
+    """
+    del root
+    sites: list[tuple[str, Any]] = []
+    if isinstance(manifest, dict) and "supplies" in manifest:
+        sites.append(("tutorial.yaml", manifest.get("supplies")))
+    for lesson in lessons:
+        text = read_text(lesson.path)
+        if text is None:
+            continue
+        fm_text, _ = split_frontmatter(text)
+        if fm_text is None:
+            continue
+        try:
+            fm = load_yaml(fm_text, lesson.rel + " frontmatter")
+        except YamlError:
+            continue
+        if not isinstance(fm, dict):
+            continue
+        if "supplies" in fm:
+            sites.append((lesson.rel, fm.get("supplies")))
+    return sites
+
+
+def collect_supplies(
+    root: Path, manifest: Any, lessons: list[Lesson]
+) -> list[tuple[str, dict]]:
+    """Every declared supplies entry, as (where, entry).
+
+    `where` is "tutorial.yaml" for a manifest-scope entry, or the lesson's
+    `rel` for a lesson-scope one. A site whose `supplies` value is not a
+    list at all is skipped entirely here, and a mapping entry is the only
+    kind returned; check_supplies is what reports either malformation - this
+    function silently keeps only what is already well-formed enough to use.
+    """
+    out: list[tuple[str, dict]] = []
+    for where, raw in _supplies_sites(root, manifest, lessons):
+        if not isinstance(raw, list):
+            continue
+        out.extend((where, e) for e in raw if isinstance(e, dict))
+    return out
+
+
+def supplies_covers(entries: list[dict], bundle_rel: str) -> bool:
+    """True when some entry's 'from' names `bundle_rel` or a directory
+    holding it, matched on path boundaries rather than by substring: a
+    `from` of 'model' does not cover 'model2/x.bin'."""
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        from_ = entry.get("from")
+        if not isinstance(from_, str):
+            continue
+        stripped = from_.rstrip("/")
+        if not stripped:
+            continue
+        if stripped == bundle_rel or bundle_rel.startswith(stripped + "/"):
+            return True
+    return False
+
+
+def _supplies_to_error(to: Any) -> str | None:
+    """Validate a supplies entry's 'to' as a PATH ONLY - never resolved.
+
+    The learner's workspace does not exist at validation time, so calling
+    resolve_exact() against it would be meaningless. This reuses
+    resolve_exact's component rule (no '', '.', '..') without touching the
+    filesystem.
+    """
+    if not isinstance(to, str) or to == "":
+        return "a supplies entry's 'to' must be a non-empty path"
+    if to == ".":
+        return None  # '.' is the workspace root itself.
+    if "\\" in to:
+        return (
+            f"the 'to' path {to!r} uses a backslash; use '/' in bundle paths"
+        )
+    if to.startswith("/"):
+        return f"the 'to' path {to!r} must be relative to the workspace, not absolute"
+    parts = to.split("/")
+    for part in parts:
+        if part in ("", ".", ".."):
+            return f"path component {part!r} is not allowed"
+    if parts[0].lower() == "tutorial":
+        # Case-INSENSITIVE deliberately. macOS and Windows filesystems fold
+        # case, so a `to` of 'Tutorial/x' lands inside the instance exactly as
+        # 'tutorial/x' does; an exact-case test would pass the mis-cased form
+        # and let a supplies entry write into the course. Check 4 takes exact
+        # case seriously for the mirror-image reason.
+        return (
+            f"the 'to' path {to!r} begins with 'tutorial/'; 'tutorial/' is the "
+            f"instance, not the learner's workspace, so a supplies entry must "
+            f"not target it"
+        )
+    return None
+
+
+def check_supplies(
+    root: Path,
+    manifest: Any,
+    lessons: list[Lesson],
+    listed_rels: set[str],
+    report: Report,
+) -> None:
+    """Check 22 - both modes.
+
+    Proves that declared supplies entries are well-formed and that every
+    declared 'from' exists where the runner will look for it. It says
+    nothing about whether the supplied files are the RIGHT files, and
+    nothing about whether a lesson still tells the learner to copy them by
+    hand - that judgement belongs to the course-quality audit, not this
+    validator.
+
+    The 'from' rule is scope-dependent because PLACEMENT TIME is:
+
+      lesson scope  - the 'from' MUST resolve under lessons/, in BOTH modes.
+        The lesson's entries are placed when the lesson opens, from the
+        instance, and materialization copies only lessons/.
+      manifest scope - the 'from' may resolve anywhere in the bundle, and a
+        'from' that does not resolve is a finding in BUNDLE MODE ONLY.
+        Placement happened during materialization, while the bundle source
+        was still in reach; nothing copies the source into the instance, so
+        an instance that no longer carries it is correct, not broken.
+
+    A site's raw `supplies` value falls into three buckets, matching the
+    precedent check 18 already sets for `optional_lessons`: nothing under
+    the key (`None`) or an explicitly empty list is treated as "nothing
+    declared here" and is silent, exactly like the key being absent
+    altogether - a freshly scaffolded bundle, or the authoring toolkit
+    rewriting `supplies: []` into block form on its first real entry, must
+    not fail validation for carrying one. A value that is present and is
+    NEITHER a list nor empty - a bare scalar, or the missing-'- ' mapping
+    typo - is a finding: only a key that is absent or empty EVERYWHERE
+    reports `n/a`.
+
+    `lessons` is expected to include generated lessons (an instance's
+    lessons.generated/ overlay): a generated lesson's supplies entries get
+    every well-formedness check a listed lesson's do, and only the
+    listed-in-'lessons'-or-'optional_lessons' rule is skipped for them,
+    because a generated lesson is never listed there by design (check 16).
+    """
+    sites = _supplies_sites(root, manifest, lessons)
+
+    malformed_sites: list[tuple[str, Any]] = []
+    live_sites: list[tuple[str, list]] = []
+    for where, raw in sites:
+        if raw is None:
+            continue  # 'supplies:' with nothing under it - nothing declared
+        if isinstance(raw, list):
+            if raw:
+                live_sites.append((where, raw))
+            # else: 'supplies: []' - present, valid, nothing declared
+            continue
+        malformed_sites.append((where, raw))
+
+    if not malformed_sites and not live_sites:
+        report.na(22, "no bundle declares supplies")
+        return
+
+    checked = 0
+    for where, raw in malformed_sites:
+        report.add(
+            22,
+            where,
+            f"'supplies' must be a list of entries, not "
+            f"{type(raw).__name__}. Each entry needs its own '- ' list "
+            f"marker; a single mapping directly under 'supplies:' is "
+            f"the common typo.",
+        )
+    for where, raw in live_sites:
+        for entry in raw:
+            checked += 1
+            if not isinstance(entry, dict):
+                report.add(
+                    22,
+                    where,
+                    f"a supplies entry is not a mapping of 'from', 'to' and "
+                    f"'describe', it is {type(entry).__name__}: {entry!r}",
+                )
+                continue
+
+            extra = sorted(set(entry) - set(SUPPLIES_KEYS))
+            for key in extra:
+                report.add(
+                    22,
+                    where,
+                    f"a supplies entry carries an unknown key {key!r}; only "
+                    f"'from', 'to' and 'describe' are recognised",
+                )
+
+            missing = [k for k in SUPPLIES_KEYS if k not in entry]
+            for key in missing:
+                report.add(
+                    22,
+                    where,
+                    f"a supplies entry is missing required key {key!r}",
+                )
+
+            if "describe" in entry:
+                describe = entry.get("describe")
+                if not _is_text(describe):
+                    report.add(
+                        22,
+                        where,
+                        "a supplies entry's 'describe' must be a non-empty "
+                        "string naming what these files are, in the author's "
+                        "words - it is the sentence the runner says to the "
+                        "learner",
+                    )
+                elif "\n" in describe.strip() or "\r" in describe.strip():
+                    # bundle-format.md puts "one non-empty LINE" in the MUST
+                    # column, and the runner SPEAKS this string to the
+                    # learner, so an embedded newline is a defect in
+                    # learner-facing output, not a style preference.
+                    #
+                    # The test is on the STRIPPED value deliberately. A
+                    # folded scalar ('describe: >') is the author writing one
+                    # sentence across several source lines: yamlite folds it
+                    # to a single line and leaves one trailing newline, which
+                    # must NOT be a finding. A literal scalar ('describe: |')
+                    # keeps its newlines INSIDE the value, which must.
+                    report.add(
+                        22,
+                        where,
+                        "a supplies entry's 'describe' must be ONE line: the "
+                        "runner says it to the learner as a sentence, and an "
+                        "embedded newline breaks that in the learner's "
+                        "output. Use a folded scalar ('describe: >') to wrap "
+                        "one sentence across source lines, or shorten it",
+                    )
+
+            if "from" in entry:
+                from_ = entry.get("from")
+                is_lesson_scope = where != "tutorial.yaml"
+                if not isinstance(from_, str) or from_ == "":
+                    report.add(
+                        22,
+                        where,
+                        "a supplies entry's 'from' must be a non-empty path",
+                    )
+                elif from_.split("/", 1)[0] == GENERATED_DIR:
+                    report.add(
+                        22,
+                        where,
+                        f"the 'from' entry {from_!r} points inside "
+                        f"'{GENERATED_DIR}/', which exists only in an "
+                        f"instance and is never part of what a bundle ships",
+                    )
+                else:
+                    has_trailing_slash = from_.endswith("/")
+                    bare = from_.rstrip("/")
+                    if not bare:
+                        report.add(
+                            22,
+                            where,
+                            f"the 'from' entry {from_!r} does not resolve: "
+                            f"path component '' is not allowed",
+                        )
+                    elif (
+                        is_lesson_scope
+                        and bare.split("/", 1)[0] != LESSONS_DIR
+                    ):
+                        # A lesson's entries are placed when the lesson OPENS,
+                        # from the instance - and materialization copies only
+                        # tutorial.yaml, COURSE.md, DESIGN.md and lessons/. A
+                        # lesson-scope 'from' outside lessons/ therefore names
+                        # a file that will not be there at placement time, in
+                        # both modes, whether or not the bundle still has it.
+                        report.add(
+                            22,
+                            where,
+                            f"the 'from' entry {from_!r} is declared by a "
+                            f"lesson but does not resolve under "
+                            f"'{LESSONS_DIR}/'. A lesson's supplies are placed "
+                            f"when that lesson opens, from the instance, and "
+                            f"materialization copies only '{LESSONS_DIR}/' - "
+                            f"so this file will not exist when the tutor needs "
+                            f"it. Move it into this lesson's folder, or declare "
+                            f"it in tutorial.yaml, where placement happens "
+                            f"while the bundle source is still in reach.",
+                        )
+                    else:
+                        resolved, reason = resolve_exact(root, bare)
+                        if resolved is None:
+                            # A MANIFEST-scope 'from' is placed during
+                            # materialization and nothing copies it into the
+                            # instance, so an instance legitimately no longer
+                            # carries it: reporting it there would call a
+                            # correct bundle broken. In bundle mode the source
+                            # is the thing being validated, so it must be
+                            # there. A lesson-scope 'from' is under lessons/ by
+                            # the branch above, which the instance does carry,
+                            # so it must resolve in both modes.
+                            if is_lesson_scope or report.mode != "instance":
+                                report.add(
+                                    22,
+                                    where,
+                                    f"the 'from' entry {from_!r} does not "
+                                    f"resolve: {reason}",
+                                )
+                        else:
+                            is_dir = resolved.is_dir()
+                            if has_trailing_slash and not is_dir:
+                                report.add(
+                                    22,
+                                    where,
+                                    f"the 'from' entry {from_!r} names a "
+                                    f"file, but a trailing '/' means a "
+                                    f"directory; remove the '/', or declare "
+                                    f"the entry as the directory it "
+                                    f"actually is",
+                                )
+                            elif not has_trailing_slash and is_dir:
+                                report.add(
+                                    22,
+                                    where,
+                                    f"the 'from' entry {from_!r} names a "
+                                    f"directory; a directory's 'from' must "
+                                    f"end in '/'",
+                                )
+
+            if "to" in entry:
+                to_error = _supplies_to_error(entry.get("to"))
+                if to_error is not None:
+                    report.add(22, where, to_error)
+
+            is_generated = where.startswith(GENERATED_DIR + "/")
+            if (
+                where != "tutorial.yaml"
+                and not is_generated
+                and where not in listed_rels
+            ):
+                report.add(
+                    22,
+                    where,
+                    f"{where} declares supplies, but this lesson is not "
+                    f"listed in tutorial.yaml's 'lessons' or "
+                    f"'optional_lessons', so it is not listed and is "
+                    f"invisible to the runner",
+                )
+
+    total_sites = len(live_sites) + len(malformed_sites)
+    entry_word = "entry" if checked == 1 else "entries"
+    site_word = "site" if total_sites == 1 else "sites"
+    detail = f"{checked} supplies {entry_word} across {total_sites} declaration {site_word}"
+    if malformed_sites:
+        malformed_word = "site" if len(malformed_sites) == 1 else "sites"
+        detail += f" ({len(malformed_sites)} malformed {malformed_word})"
+    report.ran(22, detail)
+
+
 # --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
@@ -2343,8 +2795,21 @@ def validate(target: Path, mode: str) -> Report:
         report,
         ("lessons", GENERATED_DIR) if mode == "instance" else ("lessons",),
     )
-    check_material_reachable(all_lessons, report)
+    check_material_reachable(target, manifest_dict, all_lessons, report)
     check_manifest_lists_no_generated(manifest_dict, report)
+    # A lesson-scope supplies entry is legible only if its lesson is
+    # reachable at all - through 'lessons' or 'optional_lessons', the same
+    # two lists check 4 accepts. check_supplies runs over all_lessons (so a
+    # generated lesson's own supplies entries get every well-formedness
+    # check too) and skips the listed-ness rule ITSELF for a generated
+    # lesson, since one is reachable by neither list by design (check 16).
+    listed_raw = as_list(manifest_dict.get("lessons"))
+    listed_rels = (
+        {entry for entry in listed_raw if isinstance(entry, str)}
+        if listed_raw is not None
+        else set()
+    ) | optional_keys
+    check_supplies(target, manifest_dict, all_lessons, listed_rels, report)
     if mode == "bundle":
         check_no_generated_dir(target, report)
         check_state_template(target, manifest_dict, report)

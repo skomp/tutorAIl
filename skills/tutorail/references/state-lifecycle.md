@@ -142,8 +142,52 @@ Steps, in order:
    never appears in a bundle.
 6. **Verify the invariant**, by looking: the instance has `STATE.md` and does not have
    `STATE.template.md`. Say that you checked.
-7. **Report what was created** — the instance path, the course title, the first lesson —
-   and only then start teaching.
+7. **Report what was created** — the instance path, the course title, the first lesson.
+8. **Place what the manifest supplies, then report it.** When `tutorial.yaml` declares
+   `supplies` at the top level, place those entries now: the instance exists, no lesson
+   has opened yet, and this is the one moment manifest-scope entries are placed. `from`
+   is relative to the **bundle** root, and a trailing `/` means that directory's
+   contents, recursively; `to` is relative to the **workspace** root and never inside
+   `tutorial/`.
+
+   **Read each `from` from the bundle source, not from the instance, and finish this step
+   before you release the source.** That is why step 8 is *inside* materialization rather
+   than a step after it. Step 2 copies only `tutorial.yaml`, `COURSE.md`, `DESIGN.md` and
+   `lessons/`, so a manifest-scope `from` such as `supplies/Cargo.toml` exists in the
+   bundle and will never exist in the instance. Once the source is out of reach, a
+   manifest-scope entry can no longer be placed at all. This is also the reason a
+   **lesson-scope** `from` MUST resolve inside `lessons/`: those entries are placed when
+   the lesson opens, long after this step, and `lessons/` is the only thing the instance
+   carries (`bundle-format.md` section 2, **Where a `from` may point**).
+
+   Four rules govern the placement, and `bundle-format.md` section 2 states
+   them in full:
+
+   1. **Never overwrite.** A target that already exists is left exactly as it is.
+   2. **Say nothing when every target of an entry already exists.** The entry has been
+      applied already. This is what makes re-entry idempotent with **no new state**:
+      nothing is written to `STATE.md`, nothing is consulted in the instance stamp, and
+      the workspace itself is the only record of what has been placed.
+   3. **When some targets were missing, place those, name them, and name the ones you
+      left alone.** Report a partial placement in full — these are new, these were
+      already here and were not touched. A learner must never be left wondering whether
+      a file of their own was replaced.
+   4. **Name it as setup, not as a lesson.** Placed files are not an accomplishment and
+      are not progress; nothing about them goes into `STATE.md`.
+
+   Say the entry's `describe` line when you report it — it is the author's sentence about
+   what these files are, and telling the learner is the only reason the field exists.
+   Under `ownership_policy: tutor-must-not-edit-learner-owned` **and under `on-request`**
+   you MAY **create** a declared target that does not exist, even where it falls under a
+   `learner_owned` glob, and under `on-request` you do not ask first: placing a declared
+   supply is not the tutor being asked for a change, and a course using that policy would
+   otherwise have to interrupt the learner for permission to unpack its own fixtures.
+   `unrestricted` needs no exemption at all. Under **every** policy, `unrestricted`
+   included, you may **never modify** a target that already exists — placement never
+   rewrites a file that is already there, whatever the policy would otherwise allow. The
+   exemption is create-only and covers declared paths only. A course written before the key
+   existed gets one other, narrower exemption, and `runner-protocol.md` section 10.1 is
+   where it is stated. Then start teaching.
 
 ### Workspace kinds
 
@@ -154,7 +198,9 @@ Steps, in order:
 | `none` | any plain directory. `learner_owned` is empty; there is no code to protect. |
 
 Creating the workspace itself — initialising a repository, creating a project skeleton —
-is the learner's action unless they ask you to do it. Materializing `tutorial/` is yours.
+is the learner's action unless they ask you to do it, with one qualification: files the
+bundle **declares** in `supplies` are the runner's to place, not a skeleton the learner
+builds, however much they look like one. Materializing `tutorial/` is yours.
 
 ---
 

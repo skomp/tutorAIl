@@ -129,6 +129,21 @@ point its bundle names.
 
 ---
 
+## Correct the material-naming rule in the runner design spec — owed 2026-09-12
+
+`docs/superpowers/specs/2026-09-11-tutorial-runner-design.md` states the material-naming
+rule without the `supplies:` exemption, at line 205 to line 207 and at line 833. The
+`supplies` branch therefore carries a design spec that disagrees with
+`skills/tutorail/references/bundle-format.md`.
+
+Another session owns that file, so the `supplies` branch did not change it.
+
+The exact correction is written in the `skomp/tutorail-authoring` repository, in `TODO.md`,
+under **"Correct the material-naming rule in the runner design spec"**. Do the work from
+that entry. Keep one copy of the instruction, not two.
+
+---
+
 ## Wording follow-up after `supplies:` merges — owed 2026-09-12
 
 Decisions 8 and 9 in the design spec settled two behaviours. The reference documents still
