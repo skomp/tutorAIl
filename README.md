@@ -51,8 +51,25 @@ mkdir -p ~/.agents/skills
 ln -s ~/src/tutorAIl/skills/tutorail ~/.agents/skills/tutorail
 ```
 
-`~/.agents/skills/` is Codex's documented user scope, and it follows symlinks, so
-edits to the clone take effect immediately.
+`~/.agents/skills/` is Codex's documented user scope, and it follows symlinks.
+
+**The two hosts do not run the same copy, and that is worth knowing rather than
+discovering.** Claude Code installs a *published version* from the marketplace: it changes
+only when you run `claude plugin update`, and it never contains uncommitted work. Codex
+follows the symlink into the checkout, so it runs **whatever is currently checked out** —
+including edits you have not committed, and a half-finished change mid-save.
+
+That is the right arrangement while you are developing the runner, and the wrong one if you
+just want to use it. If you are not working on tutorAIl itself, point the symlink at a
+checkout you do not edit:
+
+```
+git clone git@github.com:skomp/tutorAIl.git ~/.local/share/tutorail
+ln -s ~/.local/share/tutorail/skills/tutorail ~/.agents/skills/tutorail
+```
+
+and update it with `git -C ~/.local/share/tutorail pull`, which is the Codex equivalent of
+`claude plugin update`.
 
 Not `codex plugin add`. Codex refuses a marketplace entry whose source path is the
 marketplace root — it registers the marketplace and then enumerates nothing, with no
