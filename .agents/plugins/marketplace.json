@@ -1,0 +1,20 @@
+{
+  "name": "tutorail",
+  "interface": {
+    "displayName": "tutorAIl"
+  },
+  "plugins": [
+    {
+      "name": "tutorail",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "NONE"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
