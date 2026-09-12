@@ -390,6 +390,14 @@ code to write, with `ownership_policy` untouched and every guarantee apparently 
 The exemption is drawn narrowly on the tutor's side precisely so that the declaration
 list cannot be made to do what the policy was stopped from doing.
 
+**And `supplies` reaches only as far as the bundle itself.** Every `from` resolves inside
+the bundle, so the key hands over exactly what the bundle ships and nothing else. Setup
+that needs something from outside it — a file to fetch over the network, a toolchain to
+install, an account to create — is not a supply and cannot be declared as one. That work
+stays the learner's, and a lesson is right to ask for it. The two limits bound the same
+axis from opposite ends: the paragraph above says what may be handed over, and this one
+says where it may come from.
+
 ```yaml
 supplies:
   - from: assets/models/Duck.glb
