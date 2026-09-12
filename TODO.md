@@ -11,6 +11,23 @@ Build a harness that tests a course before a learner pays for it. An agent plays
 learner. The agent walks the course one task at a time. The agent does not read ahead.
 The harness reports sequencing defects.
 
+### The cost limit — read this first, 2026-09-12
+
+The repository owner stopped this work. The reason is cost.
+
+A harness run starts two headless sessions for each turn. One lesson needs several turns.
+A course with 15 lessons needs many turns. Nobody has measured the cost of a full run.
+
+Do not build the harness until the repository owner approves a budget.
+
+When the owner approves a budget, measure one lesson before you build anything more:
+
+1. Use the smallest course. `rust-cli-basics` has 3 lessons on the main path and 2
+   optional lessons, so it is cheap and it still exercises the optional-lesson path.
+2. Run the harness for one lesson.
+3. Report the measured cost to the owner.
+4. Wait for the owner to approve a full course run.
+
 ### Why this matters
 
 Lessons 04 and later have never been exercised in either bundle. The AutomatonDB course
@@ -77,8 +94,10 @@ finding from such a run is worthless.
 
 ### Dependencies
 
-None. The harness drives the runner, which works today. It does not need the bundle
-toolkit (sub-project A).
+The harness needs an approved budget. Read "The cost limit" above.
+
+The harness has no technical dependency. It drives the runner, which works today. It does
+not need the bundle toolkit (sub-project A).
 
 ### What it must exercise once optional lessons exist — added 2026-09-12
 
