@@ -3588,6 +3588,35 @@ CATALOG_LIMITATIONS = """What a pass does and does not mean
   catalogues whose entries are deliberately shorter."""
 
 
+def catalog_root(target: Path) -> Path:
+    """The directory that holds `target`, as an absolute, normalised path.
+
+    Every path question this file asks about a catalogue - check 6's
+    resolution and check 7's containment - is asked relative to this
+    directory, so it has to mean the same thing however the caller spelled
+    the catalogue on the command line.
+
+    `target.parent` does not. `Path("catalog.yaml").parent` is `Path(".")`,
+    and `catalogs.escapes()` decides containment on the strings alone: it
+    asks whether `normpath(root + os.sep + relative)` is `str(root)` or
+    starts with `str(root) + os.sep`. With a root of `"."` the join
+    collapses - `normpath("./durable-event-broker")` is
+    `"durable-event-broker"` - so EVERY contained path looked like an
+    escape and check 7 reported every entry in a valid catalogue. The two
+    spellings that carry a directory component took the other branch and
+    passed, which is how one file both passed and failed (issue #14).
+
+    `os.path.abspath` normalises and anchors without touching the
+    filesystem, so `catalog.yaml`, `./catalog.yaml`, `../dir/catalog.yaml`
+    and an absolute path all reduce to one root, and check 7 keeps the
+    purely textual predicate the runtime uses. Symlinks are deliberately
+    NOT resolved: `escapes()` is documented as a string test, because
+    discovery must not stat anything under a bundle path, and resolving
+    only one side of the comparison would be worse than resolving neither.
+    """
+    return Path(os.path.abspath(target)).parent
+
+
 def validate_catalog(target: Path, portable: bool) -> Report:
     report = Report(
         mode="catalog" + (" --portable" if portable else ""),
@@ -3595,7 +3624,7 @@ def validate_catalog(target: Path, portable: bool) -> Report:
         checks=CATALOG_CHECKS,
         limitations=CATALOG_LIMITATIONS,
     )
-    root = target.parent
+    root = catalog_root(target)
 
     raw = read_text(target)
     if raw is None:

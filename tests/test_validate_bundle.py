@@ -3847,6 +3847,230 @@ def test_supplies_scope_rule() -> None:
         del root
 
 
+# --------------------------------------------------------------------------
+# Catalogue mode: check 7 and the spelling of the catalogue's own path
+# --------------------------------------------------------------------------
+#
+# Issue #14. The same catalogue file passed or failed depending only on how
+# the caller named it:
+#
+#   validate_bundle.py --catalog catalog.yaml            --portable  -> FAIL
+#   validate_bundle.py --catalog /abs/path/catalog.yaml  --portable  -> PASS
+#
+# Path("catalog.yaml").parent is Path("."), and check 7 decides containment
+# on the strings alone, so with a root of "." every contained path looked
+# like an escape.
+#
+# The obvious repair - loosen the containment test - passes the bug's own
+# reproduction and destroys the check. So the fixture set below is used in
+# BOTH directions against every spelling: a contained path must be accepted
+# and a genuinely escaping path must still be rejected. A fix that weakened
+# or disabled check 7 would fail the second half.
+
+CATALOG_TEMPLATE = """catalog_version: 1
+tutorials:
+  - id: the-entry
+    title: The one entry this catalogue carries
+    description: One entry is enough to ask the containment question.
+    subjects: [testing]
+    level: beginner
+    workspace_kind: new-repository
+    source:
+      type: local
+      path: {path}
+"""
+
+# Paths that stay inside the catalogue's own directory. Each names a REAL
+# bundle, so check 6 is satisfied and check 7 is the only check left that
+# could report anything.
+CATALOG_CONTAINED = (
+    "inside",  # the bare form the bug rejected
+    "./inside",
+    "nested/deeper",  # a directory component, so normpath has work to do
+    "nested/../inside",  # leaves and returns; normpath must see that
+)
+
+# Paths that really do leave. Each also names a REAL bundle, deliberately:
+# an escaping path pointing at nothing would be rejected by check 6 whatever
+# check 7 did, which would prove nothing about check 7.
+CATALOG_ESCAPING = (
+    "../outside",
+    "inside/../../outside",  # the same escape, only visible after normpath
+    "ABSOLUTE",  # replaced with the real absolute path of tmp/outside
+)
+
+
+def build_catalog_tree(tmp: Path) -> Path:
+    """tmp/home/{inside,nested/deeper} and tmp/outside, all real bundles."""
+    home = tmp / "home"
+    home.mkdir()
+    shutil.copytree(ALL_BASELINES["cli"], home / "inside")
+    shutil.copytree(ALL_BASELINES["cli"], home / "nested" / "deeper")
+    shutil.copytree(ALL_BASELINES["cli"], tmp / "outside")
+    for bundle in (home / "inside", home / "nested" / "deeper", tmp / "outside"):
+        names = os.listdir(bundle)
+        assert "tutorial.yaml" in names and "STATE.template.md" in names, (
+            f"fixture is not a bundle check 6 accepts: {bundle} has {names}"
+        )
+    return home
+
+
+def catalog_spellings(home: Path) -> list[tuple[str, Path, str]]:
+    """(label, working directory, the string a caller would type).
+
+    One file, five names. The whole defect was that they disagreed, so the
+    assertions below are parametrised over all of them rather than over the
+    one that happened to be reported.
+    """
+    return [
+        ("a bare filename", home, "catalog.yaml"),
+        ("'./' before the filename", home, "./catalog.yaml"),
+        (
+            "a relative path with a directory component",
+            home,
+            f"../{home.name}/catalog.yaml",
+        ),
+        ("an absolute path", home, str(home / "catalog.yaml")),
+        (
+            "a relative path typed from another directory",
+            home.parent,
+            f"{home.name}/catalog.yaml",
+        ),
+    ]
+
+
+def catalog_report(home: Path, cwd: Path, spelling: str, bundle: str, portable: bool = True):
+    """Write the catalogue, then validate it from `cwd` under `spelling`."""
+    (home / "catalog.yaml").write_text(CATALOG_TEMPLATE.format(path=bundle))
+    previous = Path.cwd()
+    try:
+        os.chdir(cwd)
+        return vb.validate_catalog(Path(spelling), portable)
+    finally:
+        os.chdir(previous)
+
+
+def test_catalog_path_spelling_never_changes_the_verdict() -> None:
+    """Issue #14, in both directions, against every spelling."""
+    print("\ncatalogue --portable: how the catalogue is named must not matter:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir).resolve()
+        home = build_catalog_tree(tmp)
+        escaping = tuple(
+            str(tmp / "outside") if p == "ABSOLUTE" else p for p in CATALOG_ESCAPING
+        )
+        # Keyed by bundle path, so the identity assertion below compares each
+        # catalogue against itself across the five spellings.
+        seen: dict[str, dict[str, list[str]]] = {}
+
+        for label, cwd, spelling in catalog_spellings(home):
+            for bundle in CATALOG_CONTAINED:
+                report = catalog_report(home, cwd, spelling, bundle)
+                record(
+                    report.findings == [] and report.exit_code() == 0,
+                    f"the contained path {bundle!r} is accepted via {label}",
+                    "; ".join(str(f) for f in report.findings)
+                    or f"exit = {report.exit_code()}",
+                )
+                seen.setdefault(bundle, {})[label] = [str(f) for f in report.findings]
+
+            for bundle in escaping:
+                report = catalog_report(home, cwd, spelling, bundle)
+                shown = bundle.replace(str(tmp), "<tmp>")
+                record(
+                    [f.check for f in report.findings] == [7]
+                    and report.exit_code() == 1,
+                    f"the escaping path {shown!r} is still rejected via {label}",
+                    f"findings = {[str(f) for f in report.findings]}; "
+                    f"exit = {report.exit_code()}",
+                )
+                seen.setdefault(bundle, {})[label] = [str(f) for f in report.findings]
+
+        # Not just the same verdict - the same report. With the root
+        # normalised, the messages quote one absolute directory whatever the
+        # caller typed, so an author who gets a finding gets the same text
+        # from any working directory.
+        for bundle, by_spelling in seen.items():
+            distinct = {tuple(v) for v in by_spelling.values()}
+            record(
+                len(distinct) == 1,
+                f"all five spellings report identically for {bundle.replace(str(tmp), '<tmp>')!r}",
+                f"got {len(distinct)} distinct reports: {by_spelling}",
+            )
+
+        # Check 7 must still be the thing doing the rejecting, and it must
+        # still be opt-in. Without --portable an escaping path is legal: a
+        # user's own catalogue may name a bundle anywhere on their machine.
+        report = catalog_report(home, home, "catalog.yaml", "../outside", portable=False)
+        record(
+            report.findings == [] and report.status[7][0] == vb.NOT_APPLICABLE,
+            "without --portable the same escaping path is accepted, check 7 n/a",
+            f"findings = {[str(f) for f in report.findings]}; "
+            f"status = {report.status.get(7)}",
+        )
+
+        # The reproduction from the issue, through the real command line.
+        (home / "catalog.yaml").write_text(CATALOG_TEMPLATE.format(path="inside"))
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPT), "--catalog", "catalog.yaml", "--portable"],
+            cwd=home,
+            capture_output=True,
+            text=True,
+        )
+        # The needle is the finding's own prefix, not the word "leaves":
+        # check 7's DESCRIPTION carries that word and is printed on every
+        # run, so a looser needle would match a clean report.
+        record(
+            proc.returncode == 0
+            and "[check  7]" not in proc.stdout
+            and "PASS" in proc.stdout,
+            "the CLI accepts a bare-filename catalogue naming a contained bundle",
+            f"exit {proc.returncode}\n{proc.stdout}{proc.stderr}",
+        )
+        (home / "catalog.yaml").write_text(CATALOG_TEMPLATE.format(path="../outside"))
+        proc = subprocess.run(
+            [sys.executable, str(SCRIPT), "--catalog", "catalog.yaml", "--portable"],
+            cwd=home,
+            capture_output=True,
+            text=True,
+        )
+        record(
+            proc.returncode == 1
+            and "[check  7]" in proc.stdout
+            and "FAIL - 1 finding(s)" in proc.stdout,
+            "the CLI still rejects a bare-filename catalogue naming an outside bundle",
+            f"exit {proc.returncode}\n{proc.stdout}{proc.stderr}",
+        )
+
+
+def test_catalog_root_normalises_every_spelling() -> None:
+    """The unit under the test above: one directory, however it was named."""
+    print("\ncatalogue: catalog_root() folds every spelling to one directory:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir).resolve()
+        home = tmp / "home"
+        home.mkdir()
+        (home / "catalog.yaml").write_text("catalog_version: 1\n")
+        roots = {}
+        for label, cwd, spelling in catalog_spellings(home):
+            previous = Path.cwd()
+            try:
+                os.chdir(cwd)
+                roots[label] = vb.catalog_root(Path(spelling))
+            finally:
+                os.chdir(previous)
+        record(
+            set(roots.values()) == {home},
+            "every spelling gives the absolute directory that holds the file",
+            f"got {roots}",
+        )
+        record(
+            all(r.is_absolute() for r in roots.values()),
+            "and it is absolute, which is what makes the string test meaningful",
+            f"got {roots}",
+        )
+
+
 def test_alias_normalisation_matches_the_runtime() -> None:
     """The validator and the catalogue must agree on "the same alias".
 
@@ -4021,6 +4245,8 @@ def main() -> int:
     test_check6_supplies_exemption()
     test_supplies_status_text()
     test_supplies_scope_rule()
+    test_catalog_root_normalises_every_spelling()
+    test_catalog_path_spelling_never_changes_the_verdict()
     test_run_case_checks_where()
     test_alias_normalisation_matches_the_runtime()
     test_check_coverage()
