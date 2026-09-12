@@ -137,25 +137,44 @@ cleaned up behind you.
 Courses live outside this repository. `skomp/tutorail-bundles` holds a collection; each
 subfolder is one bundle.
 
-Register one by adding it to your catalogue at `~/.config/tutorail/catalog.yaml`:
+You configure which catalogues to read in `~/.config/tutorail/catalogs.yaml`. A catalogue
+may be a local file, or a Git repository — including a private one.
 
 ```yaml
-catalog_version: 1
-tutorials:
-  - id: rust-automaton-db
-    title: Learn Rust by Building AutomatonDB
-    description: Project-driven Rust, database internals, distributed systems.
-    subjects: [rust, databases, distributed-systems]
-    level: intermediate-to-advanced
-    workspace_kind: existing-or-new-repository
+catalogs:
+  - id: skomp
     source:
-      type: local
-      path: ~/src/github.com/skomp/tutorail-bundles/rust-automaton-db
+      type: git
+      url: git@github.com:skomp/tutorail-bundles.git
+      ref: main
+      path: catalog.yaml        # repository root, or any subfolder
+  - id: mine
+    source: { type: file, path: ~/tutorials/catalog.yaml }
+  - id: builtin
+    source: { type: bundled }
 ```
 
-`source.type` is the extension point. `local` works today; `git` and `archive` are declared
-and will fail explicitly rather than silently until implemented. An online catalogue can be
-added later without changing anything about how tutorials run.
+**A bundles repository carries its own catalogue.** Put a `catalog.yaml` at its root listing
+its bundles by relative path, and adding the repository brings the bundles with it. Bundle
+paths resolve from the directory holding their catalogue file, with no exceptions.
+
+**Private repositories need no extra setup.** Fetching uses the Git credentials you already
+have — an SSH key, or `gh`. tutorAIl stores no tokens and never asks for one.
+
+Entries are read in the order you list them and **the first match for a tutorial id wins**,
+so put your own catalogues above `builtin` to override a shipped course. When an entry is
+shadowed, the runner says which catalogue supplied it and which were overridden.
+
+Catalogues refresh when a discovery request starts — never on every turn, and never during a
+resume. If one cannot be reached, the others are still served: the runner names the one that
+failed, falls back to its last successful copy, says the results are cached, and
+distinguishes an unreachable host from a repository you lack access to from a repository with
+no catalogue file, because those have three different repairs.
+
+```
+python3 skills/tutorail/scripts/catalogs.py discover   # refresh and list
+python3 skills/tutorail/scripts/catalogs.py status     # report without fetching
+```
 
 ## Writing a bundle
 

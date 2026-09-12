@@ -4,8 +4,11 @@
 # their own tutorials in ~/.config/tutorail/catalog.yaml, which the runner creates on
 # first use; entries there have the same shape as the entries here.
 #
-# `source.path` is relative to the skill directory (the directory that holds SKILL.md),
-# because that is how both supported hosts resolve a path named in a skill.
+# `source.path` is relative to THIS FILE'S OWN DIRECTORY, which is the rule for every
+# catalogue: a catalogue's bundles are resolved from the directory that holds the
+# catalogue file. That is what lets a bundles repository ship a catalog.yaml naming its
+# own bundles by relative path. The example bundle is a sibling of this directory, so the
+# path starts with '../'.
 #
 # Only one tutorial ships. Discovery therefore offers a choice between two Rust courses
 # only after the user has registered a second one of their own.
@@ -26,4 +29,4 @@ tutorials:
     workspace_kind: new-repository
     source:
       type: local
-      path: examples/rust-cli-basics
+      path: ../examples/rust-cli-basics

@@ -43,6 +43,22 @@ asks about state merging, open it then and not before.
 If answering a question seems to require another lesson, answer from the concept instead.
 The concept is what transfers; the other lesson is a context leak.
 
+### A resume reads no catalogue
+
+The learner's catalogues are refreshed **once, when a discovery request starts**, and at
+no other moment. A session that resumes an instance reads no catalogue at all: the
+instance already names its bundle, and `STATE.md` already holds the learner's place.
+
+So a teaching turn never fetches anything, never contacts a host, and costs nothing
+beyond the files listed above. Do not run `scripts/catalogs.py` during a teaching
+session, and do not run it per turn during discovery either. `catalogue-format.md`
+section 4 has the timing; this section exists so that a session which never loads that
+document still knows not to.
+
+The one exception is a learner who, mid-course, asks what else is available. That is a
+discovery request inside a teaching session: refresh once, answer, and go back to the
+lesson.
+
 ---
 
 ## 2. One turn
@@ -582,3 +598,11 @@ matters easy to miss.
   sentence saying the chapter was drafted on arrival. Section 7.4.
 - **Editing the manifest's `lessons` list.** It is the authored course. A generated lesson
   is an overlay; the list stays byte-identical to the bundle's.
+- **Refreshing a catalogue to teach a lesson.** A resume reads no catalogue. Section 1.
+- **Reporting a catalogue that failed to refresh as though it simply held nothing.** A
+  host that cannot be reached, a repository the learner has no access to, and a
+  repository with no catalogue file at that path are three problems with three repairs,
+  and none of them is "no tutorial matched". `catalogue-format.md` section 7 carries the
+  kinds; report the one that happened.
+- **Offering a cached entry as current.** When a catalogue was served from its last
+  successful copy, say so and say how old it is, every time you present an entry from it.

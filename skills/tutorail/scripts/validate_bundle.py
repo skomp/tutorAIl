@@ -6,6 +6,10 @@ Authoring-time only. Running a tutorial never invokes this script.
 Usage:
     validate_bundle.py <path>              check a bundle
     validate_bundle.py --instance <path>   check an instance
+    validate_bundle.py --catalog <path>    check a catalogue file
+    validate_bundle.py --catalog <path> --portable
+                                           also check that the catalogue can
+                                           be served from a repository
     validate_bundle.py --help
 
 The mode is always explicit. It is never inferred from which state file is
@@ -41,516 +45,29 @@ from typing import Any
 # --------------------------------------------------------------------------
 # Restricted YAML reader
 # --------------------------------------------------------------------------
+#
+# The reader lives in yamlite.py, because catalogs.py needs the same one and
+# two hand-written YAML parsers would drift apart. The names are re-exported
+# here so that validate_bundle.YamlError, .load_yaml, .YAML_READER and
+# ._RestrictedYaml keep resolving for anything that imports this module.
 
-
-class YamlError(Exception):
-    """The document uses something the restricted reader will not guess at."""
-
-
-_UNSUPPORTED_INDICATORS = {
-    "&": "anchors (&name)",
-    "*": "aliases (*name)",
-    "!": "tags (!name)",
-    "%": "directives (%YAML)",
-    "`": "the reserved indicator '`'",
-    "@": "the reserved indicator '@'",
-}
-
-_NULLS = {"", "null", "Null", "NULL", "~"}
-_TRUE = {"true", "True", "TRUE"}
-_FALSE = {"false", "False", "FALSE"}
-
-
-def _plain_to_python(text: str) -> Any:
-    if text in _NULLS:
-        return None
-    if text in _TRUE:
-        return True
-    if text in _FALSE:
-        return False
-    try:
-        return int(text)
-    except ValueError:
-        pass
-    try:
-        return float(text)
-    except ValueError:
-        pass
-    return text
-
-
-class _FlowParser:
-    """Parses a single line's worth of YAML flow syntax.
-
-    Supports: plain scalars, single- and double-quoted scalars, flow
-    sequences [a, b], flow mappings {k: v}. Everything else raises.
-    """
-
-    def __init__(self, text: str, where: str, lineno: int) -> None:
-        self.s = text
-        self.i = 0
-        self.where = where
-        self.lineno = lineno
-
-    def fail(self, msg: str) -> "YamlError":
-        return YamlError(f"{self.where}: line {self.lineno}: {msg}")
-
-    def parse(self) -> Any:
-        value = self.value(in_flow=False)
-        self.ws()
-        if self.i < len(self.s):
-            raise self.fail(
-                f"unexpected text after the value: {self.s[self.i:]!r}"
-            )
-        return value
-
-    def ws(self) -> None:
-        while self.i < len(self.s) and self.s[self.i] in " \t":
-            self.i += 1
-
-    def peek(self) -> str:
-        return self.s[self.i] if self.i < len(self.s) else ""
-
-    def value(self, in_flow: bool) -> Any:
-        self.ws()
-        c = self.peek()
-        if c == "[":
-            return self.sequence()
-        if c == "{":
-            return self.mapping()
-        if c in ('"', "'"):
-            return self.quoted()
-        if c in _UNSUPPORTED_INDICATORS:
-            raise self.fail(
-                f"{_UNSUPPORTED_INDICATORS[c]} are not supported by the "
-                f"restricted YAML reader; rewrite the value literally"
-            )
-        return self.plain(in_flow)
-
-    def plain(self, in_flow: bool) -> Any:
-        start = self.i
-        while self.i < len(self.s):
-            c = self.s[self.i]
-            if in_flow and c in ",]}":
-                break
-            self.i += 1
-        text = self.s[start : self.i].strip()
-        if in_flow and text == "":
-            raise self.fail("empty value in a flow collection")
-        return _plain_to_python(text)
-
-    def quoted(self) -> str:
-        quote = self.s[self.i]
-        self.i += 1
-        out: list[str] = []
-        while True:
-            if self.i >= len(self.s):
-                raise self.fail(f"unterminated {quote}-quoted string")
-            c = self.s[self.i]
-            if quote == "'":
-                if c == "'":
-                    if self.s[self.i + 1 : self.i + 2] == "'":
-                        out.append("'")
-                        self.i += 2
-                        continue
-                    self.i += 1
-                    return "".join(out)
-                out.append(c)
-                self.i += 1
-                continue
-            # double quoted
-            if c == "\\":
-                esc = self.s[self.i + 1 : self.i + 2]
-                simple = {
-                    "n": "\n",
-                    "t": "\t",
-                    "r": "\r",
-                    '"': '"',
-                    "\\": "\\",
-                    "/": "/",
-                    "0": "\0",
-                    " ": " ",
-                }
-                if esc not in simple:
-                    raise self.fail(
-                        f"escape sequence '\\{esc}' is not supported by the "
-                        f"restricted YAML reader"
-                    )
-                out.append(simple[esc])
-                self.i += 2
-                continue
-            if c == '"':
-                self.i += 1
-                return "".join(out)
-            out.append(c)
-            self.i += 1
-
-    def sequence(self) -> list:
-        self.i += 1  # consume '['
-        out: list = []
-        self.ws()
-        if self.peek() == "]":
-            self.i += 1
-            return out
-        while True:
-            out.append(self.value(in_flow=True))
-            self.ws()
-            c = self.peek()
-            if c == ",":
-                self.i += 1
-                self.ws()
-                if self.peek() == "]":
-                    self.i += 1
-                    return out
-                continue
-            if c == "]":
-                self.i += 1
-                return out
-            raise self.fail(
-                f"expected ',' or ']' in a flow sequence, found {c!r}"
-                if c
-                else "unterminated flow sequence '['"
-            )
-
-    def mapping(self) -> dict:
-        self.i += 1  # consume '{'
-        out: dict = {}
-        self.ws()
-        if self.peek() == "}":
-            self.i += 1
-            return out
-        while True:
-            self.ws()
-            key = self.flow_key()
-            self.ws()
-            if self.peek() != ":":
-                raise self.fail(
-                    f"expected ':' after the key {key!r} in a flow mapping"
-                )
-            self.i += 1
-            value = self.value(in_flow=True)
-            if key in out:
-                raise self.fail(f"duplicate key {key!r} in a flow mapping")
-            out[key] = value
-            self.ws()
-            c = self.peek()
-            if c == ",":
-                self.i += 1
-                self.ws()
-                if self.peek() == "}":
-                    self.i += 1
-                    return out
-                continue
-            if c == "}":
-                self.i += 1
-                return out
-            raise self.fail(
-                f"expected ',' or '}}' in a flow mapping, found {c!r}"
-                if c
-                else "unterminated flow mapping '{'"
-            )
-
-    def flow_key(self) -> Any:
-        if self.peek() in ('"', "'"):
-            return self.quoted()
-        start = self.i
-        while self.i < len(self.s) and self.s[self.i] not in ":,]}":
-            self.i += 1
-        text = self.s[start : self.i].strip()
-        if text == "":
-            raise self.fail("empty key in a flow mapping")
-        if text[0] in _UNSUPPORTED_INDICATORS:
-            raise self.fail(
-                f"{_UNSUPPORTED_INDICATORS[text[0]]} are not supported by the "
-                f"restricted YAML reader"
-            )
-        return _plain_to_python(text)
-
-
-def _strip_comment(line: str) -> str:
-    """Remove a trailing '# ...' comment, respecting quotes.
-
-    A '#' only starts a comment at the start of the line or after a space.
-    """
-    out: list[str] = []
-    quote = ""
-    for idx, c in enumerate(line):
-        if quote:
-            out.append(c)
-            if c == quote:
-                quote = ""
-            continue
-        if c in ('"', "'"):
-            quote = c
-            out.append(c)
-            continue
-        if c == "#" and (idx == 0 or line[idx - 1] in " \t"):
-            break
-        out.append(c)
-    return "".join(out)
-
-
-_KEY_RE = re.compile(
-    r"""^(?P<key>"[^"]*"|'[^']*'|[^:#]+?)\s*:(?:[ \t]+(?P<val>.*))?$"""
-)
-_SEQ_KEY_RE = re.compile(r"""^("[^"]*"|'[^']*'|[^:#\[\]{},]+?)\s*:([ \t]|$)""")
-
-
-class _RestrictedYaml:
-    """Block-structure reader for the shallow YAML the bundle format uses.
-
-    Supported: block mappings, block sequences, sequences of mappings, flow
-    sequences and mappings, quoted and plain scalars, '>' and '|' block
-    scalars with '-'/'+' chomping, comments, one leading '---'.
-
-    Rejected with an explicit message: anchors, aliases, tags, directives,
-    multiple documents, tabs in indentation, duplicate keys, explicit
-    indentation indicators on block scalars, plain multi-line scalars, and
-    any line that is not 'key: value' or '- item'.
-    """
-
-    def __init__(self, text: str, where: str) -> None:
-        self.lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-        self.n = 0
-        self.where = where
-        self.seen_doc_start = False
-
-    def fail(self, lineno: int, msg: str) -> YamlError:
-        return YamlError(f"{self.where}: line {lineno}: {msg}")
-
-    # -- line scanning -----------------------------------------------------
-
-    def peek(self) -> tuple[int, int, str] | None:
-        """Return (index, indent, stripped text) of the next significant line."""
-        while self.n < len(self.lines):
-            raw = self.lines[self.n]
-            # Measure the leading whitespace run over BOTH spaces and tabs, so
-            # a tab-indented line is caught here rather than being read as an
-            # un-indented one and reported as some unrelated syntax error.
-            indent = len(raw) - len(raw.lstrip(" \t"))
-            if "\t" in raw[:indent]:
-                raise self.fail(
-                    self.n + 1,
-                    "a tab is used for indentation; YAML forbids this, use spaces",
-                )
-            content = _strip_comment(raw).strip()
-            if content == "":
-                self.n += 1
-                continue
-            if content == "...":
-                raise self.fail(
-                    self.n + 1,
-                    "the document-end marker '...' is not supported",
-                )
-            if content == "---":
-                if self.seen_doc_start or any(
-                    _strip_comment(x).strip() for x in self.lines[: self.n]
-                ):
-                    raise self.fail(
-                        self.n + 1,
-                        "multiple YAML documents in one file are not supported",
-                    )
-                self.seen_doc_start = True
-                self.n += 1
-                continue
-            return self.n, indent, content
-        return None
-
-    # -- entry point -------------------------------------------------------
-
-    def parse(self) -> Any:
-        first = self.peek()
-        if first is None:
-            return None
-        _, indent, _ = first
-        if indent != 0:
-            raise self.fail(first[0] + 1, "the document starts with an indented line")
-        value = self.parse_block(0)
-        trailing = self.peek()
-        if trailing is not None:
-            raise self.fail(trailing[0] + 1, f"unexpected line {trailing[2]!r}")
-        return value
-
-    def parse_block(self, indent: int) -> Any:
-        peeked = self.peek()
-        if peeked is None:
-            return None
-        _, _, text = peeked
-        if text == "-" or text.startswith("- "):
-            return self.parse_sequence(indent)
-        return self.parse_mapping(indent)
-
-    # -- structures --------------------------------------------------------
-
-    def parse_mapping(self, indent: int) -> dict:
-        out: dict = {}
-        while True:
-            peeked = self.peek()
-            if peeked is None:
-                break
-            idx, ind, text = peeked
-            if ind < indent:
-                break
-            if ind > indent:
-                raise self.fail(
-                    idx + 1,
-                    f"unexpected indentation (expected {indent} spaces, found {ind}); "
-                    f"a plain scalar cannot continue onto the next line - use '>' "
-                    f"or quote the value",
-                )
-            if text == "-" or text.startswith("- "):
-                raise self.fail(
-                    idx + 1, "expected 'key: value' but found a sequence item"
-                )
-            match = _KEY_RE.match(text)
-            if not match:
-                raise self.fail(
-                    idx + 1,
-                    f"expected 'key: value' (with a space after the colon); "
-                    f"found {text!r}",
-                )
-            raw_key = match.group("key").strip()
-            if raw_key[:1] in _UNSUPPORTED_INDICATORS:
-                raise self.fail(
-                    idx + 1,
-                    f"{_UNSUPPORTED_INDICATORS[raw_key[0]]} are not supported "
-                    f"by the restricted YAML reader",
-                )
-            if raw_key == "<<":
-                raise self.fail(idx + 1, "merge keys ('<<') are not supported")
-            if raw_key[:1] in ('"', "'"):
-                key = raw_key[1:-1]
-            else:
-                key = raw_key
-            if key in out:
-                raise self.fail(idx + 1, f"duplicate key {key!r}")
-            rest = (match.group("val") or "").strip()
-            self.n = idx + 1
-            if rest == "":
-                nxt = self.peek()
-                if nxt is not None and nxt[1] > indent:
-                    out[key] = self.parse_block(nxt[1])
-                else:
-                    out[key] = None
-            elif rest[0] in "|>":
-                out[key] = self.block_scalar(rest, indent, idx + 1)
-            else:
-                out[key] = _FlowParser(rest, self.where, idx + 1).parse()
-        return out
-
-    def parse_sequence(self, indent: int) -> list:
-        out: list = []
-        while True:
-            peeked = self.peek()
-            if peeked is None:
-                break
-            idx, ind, text = peeked
-            if ind < indent:
-                break
-            if ind > indent:
-                raise self.fail(
-                    idx + 1,
-                    f"unexpected indentation in a sequence "
-                    f"(expected {indent} spaces, found {ind})",
-                )
-            if not (text == "-" or text.startswith("- ")):
-                raise self.fail(
-                    idx + 1,
-                    f"expected a sequence item starting with '- '; found {text!r}",
-                )
-            rest = text[1:].strip()
-            self.n = idx + 1
-            if rest == "":
-                nxt = self.peek()
-                if nxt is not None and nxt[1] > indent:
-                    out.append(self.parse_block(nxt[1]))
-                else:
-                    out.append(None)
-                continue
-            if _SEQ_KEY_RE.match(rest):
-                # A mapping that starts on the '-' line. Rewrite the line so
-                # the mapping's own column is its indentation, then reparse.
-                gap = len(text) - 1 - len(text[1:].lstrip(" "))
-                col = ind + 1 + gap
-                self.lines[idx] = " " * col + rest
-                self.n = idx
-                out.append(self.parse_mapping(col))
-                continue
-            if rest[0] in "|>":
-                out.append(self.block_scalar(rest, indent, idx + 1))
-                continue
-            out.append(_FlowParser(rest, self.where, idx + 1).parse())
-        return out
-
-    def block_scalar(self, header: str, parent_indent: int, lineno: int) -> str:
-        style = header[0]
-        modifiers = header[1:].strip()
-        chomp = ""
-        if modifiers in ("-", "+"):
-            chomp = modifiers
-        elif modifiers != "":
-            raise self.fail(
-                lineno,
-                f"block scalar header {header!r} is not supported; only "
-                f"'{style}', '{style}-' and '{style}+' are",
-            )
-        body: list[str] = []
-        while self.n < len(self.lines):
-            raw = self.lines[self.n]
-            if raw.strip() == "":
-                body.append("")
-                self.n += 1
-                continue
-            indent = len(raw) - len(raw.lstrip(" \t"))
-            if "\t" in raw[:indent]:
-                raise self.fail(
-                    self.n + 1, "a tab is used for indentation inside a block scalar"
-                )
-            if indent <= parent_indent:
-                break
-            body.append(raw)
-            self.n += 1
-        while body and body[-1] == "":
-            body.pop()
-        if not body:
-            return ""
-        block_indent = min(
-            len(line) - len(line.lstrip(" ")) for line in body if line.strip()
-        )
-        stripped = [line[block_indent:] if line.strip() else "" for line in body]
-        if style == "|":
-            text = "\n".join(stripped)
-        else:
-            parts: list[str] = []
-            for line in stripped:
-                if line == "":
-                    parts.append("\n")
-                elif parts and parts[-1] not in ("\n",):
-                    parts.append(" " + line)
-                else:
-                    parts.append(line)
-            text = "".join(parts)
-        if chomp == "-":
-            return text
-        return text + "\n"
-
-
-try:  # pragma: no cover - depends on the environment
-    import yaml as _pyyaml
-except Exception:  # pragma: no cover
-    _pyyaml = None
-
-YAML_READER = "PyYAML" if _pyyaml is not None else "restricted (no PyYAML installed)"
-
-
-def load_yaml(text: str, where: str) -> Any:
-    """Parse YAML, preferring PyYAML, falling back to the restricted reader."""
-    if _pyyaml is not None:  # pragma: no cover - depends on the environment
-        try:
-            return _pyyaml.safe_load(text)
-        except _pyyaml.YAMLError as exc:
-            raise YamlError(f"{where}: {exc}") from exc
-    return _RestrictedYaml(text, where).parse()
+try:
+    from yamlite import (
+        YAML_READER,
+        YamlError,
+        _RestrictedYaml,
+        _pyyaml,
+        load_yaml,
+    )
+except ImportError:  # pragma: no cover - only when sys.path lacks this dir
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from yamlite import (
+        YAML_READER,
+        YamlError,
+        _RestrictedYaml,
+        _pyyaml,
+        load_yaml,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -829,6 +346,11 @@ class Report:
     findings: list[Finding] = field(default_factory=list)
     status: dict[int, tuple[str, str]] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    # Which check table this report is against. A catalogue is a different
+    # kind of document from a bundle, so it has its own numbering rather
+    # than sharing one table in which most numbers never apply.
+    checks: dict[int, str] = field(default_factory=lambda: CHECKS)
+    limitations: str = ""
 
     def add(self, check: int, where: str, message: str) -> None:
         self.findings.append(Finding(check, where, message))
@@ -2087,15 +1609,352 @@ def validate(target: Path, mode: str) -> Report:
     return report
 
 
-def render(report: Report, stream=sys.stdout) -> None:
-    applicable = sorted(
-        number
-        for number in CHECKS
-        if not (
-            (number in BUNDLE_ONLY and report.mode != "bundle")
-            or (number in INSTANCE_ONLY and report.mode != "instance")
-        )
+# --------------------------------------------------------------------------
+# Catalogue mode
+# --------------------------------------------------------------------------
+#
+# A catalogue is not a bundle, so it gets its own numbering rather than a
+# shared table in which most numbers never apply. The mode is explicit on the
+# command line for the same reason bundle and instance are: a validator that
+# guesses which kind of document it was handed cannot fail on a document of
+# the wrong kind.
+
+CATALOG_CHECKS: dict[int, str] = {
+    1: "the file parses, is a mapping, and catalog_version is known",
+    2: "tutorials is a non-empty list of mappings",
+    3: "every entry carries the required fields, with the right shapes",
+    4: "every id is unique in the file and matches [a-z0-9-]+",
+    5: "every source names a known, implemented type with its required fields",
+    6: "every bundle path resolves to a directory holding tutorial.yaml and "
+    "STATE.template.md",
+    7: "[--portable] no bundle path leaves the catalogue's own directory",
+}
+
+CATALOG_REQUIRED_FIELDS = (
+    "id",
+    "title",
+    "description",
+    "subjects",
+    "level",
+    "workspace_kind",
+    "source",
+)
+CATALOG_LIST_FIELDS = ("subjects", "aliases", "style")
+CATALOG_TEXT_FIELDS = ("title", "description", "level", "scope", "workspace_kind")
+CATALOG_ENTRY_SOURCE_TYPES = ("local", "git", "archive")
+CATALOG_ENTRY_SOURCE_IMPLEMENTED = ("local",)
+KNOWN_CATALOG_VERSIONS = (1,)
+
+CATALOG_LIMITATIONS = """What a pass does and does not mean
+  Green means "a runner can read this catalogue and act on every entry". It
+  says nothing about whether the metadata is TRUE: a description that
+  misrepresents the course, subjects that do not match what the bundle
+  teaches, or a `scope` that under-states the work all pass.
+
+  Check 6 opens each bundle's directory, which discovery deliberately never
+  does. That is why this is an authoring-time tool: it is allowed to look,
+  and the runner is not.
+
+  Check 6 proves only that the directory holds tutorial.yaml and
+  STATE.template.md. Run validate_bundle.py <path> on the bundle itself to
+  learn whether the bundle is well-formed.
+
+  Check 7 runs only with --portable, because a user's own catalogue
+  legitimately names bundles anywhere on their machine. Use --portable for a
+  catalog.yaml that ships inside a bundles repository, where every bundle
+  must travel with the catalogue.
+
+  Nothing here checks a catalogue entry against the bundle's own
+  tutorial.yaml. The two are allowed to differ - the bundle is authoritative
+  once resolved - and reporting every difference would reject valid
+  catalogues whose entries are deliberately shorter."""
+
+
+def _is_text(value: Any) -> bool:
+    return isinstance(value, str) and value.strip() != ""
+
+
+def _is_text_list(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and bool(value)
+        and all(_is_text(item) for item in value)
     )
+
+
+def validate_catalog(target: Path, portable: bool) -> Report:
+    report = Report(
+        mode="catalog" + (" --portable" if portable else ""),
+        target=target,
+        checks=CATALOG_CHECKS,
+        limitations=CATALOG_LIMITATIONS,
+    )
+    root = target.parent
+
+    raw = read_text(target)
+    if raw is None:
+        report.add(1, target.name, "the file could not be read as UTF-8 text")
+        for number in CATALOG_CHECKS:
+            if number != 1:
+                report.blocked(number, "the catalogue could not be read")
+        report.ran(1)
+        return report
+    try:
+        document = load_yaml(raw, target.name)
+    except YamlError as exc:
+        report.add(1, target.name, f"the file does not parse: {exc}")
+        for number in CATALOG_CHECKS:
+            if number != 1:
+                report.blocked(number, "the catalogue does not parse")
+        report.ran(1)
+        return report
+
+    if not isinstance(document, dict):
+        report.add(
+            1,
+            target.name,
+            f"a catalogue must be a mapping with 'catalog_version' and "
+            f"'tutorials', not {type(document).__name__}",
+        )
+        for number in CATALOG_CHECKS:
+            if number != 1:
+                report.blocked(number, "the catalogue is not a mapping")
+        report.ran(1)
+        return report
+
+    version = document.get("catalog_version")
+    if version is None:
+        report.add(1, target.name, "'catalog_version' is missing")
+    elif version not in KNOWN_CATALOG_VERSIONS:
+        report.add(
+            1,
+            target.name,
+            f"catalog_version is {version!r}; this document defines "
+            f"{', '.join(str(v) for v in KNOWN_CATALOG_VERSIONS)}. A version "
+            f"you do not recognise is an error, not a guess",
+        )
+    unknown_top = sorted(set(document) - {"catalog_version", "tutorials"})
+    if unknown_top:
+        report.add(
+            1,
+            target.name,
+            f"unknown top-level field(s) {', '.join(unknown_top)}; a "
+            f"catalogue holds 'catalog_version' and 'tutorials'",
+        )
+    report.ran(1, f"catalog_version {version!r}")
+
+    listed = document.get("tutorials")
+    if listed is None:
+        report.add(2, target.name, "'tutorials' is missing")
+    elif not isinstance(listed, list):
+        report.add(
+            2,
+            target.name,
+            f"'tutorials' must be a list of entries, not "
+            f"{type(listed).__name__}",
+        )
+        listed = None
+    elif not listed:
+        report.add(
+            2,
+            target.name,
+            "the tutorials list is empty; a catalogue with no entry offers "
+            "nothing and is almost certainly an accident",
+        )
+    if listed is None:
+        for number in (2, 3, 4, 5, 6, 7):
+            if number == 2:
+                report.ran(2)
+            else:
+                report.blocked(number, "there is no usable tutorials list")
+        return report
+
+    entries: list[tuple[str, dict]] = []
+    for index, item in enumerate(listed):
+        where = f"tutorials[{index}]"
+        if not isinstance(item, dict):
+            report.add(
+                2,
+                where,
+                f"the entry must be a mapping of field to value, not "
+                f"{type(item).__name__}",
+            )
+            continue
+        if _is_text(item.get("id")):
+            where = f"{where} ({item['id']})"
+        entries.append((where, item))
+    report.ran(2, f"{len(listed)} entr{'y' if len(listed) == 1 else 'ies'}")
+
+    # -- check 3: required fields, and their shapes
+    for where, item in entries:
+        missing = [f for f in CATALOG_REQUIRED_FIELDS if f not in item]
+        for name in missing:
+            report.add(3, where, f"the required field {name!r} is missing")
+        for name in CATALOG_TEXT_FIELDS:
+            if name in item and not _is_text(item[name]):
+                report.add(
+                    3,
+                    where,
+                    f"{name!r} must be a non-empty string; it is "
+                    f"{item[name]!r}",
+                )
+        for name in CATALOG_LIST_FIELDS:
+            if name in item and not _is_text_list(item[name]):
+                report.add(
+                    3,
+                    where,
+                    f"{name!r} must be a non-empty list of strings; it is "
+                    f"{item[name]!r}",
+                )
+        kind = item.get("workspace_kind")
+        if _is_text(kind) and kind not in WORKSPACE_KINDS:
+            report.add(
+                3,
+                where,
+                f"workspace_kind is {kind!r}, which is not one of "
+                f"{', '.join(WORKSPACE_KINDS)}",
+            )
+    report.ran(3, f"{len(entries)} entr{'y' if len(entries) == 1 else 'ies'}")
+
+    # -- check 4: identity
+    seen: dict[str, str] = {}
+    for where, item in entries:
+        identifier = item.get("id")
+        if not _is_text(identifier):
+            continue
+        if not re.fullmatch(r"[a-z0-9-]+", identifier):
+            report.add(
+                4,
+                where,
+                f"the id {identifier!r} must match [a-z0-9-]+; it is the "
+                f"name a learner and a bundle both answer to",
+            )
+        if identifier in seen:
+            report.add(
+                4,
+                where,
+                f"the id {identifier!r} is already used by {seen[identifier]}; "
+                f"two entries answering to one id make precedence undecidable",
+            )
+        else:
+            seen[identifier] = where
+    report.ran(4, f"{len(seen)} distinct id(s)")
+
+    # -- check 5: the provider boundary
+    resolvable: list[tuple[str, str]] = []
+    for where, item in entries:
+        source = item.get("source")
+        if source is None:
+            continue
+        if not isinstance(source, dict):
+            report.add(
+                5,
+                where,
+                f"'source' must be a mapping, not {type(source).__name__}",
+            )
+            continue
+        kind = source.get("type")
+        if not _is_text(kind):
+            report.add(5, where, "'source' has no 'type'")
+            continue
+        if kind not in CATALOG_ENTRY_SOURCE_TYPES:
+            report.add(
+                5,
+                where,
+                f"source type {kind!r} is not one of "
+                f"{', '.join(CATALOG_ENTRY_SOURCE_TYPES)}",
+            )
+            continue
+        if kind not in CATALOG_ENTRY_SOURCE_IMPLEMENTED:
+            report.add(
+                5,
+                where,
+                f"source type {kind!r} is declared but not implemented. A "
+                f"bundle that lives in a repository is reached by adding "
+                f"that repository as a CATALOGUE; a catalogue entry names a "
+                f"path inside its own catalogue's directory",
+            )
+            continue
+        path = source.get("path")
+        if not _is_text(path):
+            report.add(5, where, "a local source requires a non-empty 'path'")
+            continue
+        resolvable.append((where, path))
+    report.ran(5, f"{len(resolvable)} resolvable source(s)")
+
+    # -- check 6: the bundle is really there
+    for where, path in resolvable:
+        candidate = Path(os.path.expanduser(path))
+        absolute = (
+            candidate if candidate.is_absolute() else Path(os.path.normpath(root / candidate))
+        )
+        if not absolute.is_dir():
+            report.add(
+                6,
+                where,
+                f"the bundle path {path!r} resolves to {absolute}, which is "
+                f"not a directory. Relative paths resolve from {root}, the "
+                f"directory that holds this catalogue",
+            )
+            continue
+        if absolute.name not in list_dir(absolute.parent):
+            report.add(
+                6,
+                where,
+                f"the directory is named "
+                f"{[e for e in list_dir(absolute.parent) if e.lower() == absolute.name.lower()][0]!r}, "
+                f"not {absolute.name!r}; the case differs, which resolves on "
+                f"macOS or Windows and fails on Linux",
+            )
+            continue
+        present = list_dir(absolute)
+        for required in ("tutorial.yaml", "STATE.template.md"):
+            if required not in present:
+                near = [e for e in present if e.lower() == required.lower()]
+                report.add(
+                    6,
+                    where,
+                    f"{absolute}/{required} is missing"
+                    + (f"; the entry is named {near[0]!r}" if near else "")
+                    + ". A catalogue entry must name a bundle",
+                )
+    report.ran(6, f"{len(resolvable)} bundle path(s)")
+
+    # -- check 7: portability
+    if not portable:
+        report.na(
+            7,
+            "pass --portable for a catalogue that ships inside a repository",
+        )
+        return report
+    from catalogs import escapes  # authoring-time tool, runtime predicate
+
+    for where, path in resolvable:
+        if escapes(root, path):
+            report.add(
+                7,
+                where,
+                f"the bundle path {path!r} leaves {root}, the directory that "
+                f"holds this catalogue. A catalogue served from a repository "
+                f"may only name bundles that travel with it, so the path must "
+                f"be relative and must stay inside",
+            )
+    report.ran(7, f"{len(resolvable)} bundle path(s)")
+    return report
+
+
+def render(report: Report, stream=sys.stdout) -> None:
+    if report.checks is CHECKS:
+        applicable = sorted(
+            number
+            for number in CHECKS
+            if not (
+                (number in BUNDLE_ONLY and report.mode != "bundle")
+                or (number in INSTANCE_ONLY and report.mode != "instance")
+            )
+        )
+    else:
+        applicable = sorted(report.checks)
     print(f"tutorAIl validator - mode: {report.mode}", file=stream)
     print(f"target:      {report.target}", file=stream)
     print(f"yaml reader: {YAML_READER}", file=stream)
@@ -2107,7 +1966,10 @@ def render(report: Report, stream=sys.stdout) -> None:
         )
         label = {RAN: "ran", NOT_APPLICABLE: "n/a", BLOCKED: "NOT RUN"}[state]
         suffix = f"  ({detail})" if detail else ""
-        print(f"  [{number:>2}] {label:<7} {CHECKS[number]}{suffix}", file=stream)
+        print(
+            f"  [{number:>2}] {label:<7} {report.checks[number]}{suffix}",
+            file=stream,
+        )
     print("", file=stream)
 
     if report.findings:
@@ -2133,7 +1995,7 @@ def render(report: Report, stream=sys.stdout) -> None:
                 "PASS - every applicable check ran and found nothing.", file=stream
             )
     print("", file=stream)
-    print(LIMITATIONS, file=stream)
+    print(report.limitations or LIMITATIONS, file=stream)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -2141,15 +2003,37 @@ def main(argv: list[str] | None = None) -> int:
         prog="validate_bundle.py",
         description="Structurally validate a tutorAIl bundle or instance.",
     )
-    parser.add_argument("path", help="the bundle or instance directory")
-    parser.add_argument(
+    parser.add_argument("path", help="the bundle, instance or catalogue path")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
         "--instance",
         action="store_true",
         help="check the path as an instance instead of a bundle",
     )
+    group.add_argument(
+        "--catalog",
+        action="store_true",
+        help="check the path as a catalogue file instead of a bundle",
+    )
+    parser.add_argument(
+        "--portable",
+        action="store_true",
+        help="with --catalog, also check that every bundle path stays inside "
+        "the catalogue's own directory",
+    )
     args = parser.parse_args(argv)
 
     target = Path(args.path)
+    if args.portable and not args.catalog:
+        print("error: --portable applies only with --catalog", file=sys.stderr)
+        return 2
+    if args.catalog:
+        if not target.is_file():
+            print(f"error: {target} is not a file", file=sys.stderr)
+            return 2
+        report = validate_catalog(target, args.portable)
+        render(report)
+        return report.exit_code()
     if not target.is_dir():
         print(f"error: {target} is not a directory", file=sys.stderr)
         return 2

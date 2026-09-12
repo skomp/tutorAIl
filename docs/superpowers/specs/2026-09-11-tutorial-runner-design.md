@@ -457,10 +457,42 @@ announcement is noise that makes the one that matters easier to miss.
 
 ## 7. Catalogue and the provider boundary
 
-| File | Ships | Contains |
-|---|---|---|
-| `skills/tutorail/catalog/builtin.yaml` | yes | only bundles shipped with the plugin |
-| `~/.config/tutorail/catalog.yaml` | no — created on first run | the user's registrations |
+**Revised 2026-09-12.** The earlier design read exactly two files: the catalogue shipped
+with the plugin, and one user file. It is replaced by a configurable list of catalogues,
+any of which may be a Git repository. The two-file model survives as the *implied
+default*, so nothing a user already has stops working.
+
+### 7.1 Three layers
+
+| Layer | File | Ships | Contains |
+|---|---|---|---|
+| catalogue of catalogues | `~/.config/tutorail/catalogs.yaml` | no | which catalogues, in priority order |
+| catalogue | `skills/tutorail/catalog/builtin.yaml` | yes | only bundles shipped with the plugin |
+| catalogue | `~/.config/tutorail/catalog.yaml` | no | the user's registrations |
+| catalogue | any `catalog.yaml` in a bundles repository | no | that repository's own bundles |
+| cache | `~/.cache/tutorail/catalogs/<id>/` | no | the last successful copy, and any clone |
+
+```yaml
+catalogs_version: 1
+catalogs:
+  - id: mine
+    source: { type: file, path: ~/tutorials/catalog.yaml }
+  - id: skomp
+    source:
+      type: git
+      url: git@github.com:skomp/tutorail-bundles.git
+      ref: main
+      path: catalog.yaml          # repository root, or any subfolder
+  - id: builtin
+    source: { type: bundled }
+```
+
+Catalogue source types: `bundled`, `file`, `git`. **When `catalogs.yaml` is absent, the
+runner behaves as though it listed `~/.config/tutorail/catalog.yaml` followed by
+`bundled`** — which is the old model exactly, so an existing user catalogue needs no
+migration.
+
+A catalogue entry keeps the shape it had:
 
 ```yaml
 catalog_version: 1
@@ -478,17 +510,94 @@ tutorials:
     workspace_kind: existing-or-new-repository
     source:
       type: local            # | git | archive
-      path: ~/src/github.com/skomp/tutorail-bundles/rust-automaton-db
+      path: rust-automaton-db
 ```
 
-**`source` is the entire provider boundary.** An online catalogue later returns the same
-entry shape and differs only inside `source` (`type: git`, `url`, `revision`). Matching,
-choice, materialization, state lifecycle and teaching are written against the entry and
-never against its origin. Adding `OnlineCatalogProvider` means implementing one new
-`source.type` in the resolve step and touching nothing else. `git` and `archive` are
-declared but unimplemented in v1, and fail explicitly rather than silently.
+**`source` is still the entire provider boundary for a bundle**, and `git`/`archive`
+remain declared but unimplemented *there*. Remoteness was added one layer up instead: a
+**catalogue** may be remote, and it brings its bundles with it.
 
-### Matching
+> **A bundle path resolves relative to its own catalogue's root — the directory that
+> holds the catalogue file.**
+
+That rule is what makes a bundles repository install with one entry: it ships a
+`catalog.yaml` at its root naming its own bundles by relative path, and adding the
+repository adds the courses. For a `git` catalogue the root is inside the cache clone, so
+a resolved bundle path is an absolute path under `~/.cache/tutorail/`.
+
+A catalogue fetched from a repository may not name a bundle outside its own directory —
+no absolute path, no `..` escape. Such an entry is skipped with a reason. A local
+catalogue is the user's own file and may name anything; that is the existing behaviour and
+several real entries depend on it.
+
+### 7.2 `scripts/catalogs.py`
+
+Fetching, caching, merging, precedence and staleness are deterministic, error-prone, and
+exactly the kind of work an agent does inconsistently across sessions — the same argument
+that justified `validate_bundle.py`. Unlike the validator, **this script runs on a
+learner's machine at runtime**, so it is stdlib-only plus the `git` binary. No third-party
+packages.
+
+| Command | Runs when | Does |
+|---|---|---|
+| `discover` | a discovery request starts | refreshes every catalogue, prints the merged catalogue and per-source status |
+| `status` | explaining the configuration or a failure | reports from disk; fetches nothing |
+| `resolve <id>` | the learner has chosen | prints the entry and the bundle directory, and checks the bundle is there |
+
+Options: `--config`, `--cache-dir`, `--timeout`, `--offline`, `--json`. Exit codes: `0`
+all current, `1` partial (something cached or unavailable), `2` the configuration is
+unusable, `3` nothing to serve.
+
+**`discover` never touches a bundle path** — it does not open, list or stat one. That is
+what keeps the provider boundary real rather than aspirational, and it is tested by
+offering an entry whose bundle directory does not exist. `resolve` is the step allowed to
+look, and it is the step that runs after the learner has chosen.
+
+The restricted YAML reader moved to `scripts/yamlite.py`, shared by both scripts. Two
+hand-written YAML parsers would drift apart, and a fix applied to one of them is the
+classic half-fix.
+
+### 7.3 Refresh, and failure
+
+**Refresh every catalogue when a discovery request starts. Once.** Never per turn. Never
+during a resume — a resume reads no catalogue at all, so continuing a course costs
+nothing.
+
+**A failed refresh never fails discovery.** Serve the catalogues that answered, name the
+one that did not, fall back to its last successful cached copy, and state that those
+results are cached and how old they are. Stale results are never presented as current: the
+cache records that the last attempt failed, so a later `status` or `resolve` — which fetch
+nothing — cannot read the old success timestamp and call it current.
+
+**The failure kinds are reported distinctly**, because they have different repairs:
+
+| Kind | Repair |
+|---|---|
+| `unreachable` | the network, or a mis-spelt host |
+| `no-access` | credentials, or the repository name |
+| `no-ref` | the `ref` field |
+| `no-catalogue` | the `path` field |
+| `missing-file` / `unreadable` / `malformed` | the local file |
+| `no-git` | install git |
+| `unclassified` | git's own message, printed verbatim, uninterpreted |
+
+Classification order is load-bearing and was the single most delicate part of this work.
+An SSH transport failure prints **both** the transport error **and** "Could not read from
+remote repository. Please make sure you have the correct access rights" — the same words a
+refused key prints. Testing the access patterns first therefore reports every unreachable
+host as a permissions problem and sends the learner to fix credentials that are already
+correct. The transport patterns are tried first, and that case has its own test.
+
+`unclassified` exists so the script can decline to guess. A classifier that always returns
+one of the three kinds cannot be wrong out loud, only quietly.
+
+**Authentication:** the runner uses the Git credentials the user already has — SSH key,
+credential helper, `gh`. No tokens, no stored secrets, no prompting: `GIT_TERMINAL_PROMPT=0`
+and SSH `BatchMode=yes` turn a credential prompt into a fast, classifiable `no-access`
+rather than a process waiting for a human who is not there. A private repository installs
+by the same mechanism as a public one.
+
+### 7.4 Matching
 
 Agent judgement against `subjects`/`aliases`/`title`/`description`/`level`/`style` — not
 a scoring function. Rules:
@@ -498,20 +607,25 @@ a scoring function. Rules:
 - State **why** each candidate matched, so ranking is inspectable.
 - Show title, description, level, scope, `workspace_kind` — not the lesson list.
 - Do not discard weak-but-valid alternatives; rank them lower.
+- Say "nothing matched" only when no catalogue was cached or unavailable.
 
-**Discovery loads metadata only.** The runner must not read anything under `source.path`
-until the learner has chosen. This is what makes a remote catalogue viable later.
+**Discovery loads metadata only.** The runner must not read anything under a bundle path
+until the learner has chosen.
 
 Registration is the one deliberate exception: adding a course to a catalogue requires
 reading its `tutorial.yaml` to build the entry. The learner is pointing at that specific
 bundle, so no provider boundary is crossed.
 
-### Precedence and authority
+### 7.5 Precedence and authority
 
-Both catalogue files are read and merged. **The user's file wins on an `id` collision**,
-because the user controls their own file — but the runner must say that a shipped entry
-was overridden, since silently substituting a different `source.path` is exactly the kind
-of hidden choice the matching rules otherwise forbid.
+**First match wins, by tutorial `id`, in `catalogs.yaml` order.** The implied default puts
+the user's catalogue before `builtin`, so a user can override a shipped tutorial — the
+same precedence the two-file model had.
+
+**The runner must say which catalogue supplied an entry and which were shadowed.**
+Silently substituting a different bundle for a known course name is exactly the kind of
+hidden choice the matching rules forbid everywhere else. `discover` prints an `OVERRIDES`
+line and lists the shadowed entries rather than dropping them.
 
 Catalogue entries duplicate manifest metadata (`title`, `subjects`, `level`,
 `workspace_kind`, …) by necessity, because discovery must not open the bundle. The copy
@@ -524,6 +638,7 @@ derived at registration time from the length of the `lessons` list.
 
 ---
 
+
 ## 8. Runner protocol
 
 ```
@@ -532,10 +647,11 @@ ORIENT
   │    ├─ yes + "continue" / no subject named ──────────► RESUME
   │    └─ yes + different subject named ────────────────► ask
   └─ no ─────────────────────────────────────────────────► DISCOVER
-                                          catalogue metadata → match → choice
+                       catalogs.py discover (refresh once, merge, report)
+                            → catalogue metadata → match → choice
                                                         ↓
                                                   MATERIALIZE
-                                    resolve source → copy → STATE.template.md
+                       catalogs.py resolve <id> → copy → STATE.template.md
                                     → STATE.md → stamp instance
                                                         ↓
                                   ┌───────────────► TEACH LOOP ◄──────┐
@@ -578,7 +694,9 @@ warning` / `known accepted warning` (matched against `STATE.md`'s `accepted_warn
 ## 9. Validator script
 
 `skills/tutorail/scripts/validate_bundle.py` — **authoring-time only.** Never in a
-learner's path; running a tutorial does not invoke it.
+learner's path; running a tutorial does not invoke it. `scripts/catalogs.py` (§7.2) is the
+opposite: it is the one script a learner's session does run, at discovery. The two share
+`scripts/yamlite.py` and nothing else.
 
 Its justification is the same as the runner's: **checking a bundle must not require
 reading the bundle into context.** For a 23-lesson course, verifying every lesson's
@@ -595,6 +713,14 @@ it with zero context.
    `LESSON.md` named in exact case
 5. no progress markers anywhere in `COURSE.md` or `lessons/`
 6. every file in a lesson folder is mentioned by that folder's `LESSON.md`
+
+**Catalogue mode** (added 2026-09-12): `--catalog <file>` checks a catalogue file, and
+`--catalog <file> --portable` additionally checks that every bundle path stays inside the
+catalogue's own directory — which is what a `catalog.yaml` shipping inside a bundles
+repository must satisfy, and what a user's own catalogue must not be held to. Catalogue
+mode has its own seven checks and its own numbering, because a catalogue is not a bundle
+and a shared table in which most numbers never apply teaches nobody anything. The mode
+stays explicit on the command line for the same reason bundle and instance do.
 
 **Cheap checks** (free once the script exists):
 
@@ -688,10 +814,10 @@ tutorAIl/
 ├── skills/tutorail/
 │   ├── SKILL.md
 │   ├── references/{bundle-format,catalogue-format,runner-protocol,state-lifecycle}.md
-│   ├── scripts/validate_bundle.py
+│   ├── scripts/{validate_bundle.py,catalogs.py,yamlite.py}
 │   ├── catalog/builtin.yaml
 │   └── examples/rust-cli-basics/
-├── tests/{fixtures/,test_validate_bundle.py}
+├── tests/{fixtures/,test_validate_bundle.py,test_catalogs.py}
 ├── docs/superpowers/specs/
 └── README.md
 ```
@@ -828,8 +954,11 @@ Standalone UI; web/desktop app; hosted backend; any model API client; accounts; 
 state; marketplace; recommendation ML; embedding search; ratings; payments; a full remote
 catalogue service; autonomous coding mode; a workflow engine; a custom DSL.
 
-Remote trust, signing, bundle updates after a learner has started, offline caching and
-catalogue mirrors are documented as future concerns, not solved.
+Remote trust and signing, and bundle updates after a learner has started, are documented
+as future concerns, not solved. **Offline caching and catalogue mirrors are now solved**
+for catalogues (§7): every catalogue is cached, a failed refresh falls back to its last
+successful copy, and the result is reported as cached rather than as current. Nothing
+caches a *bundle* that a learner has not chosen.
 
 ---
 
@@ -845,7 +974,12 @@ catalogue mirrors are documented as future concerns, not solved.
 4. **Multiple concurrent tutorials in one workspace.** Not supported; `tutorial/` is
    singular. Deferred.
 5. **Remote repositories.** Both `tutorAIl` and `tutorail-bundles` are local-only. Nothing
-   has been created on GitHub.
+   has been created on GitHub. A `git` catalogue therefore has no real remote to point at
+   yet; it is exercised against local repositories over `file://` URLs, which uses the
+   same clone, fetch and checkout path.
+6. **`tutorail-bundles` has no `catalog.yaml` of its own.** Adding one is what makes the
+   repository installable with a single `catalogs.yaml` entry, and the maintenance skills
+   should generate it. Not done here: that repository is out of this change's scope.
 
 ---
 
@@ -929,8 +1063,12 @@ real files. One repository cannot satisfy both without duplication.
 | `tutorail-bundles` repository | **done** — holds `rust-automaton-db` |
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
-| Validator (`scripts/validate_bundle.py`) | **done** — 12 checks, restricted YAML reader |
-| Validator test suite | **done** — 138 assertions; every check proven firing |
+| Validator (`scripts/validate_bundle.py`) | **done** — 17 bundle checks + 7 catalogue checks |
+| Validator test suite | **done** — 189 assertions; every check proven firing |
+| Multi-catalogue support (`scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
+| Catalogue test suite (`tests/test_catalogs.py`) | **done** — 158 assertions; every failure kind proven firing |
+| Shared YAML reader (`scripts/yamlite.py`) | **done** |
+| `catalog.yaml` inside `tutorail-bundles` | **not done** — §15 item 6 |
 | `SKILL.md` (the runner control plane) | **done** |
 | `references/catalogue-format.md` | **done** |
 | `references/runner-protocol.md` | **done** |

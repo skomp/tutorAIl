@@ -328,7 +328,7 @@ ownership of this one path is settled by the runner and not by the manifest.
 5. **Add the provenance frontmatter** below, alongside the ordinary lesson fields.
 6. **Record the way back before you teach a word of it.** Set `active_lesson` to the
    generated lesson and `resume_at` to the lesson the learner returns to — section 8.3.
-   Write it now, while you still know where the learner was standing; a session that
+   Record it now, while you still know where the learner was standing; a session that
    starts after the detour cannot recover it.
 7. **Say what you wrote and why, before teaching it.** A lesson that appears in the
    learner's workspace unannounced is indistinguishable from the course changing
@@ -424,7 +424,7 @@ learner goes back into 04 and finishes it.
 
 #### Recording it
 
-**Write `resume_at` when the detour becomes active, not when it finishes**, and write the
+**Set `resume_at` when the detour becomes active, not when it finishes**, and write the
 value you already know rather than one you derive. `after:` records placement and
 `resume_at` records the way back; they are independent fields and neither is computed from
 the other.

@@ -1,0 +1,1544 @@
+#!/usr/bin/env python3
+"""Fetch, cache and merge the learner's tutorial catalogues.
+
+RUNTIME script. Unlike validate_bundle.py, this one runs on a learner's
+machine, so it uses the standard library and the `git` binary and nothing
+else. No third-party packages, no network client of its own, no credential
+handling: `git` borrows whatever access the user already granted it.
+
+Usage:
+    catalogs.py discover            refresh every catalogue, print the merged
+                                    catalogue and the per-catalogue status
+    catalogs.py status              print the per-catalogue status from what
+                                    is already on disk; fetch nothing
+    catalogs.py resolve <id>        print one merged entry and the bundle
+                                    directory it resolves to; fetch nothing
+
+Options:
+    --config PATH       the catalogue of catalogues
+                        (default ~/.config/tutorail/catalogs.yaml)
+    --cache-dir PATH    (default ~/.cache/tutorail)
+    --timeout SECONDS   per git command (default 30)
+    --offline           discover without fetching; serve what is on disk
+    --json              machine-readable output instead of the report
+
+Exit codes:
+    0  every configured catalogue answered
+    1  at least one catalogue was served from cache or could not be served,
+       and at least one entry is available
+    2  usage, or the catalogue of catalogues is unusable
+    3  no entry could be served at all
+
+Three rules this script exists to keep:
+
+  * **Discovery loads metadata only.** Nothing here opens, stats or lists
+    anything under a tutorial's bundle path. `discover` cannot tell whether a
+    bundle is present, and must not: that is what keeps a remote catalogue
+    possible. Only `resolve`, which runs after the learner has chosen, looks
+    at a bundle directory.
+
+  * **A failed refresh never fails discovery.** The catalogues that answered
+    are served, the one that did not is named, and its last successful copy
+    is used and marked as cached. Stale results are never presented as
+    current: every catalogue is reported with the timestamp of its last
+    successful refresh.
+
+  * **Failures are not collapsed.** "The host is unreachable", "you have no
+    access to this repository" and "this repository has no catalogue file"
+    have three different repairs. A git failure this script cannot recognise
+    is reported as unclassified with git's own words, never guessed into one
+    of the three.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+try:
+    from yamlite import YAML_READER, YamlError, load_yaml
+except ImportError:  # pragma: no cover - only when sys.path lacks this dir
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from yamlite import YAML_READER, YamlError, load_yaml
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+SKILL_DIR = SCRIPT_DIR.parent
+BUNDLED_CATALOG = SKILL_DIR / "catalog" / "builtin.yaml"
+
+DEFAULT_CONFIG = "~/.config/tutorail/catalogs.yaml"
+DEFAULT_CACHE_DIR = "~/.cache/tutorail"
+DEFAULT_TIMEOUT = 30
+
+KNOWN_CONFIG_VERSIONS = (1,)
+KNOWN_CATALOG_VERSIONS = (1,)
+
+CATALOG_SOURCE_TYPES = ("bundled", "file", "git")
+CATALOG_SOURCE_REQUIRED = {
+    "bundled": (),
+    "file": ("path",),
+    "git": ("url",),
+}
+
+# A tutorial entry's `source` says where the BUNDLE is. A catalogue entry's
+# `source` says where the CATALOGUE is. They are different fields with
+# different vocabularies, and conflating them is the mistake this comment
+# exists to prevent. `git` and `archive` remain declared-but-unimplemented at
+# the tutorial level: a git CATALOGUE brings its bundles with it by relative
+# path, which is how a bundles repository is installed with one entry.
+TUTORIAL_SOURCE_TYPES = ("local", "git", "archive")
+TUTORIAL_SOURCE_IMPLEMENTED = ("local",)
+
+ENTRY_REQUIRED_FIELDS = (
+    "id",
+    "title",
+    "description",
+    "subjects",
+    "level",
+    "workspace_kind",
+    "source",
+)
+
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+# --------------------------------------------------------------------------
+# Failure kinds
+# --------------------------------------------------------------------------
+#
+# Every kind is a DIFFERENT REPAIR. That is the test for whether a kind earns
+# its place: if two kinds would send the user to do the same thing, they are
+# one kind. Collapsing them the other way - reporting every git failure as
+# "could not fetch" - is the defect this table exists to prevent, because the
+# learner is then told to check their network when the real answer is that
+# they have no access, or that the file is simply not at that path.
+
+FAILURE_KINDS: dict[str, tuple[str, str]] = {
+    "unreachable": (
+        "the host could not be reached",
+        "check the network connection, and that the host name is spelt "
+        "correctly, then run discover again",
+    ),
+    "no-access": (
+        "you have no access to this repository, or it does not exist",
+        "check that the repository name is right and that your git "
+        "credentials reach it - the same SSH key or helper you use for "
+        "`git clone` by hand. This script never prompts for credentials and "
+        "never stores any",
+    ),
+    "no-ref": (
+        "the repository has no such branch or tag",
+        "correct the 'ref' field, or remove it to take the default branch",
+    ),
+    "no-catalogue": (
+        "the repository has no catalogue file at that path",
+        "correct the 'path' field to name the catalogue file inside the "
+        "repository",
+    ),
+    "missing-file": (
+        "the catalogue file is not there",
+        "correct the 'path' field, or create the file",
+    ),
+    "unreadable": (
+        "the catalogue file could not be read",
+        "check the file's permissions and that it is UTF-8 text",
+    ),
+    "malformed": (
+        "the catalogue file is not a usable catalogue",
+        "correct the file, then check it with "
+        "validate_bundle.py --catalog <path>",
+    ),
+    "no-git": (
+        "the git command is not installed",
+        "install git, or remove the git catalogues from the configuration",
+    ),
+    "unclassified": (
+        "git failed for a reason this script does not recognise",
+        "read git's own message below; it has not been interpreted",
+    ),
+}
+
+# Classification patterns, in the order they are tried. ORDER IS LOAD-BEARING.
+#
+# An SSH timeout prints BOTH "Operation timed out" and "Could not read from
+# remote repository." - the second of which is also what a refused key
+# prints. Testing the access patterns first would report every unreachable
+# host as an access problem, which is the exact "distinguish refused from
+# failed earlier" failure. So the transport patterns are tried first.
+
+_UNREACHABLE_PATTERNS = (
+    "could not resolve host",
+    "could not resolve hostname",
+    "name or service not known",
+    "nodename nor servname provided",
+    "temporary failure in name resolution",
+    "no address associated with hostname",
+    "connection timed out",
+    "operation timed out",
+    "timed out",
+    "connection refused",
+    "connection reset by peer",
+    "network is unreachable",
+    "no route to host",
+    "failed to connect to",
+    "unable to look up",
+    "server certificate verification failed",
+)
+
+_NO_REF_PATTERNS = (
+    "not found in upstream origin",
+    "couldn't find remote ref",
+    "could not find remote ref",
+    "unknown revision or path not in the working tree",
+    "did not match any file(s) known to git",
+)
+
+_NO_ACCESS_PATTERNS = (
+    "permission denied",
+    "publickey",
+    "authentication failed",
+    "repository not found",
+    "access denied",
+    "requested url returned error: 401",
+    "requested url returned error: 403",
+    "the requested url returned error: 401",
+    "the requested url returned error: 403",
+    "please make sure you have the correct access rights",
+    "terminal prompts disabled",
+    "could not read from remote repository",
+    "invalid username or password",
+    "you do not have permission",
+)
+
+
+def classify_git_error(stderr: str, stdout: str = "") -> str:
+    """Map git's own words onto one of the failure kinds.
+
+    Pure, so the classifier can be exercised directly against the messages
+    real git prints. It returns "unclassified" rather than guessing, and the
+    caller then reports git's message verbatim.
+    """
+    text = f"{stderr}\n{stdout}".lower()
+    for pattern in _UNREACHABLE_PATTERNS:
+        if pattern in text:
+            return "unreachable"
+    for pattern in _NO_REF_PATTERNS:
+        if pattern in text:
+            return "no-ref"
+    for pattern in _NO_ACCESS_PATTERNS:
+        if pattern in text:
+            return "no-access"
+    return "unclassified"
+
+
+# --------------------------------------------------------------------------
+# Model
+# --------------------------------------------------------------------------
+
+
+class ConfigError(Exception):
+    """The catalogue of catalogues cannot be used at all."""
+
+
+@dataclass(frozen=True)
+class Failure:
+    kind: str
+    detail: str
+
+    @property
+    def summary(self) -> str:
+        return FAILURE_KINDS[self.kind][0]
+
+    @property
+    def repair(self) -> str:
+        return FAILURE_KINDS[self.kind][1]
+
+    def as_dict(self) -> dict:
+        return {
+            "kind": self.kind,
+            "summary": self.summary,
+            "detail": self.detail,
+            "repair": self.repair,
+        }
+
+
+@dataclass(frozen=True)
+class Source:
+    type: str
+    path: str | None = None
+    url: str | None = None
+    ref: str | None = None
+
+    def fingerprint(self) -> str:
+        return "\x00".join(
+            [self.type, self.url or "", self.ref or "", self.path or ""]
+        )
+
+    def describe(self) -> str:
+        if self.type == "bundled":
+            return "bundled with the plugin"
+        if self.type == "file":
+            return str(self.path)
+        ref = f"@{self.ref}" if self.ref else "@(default branch)"
+        return f"{self.url}{ref}#{self.path or 'catalog.yaml'}"
+
+    def as_dict(self) -> dict:
+        out: dict[str, Any] = {"type": self.type}
+        for name in ("url", "ref", "path"):
+            value = getattr(self, name)
+            if value is not None:
+                out[name] = value
+        return out
+
+
+@dataclass(frozen=True)
+class CatalogSpec:
+    id: str
+    source: Source
+
+
+@dataclass
+class CatalogResult:
+    spec: CatalogSpec
+    state: str = "unavailable"  # current | cached | unavailable
+    refreshed_now: bool = False
+    entries: list[dict] = field(default_factory=list)
+    root: Path | None = None
+    fetched_at: str | None = None
+    commit: str | None = None
+    failure: Failure | None = None
+    skipped: list[tuple[str, str]] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        return {
+            "id": self.spec.id,
+            "source": self.spec.source.as_dict(),
+            "origin": self.spec.source.describe(),
+            "state": self.state,
+            "refreshed_now": self.refreshed_now,
+            "entry_count": len(self.entries),
+            "root": str(self.root) if self.root else None,
+            "fetched_at": self.fetched_at,
+            "commit": self.commit,
+            "failure": self.failure.as_dict() if self.failure else None,
+            "skipped": [{"where": w, "reason": r} for w, r in self.skipped],
+        }
+
+
+@dataclass
+class MergedEntry:
+    entry: dict
+    catalog_id: str
+    freshness: str  # current | cached
+    resolved_path: str
+    origin: str
+    shadowed: list[tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def id(self) -> str:
+        return str(self.entry["id"])
+
+    def as_dict(self) -> dict:
+        out = dict(self.entry)
+        out["catalog"] = self.catalog_id
+        out["freshness"] = self.freshness
+        out["resolved_path"] = self.resolved_path
+        out["origin"] = self.origin
+        out["shadows"] = [
+            {"catalog": cid, "origin": origin} for cid, origin in self.shadowed
+        ]
+        return out
+
+
+# --------------------------------------------------------------------------
+# Small helpers
+# --------------------------------------------------------------------------
+
+
+def now_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def parse_stamp(text: str | None) -> datetime | None:
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        return None
+
+
+def describe_age(stamp: str | None) -> str:
+    moment = parse_stamp(stamp)
+    if moment is None:
+        return "never"
+    seconds = int((datetime.now(timezone.utc) - moment).total_seconds())
+    if seconds < 0:
+        return "in the future - the clock moved"
+    if seconds < 90:
+        return f"{seconds} seconds ago"
+    minutes = seconds // 60
+    if minutes < 90:
+        return f"{minutes} minutes ago"
+    hours = minutes // 60
+    if hours < 48:
+        return f"{hours} hours ago"
+    return f"{hours // 24} days ago"
+
+
+def expand(path: str) -> Path:
+    return Path(os.path.expanduser(str(path)))
+
+
+def read_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def escapes(root: Path, relative: str) -> bool:
+    """True when `relative` leaves `root`, on the strings alone.
+
+    No filesystem call, because this runs during discovery, which must not
+    touch anything under a bundle path. `os.path.normpath` collapses the
+    '..' segments textually, which is what the check needs.
+    """
+    if os.path.isabs(relative) or relative.startswith("~"):
+        return True
+    combined = os.path.normpath(os.path.join(str(root), relative))
+    return combined != str(root) and not combined.startswith(str(root) + os.sep)
+
+
+# --------------------------------------------------------------------------
+# The catalogue of catalogues
+# --------------------------------------------------------------------------
+
+
+def read_source(raw: Any, where: str) -> Source:
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{where}: 'source' must be a mapping")
+    kind = raw.get("type")
+    if kind is None:
+        raise ConfigError(f"{where}: 'source' has no 'type'")
+    kind = str(kind)
+    if kind not in CATALOG_SOURCE_TYPES:
+        raise ConfigError(
+            f"{where}: source type {kind!r} is not one of "
+            f"{', '.join(CATALOG_SOURCE_TYPES)}"
+        )
+    for required in CATALOG_SOURCE_REQUIRED[kind]:
+        if not raw.get(required):
+            raise ConfigError(
+                f"{where}: a {kind} source requires the field {required!r}"
+            )
+    unknown = sorted(set(raw) - {"type", "path", "url", "ref"})
+    if unknown:
+        raise ConfigError(
+            f"{where}: source has unknown field(s) {', '.join(unknown)}"
+        )
+    if kind == "bundled" and (raw.get("path") or raw.get("url")):
+        raise ConfigError(
+            f"{where}: a bundled source takes no 'path' and no 'url'; it is "
+            f"the catalogue that ships with the plugin"
+        )
+    if kind == "git":
+        path = str(raw.get("path") or "catalog.yaml")
+        if os.path.isabs(path) or path.startswith("~") or escapes(Path("/r"), path):
+            raise ConfigError(
+                f"{where}: the git source path {path!r} must stay inside the "
+                f"repository; it must be relative and must not contain '..'"
+            )
+        return Source(type=kind, url=str(raw["url"]), ref=_opt(raw.get("ref")), path=path)
+    if kind == "file":
+        return Source(type=kind, path=str(raw["path"]))
+    return Source(type=kind)
+
+
+def _opt(value: Any) -> str | None:
+    return None if value is None else str(value)
+
+
+def implied_default(config_path: Path) -> tuple[list[CatalogSpec], str]:
+    """What to do when there is no catalogs.yaml.
+
+    The old two-file model is exactly this list, so an existing
+    ~/.config/tutorail/catalog.yaml keeps working with no migration. The user
+    file comes FIRST, so a user entry overrides a shipped one - which is the
+    same precedence the two-file model had.
+
+    A missing user catalogue is the normal state on a first run, so it is
+    omitted rather than reported as a failure.
+    """
+    specs: list[CatalogSpec] = []
+    # The user catalogue is a SIBLING of the catalogue of catalogues, so
+    # --config stays self-consistent: pointing at another configuration
+    # directory moves both files together.
+    legacy = config_path.parent / "catalog.yaml"
+    if legacy.is_file():
+        specs.append(CatalogSpec("user", Source(type="file", path=str(legacy))))
+    specs.append(CatalogSpec("builtin", Source(type="bundled")))
+    note = (
+        f"no {config_path} - using the implied default, which is the "
+        f"two-file model this replaced"
+    )
+    return specs, note
+
+
+def load_config(config_path: Path) -> tuple[list[CatalogSpec], str | None]:
+    """Return the configured catalogues, and a note when one was implied."""
+    if not config_path.exists():
+        specs, note = implied_default(config_path)
+        return specs, note
+    raw_text = read_text(config_path)
+    if raw_text is None:
+        raise ConfigError(f"{config_path}: the file could not be read as UTF-8 text")
+    try:
+        document = load_yaml(raw_text, str(config_path))
+    except YamlError as exc:
+        raise ConfigError(f"{config_path}: the file does not parse: {exc}") from exc
+    if not isinstance(document, dict):
+        raise ConfigError(
+            f"{config_path}: the file must hold a mapping with a 'catalogs' list"
+        )
+    version = document.get("catalogs_version", 1)
+    if version not in KNOWN_CONFIG_VERSIONS:
+        raise ConfigError(
+            f"{config_path}: catalogs_version is {version!r}, which this "
+            f"runner does not know. Known: "
+            f"{', '.join(str(v) for v in KNOWN_CONFIG_VERSIONS)}"
+        )
+    listed = document.get("catalogs")
+    if not isinstance(listed, list) or not listed:
+        raise ConfigError(
+            f"{config_path}: 'catalogs' must be a non-empty list of catalogues"
+        )
+    specs: list[CatalogSpec] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(listed):
+        where = f"{config_path}: catalogs[{index}]"
+        if not isinstance(raw, dict):
+            raise ConfigError(f"{where}: each catalogue must be a mapping")
+        identifier = raw.get("id")
+        if identifier is None:
+            raise ConfigError(f"{where}: the catalogue has no 'id'")
+        identifier = str(identifier)
+        # The id becomes a directory name under the cache, so it is checked
+        # before it is ever joined onto a path.
+        if not _SLUG_RE.match(identifier):
+            raise ConfigError(
+                f"{where}: the id {identifier!r} must match [a-z0-9-]+ and "
+                f"start with a letter or a digit; it names a cache directory"
+            )
+        if identifier in seen:
+            raise ConfigError(
+                f"{where}: the id {identifier!r} is used more than once; "
+                f"precedence is decided by order, so ids must be unique"
+            )
+        seen.add(identifier)
+        if "source" not in raw:
+            raise ConfigError(f"{where}: the catalogue has no 'source'")
+        unknown = sorted(set(raw) - {"id", "source"})
+        if unknown:
+            raise ConfigError(
+                f"{where}: unknown field(s) {', '.join(unknown)}; a catalogue "
+                f"has an 'id' and a 'source'"
+            )
+        specs.append(CatalogSpec(identifier, read_source(raw["source"], where)))
+    return specs, None
+
+
+# --------------------------------------------------------------------------
+# The cache
+# --------------------------------------------------------------------------
+
+
+class Cache:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.catalogs = root / "catalogs"
+
+    def dir_for(self, identifier: str) -> Path:
+        return self.catalogs / identifier
+
+    def meta_path(self, identifier: str) -> Path:
+        return self.dir_for(identifier) / "meta.json"
+
+    def document_path(self, identifier: str) -> Path:
+        return self.dir_for(identifier) / "catalog.yaml"
+
+    def clone_path(self, identifier: str) -> Path:
+        return self.dir_for(identifier) / "repo"
+
+    def read_meta(self, identifier: str) -> dict:
+        text = read_text(self.meta_path(identifier))
+        if text is None:
+            return {}
+        try:
+            data = json.loads(text)
+        except ValueError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def write_meta(self, identifier: str, meta: dict) -> None:
+        target = self.dir_for(identifier)
+        target.mkdir(parents=True, exist_ok=True)
+        self.meta_path(identifier).write_text(
+            json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+    def store_document(self, identifier: str, text: str) -> None:
+        target = self.dir_for(identifier)
+        target.mkdir(parents=True, exist_ok=True)
+        self.document_path(identifier).write_text(text, encoding="utf-8")
+
+
+# --------------------------------------------------------------------------
+# git
+# --------------------------------------------------------------------------
+
+
+def git_env() -> dict[str, str]:
+    """An environment that borrows the user's access and never prompts.
+
+    GIT_TERMINAL_PROMPT and BatchMode turn a credential prompt into a fast,
+    classifiable failure instead of a process that hangs waiting for a human
+    who is not there. LC_ALL keeps git's messages in the language the
+    classifier was written against.
+    """
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GCM_INTERACTIVE"] = "never"
+    env["LC_ALL"] = "C"
+    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")
+    return env
+
+
+@dataclass
+class GitRun:
+    ok: bool
+    stdout: str
+    stderr: str
+    timed_out: bool = False
+
+
+def run_git(args: list[str], timeout: int) -> GitRun:
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            env=git_env(),
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return GitRun(
+            ok=False,
+            stdout="",
+            stderr=f"the git command did not finish within {timeout} seconds",
+            timed_out=True,
+        )
+    except OSError as exc:  # pragma: no cover - git was checked for already
+        return GitRun(ok=False, stdout="", stderr=str(exc))
+    return GitRun(
+        ok=completed.returncode == 0,
+        stdout=completed.stdout or "",
+        stderr=completed.stderr or "",
+    )
+
+
+def git_failure(run: GitRun, what: str) -> Failure:
+    if run.timed_out:
+        return Failure("unreachable", f"{what}: {run.stderr}")
+    kind = classify_git_error(run.stderr, run.stdout)
+    detail = (run.stderr or run.stdout).strip() or "git failed and said nothing"
+    return Failure(kind, f"{what}: {detail}")
+
+
+def refresh_clone(
+    spec: CatalogSpec, clone: Path, timeout: int
+) -> tuple[bool, Failure | None]:
+    """Bring the cached clone up to date, or create it.
+
+    A FAILED update never destroys the clone. The clone is the only copy of
+    the bundles a git catalogue carries, so wiping it on a transient failure
+    would turn "cannot refresh" into "cannot teach".
+    """
+    ref = spec.source.ref
+    if (clone / ".git").exists():
+        fetch_args = ["-C", str(clone), "fetch", "--quiet", "--depth", "1", "origin"]
+        fetch_args.append(ref if ref else "HEAD")
+        run = run_git(fetch_args, timeout)
+        if not run.ok:
+            return False, git_failure(run, "git fetch")
+        run = run_git(
+            ["-C", str(clone), "checkout", "--quiet", "--force", "FETCH_HEAD"],
+            timeout,
+        )
+        if not run.ok:
+            return False, git_failure(run, "git checkout")
+        return True, None
+
+    # No usable clone. Anything already there is a half-written clone from an
+    # interrupted run, not a fallback copy, so it is safe to remove.
+    if clone.exists():
+        shutil.rmtree(clone, ignore_errors=True)
+    clone.parent.mkdir(parents=True, exist_ok=True)
+    args = ["clone", "--quiet", "--depth", "1", "--single-branch"]
+    if ref:
+        args += ["--branch", ref]
+    args += ["--", str(spec.source.url), str(clone)]
+    run = run_git(args, timeout)
+    if not run.ok:
+        shutil.rmtree(clone, ignore_errors=True)
+        return False, git_failure(run, "git clone")
+    return True, None
+
+
+def clone_commit(clone: Path, timeout: int) -> str | None:
+    run = run_git(["-C", str(clone), "rev-parse", "--short", "HEAD"], timeout)
+    return run.stdout.strip() if run.ok else None
+
+
+# --------------------------------------------------------------------------
+# Reading one catalogue document
+# --------------------------------------------------------------------------
+
+
+def parse_catalog(
+    text: str, where: str, root: Path, portable: bool
+) -> tuple[list[dict], list[tuple[str, str]]]:
+    """Parse a catalogue document into entries, skipping malformed ones.
+
+    Raises YamlError or ConfigError when the DOCUMENT is unusable. An entry
+    that is unusable is skipped with a reason, because one bad entry must not
+    hide the rest of a catalogue.
+
+    `portable` is true for a catalogue that was fetched from a repository. A
+    bundle path there must stay inside the catalogue's own root, so a remote
+    catalogue cannot point the runner at an arbitrary directory on the
+    learner's machine.
+    """
+    document = load_yaml(text, where)
+    if not isinstance(document, dict):
+        raise ConfigError(
+            f"{where}: a catalogue must be a mapping with a 'tutorials' list"
+        )
+    version = document.get("catalog_version")
+    if version is None:
+        raise ConfigError(f"{where}: 'catalog_version' is missing")
+    if version not in KNOWN_CATALOG_VERSIONS:
+        raise ConfigError(
+            f"{where}: catalog_version is {version!r}, which this runner does "
+            f"not know. Known: "
+            f"{', '.join(str(v) for v in KNOWN_CATALOG_VERSIONS)}"
+        )
+    listed = document.get("tutorials")
+    if listed is None:
+        raise ConfigError(f"{where}: 'tutorials' is missing")
+    if not isinstance(listed, list):
+        raise ConfigError(f"{where}: 'tutorials' must be a list")
+
+    entries: list[dict] = []
+    skipped: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(listed):
+        label = f"tutorials[{index}]"
+        if not isinstance(raw, dict):
+            skipped.append((label, "the entry is not a mapping"))
+            continue
+        identifier = raw.get("id")
+        if identifier is not None:
+            label = f"{label} ({identifier})"
+        missing = [f for f in ENTRY_REQUIRED_FIELDS if raw.get(f) in (None, "", [])]
+        if missing:
+            skipped.append(
+                (label, f"the required field(s) {', '.join(missing)} are missing")
+            )
+            continue
+        identifier = str(identifier)
+        if identifier in seen:
+            skipped.append((label, f"the id {identifier!r} appears twice in this file"))
+            continue
+        source = raw.get("source")
+        if not isinstance(source, dict):
+            skipped.append((label, "'source' must be a mapping"))
+            continue
+        kind = str(source.get("type", ""))
+        if kind not in TUTORIAL_SOURCE_TYPES:
+            skipped.append(
+                (
+                    label,
+                    f"source type {kind!r} is not one of "
+                    f"{', '.join(TUTORIAL_SOURCE_TYPES)}",
+                )
+            )
+            continue
+        if kind not in TUTORIAL_SOURCE_IMPLEMENTED:
+            skipped.append(
+                (
+                    label,
+                    f"source type {kind!r} is declared but not implemented; a "
+                    f"bundle in a repository is reached by adding that "
+                    f"repository as a catalogue instead",
+                )
+            )
+            continue
+        path = source.get("path")
+        if not path:
+            skipped.append((label, "a local source requires the field 'path'"))
+            continue
+        path = str(path)
+        if portable and escapes(root, path):
+            skipped.append(
+                (
+                    label,
+                    f"the bundle path {path!r} leaves the catalogue's own "
+                    f"directory; a catalogue fetched from a repository may "
+                    f"only name bundles inside it",
+                )
+            )
+            continue
+        seen.add(identifier)
+        entries.append(dict(raw))
+    return entries, skipped
+
+
+def resolve_bundle_path(root: Path, path: str) -> str:
+    candidate = expand(path)
+    if candidate.is_absolute():
+        return os.path.normpath(str(candidate))
+    return os.path.normpath(str(root / candidate))
+
+
+# --------------------------------------------------------------------------
+# Fetching one catalogue
+# --------------------------------------------------------------------------
+
+
+def serve_from_cache(
+    spec: CatalogSpec, cache: Cache, failure: Failure, attempted: bool = True
+) -> CatalogResult:
+    """Fall back to the last successful copy, and say that it is cached.
+
+    A failed refresh is REMEMBERED in the cache metadata. Without that, a
+    later `status` or `resolve` - which fetch nothing - would read the last
+    successful copy, see a success timestamp, and report the catalogue as
+    current when the most recent attempt had in fact failed. That is exactly
+    the "never present stale results as current" rule, and it is broken by
+    omission rather than by a wrong message.
+    """
+    result = CatalogResult(spec=spec, failure=failure)
+    meta = cache.read_meta(spec.id)
+    if attempted and meta.get("fingerprint") == spec.source.fingerprint():
+        meta = dict(meta)
+        meta["stale"] = True
+        meta["last_attempt_at"] = now_stamp()
+        meta["last_attempt_kind"] = failure.kind
+        cache.write_meta(spec.id, meta)
+    if meta.get("fingerprint") != spec.source.fingerprint():
+        if meta:
+            result.failure = Failure(
+                failure.kind,
+                f"{failure.detail}\n"
+                f"    the cached copy was fetched from a different source "
+                f"({meta.get('origin', 'unknown')}), so it is not this "
+                f"catalogue and was not used",
+            )
+        return result
+    text = read_text(cache.document_path(spec.id))
+    if text is None:
+        return result
+    root = Path(meta.get("root", "")) if meta.get("root") else None
+    if root is None:
+        return result
+    try:
+        entries, skipped = parse_catalog(
+            text,
+            f"cached copy of {spec.id}",
+            root,
+            portable=spec.source.type == "git",
+        )
+    except (YamlError, ConfigError):
+        return result
+    result.state = "cached"
+    result.entries = entries
+    result.skipped = skipped
+    result.root = root
+    result.fetched_at = meta.get("fetched_at")
+    result.commit = meta.get("commit")
+    return result
+
+
+def record_success(
+    spec: CatalogSpec,
+    cache: Cache,
+    text: str,
+    root: Path,
+    commit: str | None,
+    entries: list[dict],
+) -> str:
+    stamp = now_stamp()
+    if spec.source.type != "bundled":
+        cache.store_document(spec.id, text)
+        cache.write_meta(
+            spec.id,
+            {
+                "id": spec.id,
+                "fingerprint": spec.source.fingerprint(),
+                "origin": spec.source.describe(),
+                "root": str(root),
+                "fetched_at": stamp,
+                "commit": commit,
+                "entry_count": len(entries),
+                "stale": False,
+                "last_attempt_at": stamp,
+                "last_attempt_kind": None,
+            },
+        )
+    return stamp
+
+
+def load_one(
+    spec: CatalogSpec, cache: Cache, fetch: bool, timeout: int
+) -> CatalogResult:
+    if spec.source.type == "bundled":
+        return load_bundled(spec)
+    if spec.source.type == "file":
+        return load_file(spec, cache)
+    return load_git(spec, cache, fetch, timeout)
+
+
+def load_bundled(spec: CatalogSpec) -> CatalogResult:
+    """The catalogue that ships with the plugin.
+
+    It is never cached: it is part of the installation, so a missing or
+    broken one is a packaging fault, and serving a cached copy over it would
+    hide exactly that.
+    """
+    result = CatalogResult(spec=spec)
+    path = BUNDLED_CATALOG
+    if not path.is_file():
+        result.failure = Failure(
+            "missing-file",
+            f"{path} is not there. The catalogue ships with the plugin, so "
+            f"this is a packaging problem, not a configuration problem",
+        )
+        return result
+    text = read_text(path)
+    if text is None:
+        result.failure = Failure("unreadable", f"{path} is not UTF-8 text")
+        return result
+    root = path.parent
+    try:
+        entries, skipped = parse_catalog(text, str(path), root, portable=False)
+    except (YamlError, ConfigError) as exc:
+        result.failure = Failure("malformed", str(exc))
+        return result
+    result.state = "current"
+    result.refreshed_now = True
+    result.entries = entries
+    result.skipped = skipped
+    result.root = root
+    result.fetched_at = now_stamp()
+    return result
+
+
+def load_file(spec: CatalogSpec, cache: Cache) -> CatalogResult:
+    assert spec.source.path is not None
+    path = expand(spec.source.path)
+    if not path.is_file():
+        return serve_from_cache(
+            spec,
+            cache,
+            Failure("missing-file", f"{path} is not a file"),
+        )
+    text = read_text(path)
+    if text is None:
+        return serve_from_cache(
+            spec, cache, Failure("unreadable", f"{path} is not UTF-8 text")
+        )
+    root = path.parent
+    try:
+        entries, skipped = parse_catalog(text, str(path), root, portable=False)
+    except (YamlError, ConfigError) as exc:
+        return serve_from_cache(spec, cache, Failure("malformed", str(exc)))
+    result = CatalogResult(spec=spec, state="current", refreshed_now=True)
+    result.entries = entries
+    result.skipped = skipped
+    result.root = root
+    result.fetched_at = record_success(spec, cache, text, root, None, entries)
+    return result
+
+
+def load_git(
+    spec: CatalogSpec, cache: Cache, fetch: bool, timeout: int
+) -> CatalogResult:
+    clone = cache.clone_path(spec.id)
+    if fetch:
+        if shutil.which("git") is None:
+            return serve_from_cache(
+                spec,
+                cache,
+                Failure("no-git", "`git` was not found on the PATH"),
+            )
+        meta = cache.read_meta(spec.id)
+        if meta and meta.get("fingerprint") != spec.source.fingerprint():
+            # The configured source changed under this id. The old clone
+            # answers to a different url or ref, so it is not a fallback for
+            # this catalogue and must not be fetched into.
+            shutil.rmtree(clone, ignore_errors=True)
+        ok, failure = refresh_clone(spec, clone, timeout)
+        if not ok:
+            assert failure is not None
+            return serve_from_cache(spec, cache, failure)
+
+    if not (clone / ".git").exists():
+        return serve_from_cache(
+            spec,
+            cache,
+            Failure(
+                "missing-file",
+                f"there is no clone at {clone} and this run did not fetch",
+            ),
+            attempted=fetch,
+        )
+
+    relative = spec.source.path or "catalog.yaml"
+    document = clone / relative
+    if not document.is_file():
+        listing = sorted(p.name for p in clone.iterdir() if p.name != ".git")[:20]
+        return serve_from_cache(
+            spec,
+            cache,
+            Failure(
+                "no-catalogue",
+                f"the repository was fetched, but it holds no file at "
+                f"{relative!r}. Its top level holds: "
+                f"{', '.join(listing) if listing else '(nothing)'}",
+            ),
+        )
+    text = read_text(document)
+    if text is None:
+        return serve_from_cache(
+            spec, cache, Failure("unreadable", f"{relative} is not UTF-8 text")
+        )
+    root = document.parent
+    try:
+        entries, skipped = parse_catalog(
+            text, f"{spec.id}:{relative}", root, portable=True
+        )
+    except (YamlError, ConfigError) as exc:
+        return serve_from_cache(spec, cache, Failure("malformed", str(exc)))
+
+    commit = clone_commit(clone, timeout)
+    result = CatalogResult(spec=spec, state="current", refreshed_now=fetch)
+    result.entries = entries
+    result.skipped = skipped
+    result.root = root
+    result.commit = commit
+    if fetch:
+        result.fetched_at = record_success(spec, cache, text, root, commit, entries)
+    else:
+        meta = cache.read_meta(spec.id)
+        result.fetched_at = meta.get("fetched_at")
+        result.state = (
+            "current"
+            if result.fetched_at and not meta.get("stale")
+            else "cached"
+        )
+        if meta.get("stale"):
+            kind = str(meta.get("last_attempt_kind") or "unclassified")
+            result.failure = Failure(
+                kind if kind in FAILURE_KINDS else "unclassified",
+                f"the last refresh, at {meta.get('last_attempt_at')}, failed; "
+                f"this run fetched nothing, so the clone is whatever that "
+                f"failure left behind",
+            )
+    return result
+
+
+# --------------------------------------------------------------------------
+# Merge
+# --------------------------------------------------------------------------
+
+
+def merge(results: list[CatalogResult]) -> tuple[list[MergedEntry], list[dict]]:
+    """First match wins, by tutorial id, in configuration order.
+
+    A shadowed entry is never dropped silently: the winner records which
+    catalogues also carry that id, so the runner can say which catalogue
+    supplied the tutorial it is about to offer.
+    """
+    merged: dict[str, MergedEntry] = {}
+    order: list[str] = []
+    shadowed: list[dict] = []
+    for result in results:
+        if result.state == "unavailable":
+            continue
+        assert result.root is not None
+        for entry in result.entries:
+            identifier = str(entry["id"])
+            path = str(entry["source"]["path"])
+            resolved = resolve_bundle_path(result.root, path)
+            if identifier in merged:
+                winner = merged[identifier]
+                winner.shadowed.append((result.spec.id, result.spec.source.describe()))
+                shadowed.append(
+                    {
+                        "id": identifier,
+                        "catalog": result.spec.id,
+                        "origin": result.spec.source.describe(),
+                        "resolved_path": resolved,
+                        "title": entry.get("title"),
+                        "shadowed_by": winner.catalog_id,
+                        "winning_path": winner.resolved_path,
+                    }
+                )
+                continue
+            merged[identifier] = MergedEntry(
+                entry=entry,
+                catalog_id=result.spec.id,
+                freshness="current" if result.state == "current" else "cached",
+                resolved_path=resolved,
+                origin=result.spec.source.describe(),
+            )
+            order.append(identifier)
+    return [merged[i] for i in order], shadowed
+
+
+# --------------------------------------------------------------------------
+# Rendering
+# --------------------------------------------------------------------------
+
+STATE_LABEL = {
+    "current": "current",
+    "cached": "CACHED",
+    "unavailable": "UNAVAILABLE",
+}
+
+
+def _join(value: Any) -> str:
+    if isinstance(value, list):
+        return ", ".join(str(v) for v in value)
+    return str(value)
+
+
+def render_catalogs(
+    results: list[CatalogResult], stream, refreshed: bool
+) -> None:
+    print("catalogues:", file=stream)
+    for result in results:
+        spec = result.spec
+        head = (
+            f"  [{STATE_LABEL[result.state]}] {spec.id}  ({spec.source.type}) "
+            f"{spec.source.describe()}"
+        )
+        print(head, file=stream)
+        if result.state == "current":
+            when = "refreshed just now" if result.refreshed_now else "read just now"
+            if not refreshed and spec.source.type == "git":
+                when = (
+                    f"not refreshed in this run; last refreshed "
+                    f"{result.fetched_at} ({describe_age(result.fetched_at)})"
+                )
+            print(
+                f"      {len(result.entries)} entr"
+                f"{'y' if len(result.entries) == 1 else 'ies'}; {when}",
+                file=stream,
+            )
+        elif result.state == "cached":
+            print(
+                f"      {len(result.entries)} entr"
+                f"{'y' if len(result.entries) == 1 else 'ies'}, SERVED FROM "
+                f"CACHE; last refreshed {result.fetched_at} "
+                f"({describe_age(result.fetched_at)})",
+                file=stream,
+            )
+        else:
+            print("      nothing could be served for this catalogue", file=stream)
+        if result.failure is not None:
+            print(
+                f"      the refresh failed: {result.failure.summary}",
+                file=stream,
+            )
+            for line in result.failure.detail.splitlines():
+                print(f"      | {line}", file=stream)
+            print(f"      repair: {result.failure.repair}", file=stream)
+        if result.commit and result.state != "unavailable":
+            print(f"      commit: {result.commit}", file=stream)
+        for where, reason in result.skipped:
+            print(f"      skipped {where}: {reason}", file=stream)
+    print("", file=stream)
+
+
+def render_warnings(results: list[CatalogResult], stream) -> None:
+    cached = [r for r in results if r.state == "cached"]
+    gone = [r for r in results if r.state == "unavailable"]
+    for result in cached:
+        print(
+            f"WARNING - {result.spec.id} was served from cache. Its entries "
+            f"are as of {result.fetched_at} "
+            f"({describe_age(result.fetched_at)}), not current. Say so when "
+            f"you offer them.",
+            file=stream,
+        )
+    for result in gone:
+        print(
+            f"WARNING - {result.spec.id} could not be served at all. Any "
+            f"tutorial it holds is missing from this list. Say so rather "
+            f"than reporting that nothing matched.",
+            file=stream,
+        )
+    if cached or gone:
+        print("", file=stream)
+
+
+def render_entries(
+    entries: list[MergedEntry], shadowed: list[dict], stream
+) -> None:
+    count = len(entries)
+    print(
+        f"tutorials ({count}, first match wins, in configuration order):",
+        file=stream,
+    )
+    if not entries:
+        print("  (none)", file=stream)
+    for item in entries:
+        entry = item.entry
+        print("", file=stream)
+        print(
+            f"  {item.id}  [{item.freshness}]  from the {item.catalog_id} "
+            f"catalogue",
+            file=stream,
+        )
+        for label, key in (
+            ("title", "title"),
+            ("description", "description"),
+            ("subjects", "subjects"),
+            ("aliases", "aliases"),
+            ("level", "level"),
+            ("style", "style"),
+            ("scope", "scope"),
+            ("workspace_kind", "workspace_kind"),
+        ):
+            if key in entry and entry[key] not in (None, "", []):
+                text = " ".join(_join(entry[key]).split())
+                print(f"      {label + ':':<16}{text}", file=stream)
+        for catalog_id, origin in item.shadowed:
+            print(
+                f"      OVERRIDES:      the {catalog_id} catalogue also "
+                f"carries {item.id}; this one comes from {item.catalog_id} "
+                f"({item.origin}) and the {catalog_id} entry ({origin}) is "
+                f"shadowed. Say this when you offer it.",
+                file=stream,
+            )
+    print("", file=stream)
+    if shadowed:
+        print("shadowed entries (not offered):", file=stream)
+        for item in shadowed:
+            print(
+                f"  {item['id']} from {item['catalog']} - the "
+                f"{item['shadowed_by']} catalogue supplies this id instead",
+                file=stream,
+            )
+        print("", file=stream)
+
+
+def render_header(
+    command: str, config: Path, note: str | None, cache: Cache, stream
+) -> None:
+    print(f"tutorAIl catalogues - {command}", file=stream)
+    print(f"config:      {config}", file=stream)
+    if note:
+        print(f"             {note}", file=stream)
+    print(f"cache:       {cache.catalogs}", file=stream)
+    print(f"yaml reader: {YAML_READER}", file=stream)
+    print("", file=stream)
+
+
+def render_implied(specs: list[CatalogSpec], stream) -> None:
+    print(
+        "The implied default is equivalent to this file. Write it before you "
+        "add a catalogue, so nothing already in use is lost:",
+        file=stream,
+    )
+    print("", file=stream)
+    print("  catalogs_version: 1", file=stream)
+    print("  catalogs:", file=stream)
+    for spec in specs:
+        print(f"    - id: {spec.id}", file=stream)
+        if spec.source.type == "bundled":
+            print("      source: { type: bundled }", file=stream)
+        else:
+            print(
+                f"      source: {{ type: file, path: {spec.source.path} }}",
+                file=stream,
+            )
+    print("", file=stream)
+
+
+# --------------------------------------------------------------------------
+# Commands
+# --------------------------------------------------------------------------
+
+
+def exit_code_for(results: list[CatalogResult], entries: list[MergedEntry]) -> int:
+    if not entries:
+        return 3
+    if any(r.state != "current" for r in results):
+        return 1
+    return 0
+
+
+@dataclass
+class Run:
+    specs: list[CatalogSpec]
+    note: str | None
+    results: list[CatalogResult]
+    entries: list[MergedEntry]
+    shadowed: list[dict]
+
+
+def gather(
+    config: Path, cache: Cache, fetch: bool, timeout: int
+) -> Run:
+    specs, note = load_config(config)
+    results = [load_one(spec, cache, fetch, timeout) for spec in specs]
+    entries, shadowed = merge(results)
+    return Run(specs, note, results, entries, shadowed)
+
+
+def command_discover(args, stream) -> int:
+    cache = Cache(expand(args.cache_dir))
+    config = expand(args.config)
+    run = gather(config, cache, not args.offline, args.timeout)
+    code = exit_code_for(run.results, run.entries)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "command": "discover",
+                    "config": str(config),
+                    "implied_default": run.note is not None,
+                    "cache_dir": str(cache.catalogs),
+                    "offline": bool(args.offline),
+                    "catalogs": [r.as_dict() for r in run.results],
+                    "tutorials": [e.as_dict() for e in run.entries],
+                    "shadowed": run.shadowed,
+                    "exit_code": code,
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            file=stream,
+        )
+        return code
+    render_header("discover", config, run.note, cache, stream)
+    render_catalogs(run.results, stream, refreshed=not args.offline)
+    render_warnings(run.results, stream)
+    render_entries(run.entries, run.shadowed, stream)
+    print(
+        "Discovery read catalogue metadata only. Nothing under a bundle path "
+        "was opened. Use `resolve <id>` after the learner has chosen.",
+        file=stream,
+    )
+    return code
+
+
+def command_status(args, stream) -> int:
+    cache = Cache(expand(args.cache_dir))
+    config = expand(args.config)
+    run = gather(config, cache, False, args.timeout)
+    code = exit_code_for(run.results, run.entries)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "command": "status",
+                    "config": str(config),
+                    "implied_default": run.note is not None,
+                    "cache_dir": str(cache.catalogs),
+                    "catalogs": [r.as_dict() for r in run.results],
+                    "exit_code": code,
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            file=stream,
+        )
+        return code
+    render_header("status", config, run.note, cache, stream)
+    render_catalogs(run.results, stream, refreshed=False)
+    render_warnings(run.results, stream)
+    if run.note is not None:
+        render_implied(run.specs, stream)
+    print(
+        "Nothing was fetched. Run `discover` to refresh, which is what a "
+        "discovery request does.",
+        file=stream,
+    )
+    return code
+
+
+def command_resolve(args, stream) -> int:
+    cache = Cache(expand(args.cache_dir))
+    config = expand(args.config)
+    run = gather(config, cache, False, args.timeout)
+    wanted = args.id
+    match = next((e for e in run.entries if e.id == wanted), None)
+    if match is None:
+        available = ", ".join(e.id for e in run.entries) or "(none)"
+        payload = {
+            "command": "resolve",
+            "id": wanted,
+            "found": False,
+            "available": [e.id for e in run.entries],
+            "exit_code": 3,
+        }
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True), file=stream)
+        else:
+            print(f"tutorAIl catalogues - resolve {wanted}", file=stream)
+            print("", file=stream)
+            print(
+                f"No catalogue supplies {wanted!r}. Available: {available}",
+                file=stream,
+            )
+            render_warnings(run.results, stream)
+        return 3
+
+    bundle = Path(match.resolved_path)
+    present = bundle.is_dir()
+    manifest = (bundle / "tutorial.yaml").is_file() if present else False
+    template = (bundle / "STATE.template.md").is_file() if present else False
+    problems: list[str] = []
+    if not present:
+        problems.append(f"{bundle} is not a directory")
+    else:
+        if not manifest:
+            problems.append(f"{bundle}/tutorial.yaml is missing")
+        if not template:
+            problems.append(f"{bundle}/STATE.template.md is missing")
+    code = 0 if not problems else 1
+
+    if args.json:
+        payload = match.as_dict()
+        payload.update(
+            {
+                "command": "resolve",
+                "found": True,
+                "bundle_present": present,
+                "problems": problems,
+                "exit_code": code,
+            }
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stream)
+        return code
+
+    print(f"tutorAIl catalogues - resolve {wanted}", file=stream)
+    print("", file=stream)
+    print(f"  id:             {match.id}", file=stream)
+    print(f"  title:          {match.entry.get('title')}", file=stream)
+    print(f"  catalogue:      {match.catalog_id} ({match.origin})", file=stream)
+    print(f"  freshness:      {match.freshness}", file=stream)
+    print(f"  bundle:         {match.resolved_path}", file=stream)
+    for catalog_id, origin in match.shadowed:
+        print(
+            f"  OVERRIDES:      the {catalog_id} catalogue ({origin}) also "
+            f"carries {match.id}; it is shadowed by this one",
+            file=stream,
+        )
+    print("", file=stream)
+    if problems:
+        print("The bundle is not usable:", file=stream)
+        for problem in problems:
+            print(f"  - {problem}", file=stream)
+        if match.freshness == "cached":
+            print(
+                "  This catalogue was served from cache, so the entry may "
+                "name a bundle that the last successful fetch did not carry.",
+                file=stream,
+            )
+    else:
+        print(
+            "The bundle carries tutorial.yaml and STATE.template.md. "
+            "Materialization may open it now.",
+            file=stream,
+        )
+    return code
+
+
+# --------------------------------------------------------------------------
+# Driver
+# --------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="catalogs.py",
+        description=(
+            "Fetch, cache and merge the learner's tutorial catalogues."
+        ),
+    )
+    parser.add_argument("--config", default=DEFAULT_CONFIG)
+    parser.add_argument("--cache-dir", default=DEFAULT_CACHE_DIR)
+    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT)
+    parser.add_argument("--json", action="store_true")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    discover = sub.add_parser(
+        "discover", help="refresh every catalogue and print the merged catalogue"
+    )
+    discover.add_argument(
+        "--offline",
+        action="store_true",
+        help="serve what is on disk; fetch nothing",
+    )
+    discover.set_defaults(run=command_discover)
+
+    status = sub.add_parser(
+        "status", help="report each catalogue from disk, without fetching"
+    )
+    status.set_defaults(run=command_status, offline=True)
+
+    resolve = sub.add_parser(
+        "resolve", help="print one entry and the bundle directory it names"
+    )
+    resolve.add_argument("id", help="the tutorial id the learner chose")
+    resolve.set_defaults(run=command_resolve, offline=True)
+    return parser
+
+
+def main(argv: list[str] | None = None, stream=None) -> int:
+    stream = stream if stream is not None else sys.stdout
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.timeout <= 0:
+        print("error: --timeout must be a positive number of seconds", file=sys.stderr)
+        return 2
+    try:
+        return args.run(args, stream)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        print(
+            "The catalogue of catalogues decides every other step, so nothing "
+            "was fetched. Correct the file, or remove it to fall back to the "
+            "implied default.",
+            file=sys.stderr,
+        )
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

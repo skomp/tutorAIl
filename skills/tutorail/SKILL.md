@@ -65,13 +65,25 @@ the new one in a different workspace, or replacing the instance. Never overwrite
 existing instance on your own judgement.
 
 **No instance exists** — discover. Load `references/catalogue-format.md` now; it governs
-where catalogues live, how entries are matched, and how choices are presented. The rule
-that matters most: read catalogue metadata only. Do not read anything under a candidate's
-`source.path` until the learner has chosen.
+where catalogues live, how entries are matched, and how choices are presented. A learner
+may configure many catalogues, and any of them may live in a Git repository, so run
+`scripts/catalogs.py discover` once at the start of a discovery request and act on what
+it prints. It refreshes, merges by first-match-wins precedence, and reports each source.
 
-After the learner chooses, materialize the instance. Load
-`references/state-lifecycle.md` before you create any file — it defines the copy, the
-`STATE.template.md`-to-`STATE.md` conversion, and the instance stamp.
+Three things it tells you that you must pass on: which catalogue supplied an entry and
+which were shadowed; which catalogues were served from cache, and how stale; and which
+failed, by kind — an unreachable host, a repository you have no access to, and a
+repository with no catalogue file are three problems with three repairs. One failed
+catalogue never fails discovery.
+
+The rule that matters most is unchanged: read catalogue metadata only. Do not open
+anything under a candidate's bundle path until the learner has chosen.
+
+After the learner chooses, `scripts/catalogs.py resolve <id>` gives the bundle
+directory — that is the first moment anything under a bundle path may be opened. Then
+materialize the instance. Load `references/state-lifecycle.md` before you create any
+file — it defines the copy, the `STATE.template.md`-to-`STATE.md` conversion, and the
+instance stamp.
 
 ## Step 3 — teach
 
@@ -173,13 +185,16 @@ not before.
 
 | Load this | When |
 |---|---|
-| `references/catalogue-format.md` | no active instance was found and you must find a tutorial to offer; also when the learner asks what tutorials are available |
+| `references/catalogue-format.md` | no active instance was found and you must find a tutorial to offer; the learner asks what tutorials are available; the learner wants to add a catalogue or register a course; a catalogue failed to refresh |
 | `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; you need to advance `active_lesson`; you are about to write a generated lesson |
 | `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson |
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
-`scripts/validate_bundle.py` is an authoring-time tool. Running a tutorial never invokes
-it. Suggest it only when someone is writing or fixing a bundle.
+Two scripts, with opposite lifetimes. `scripts/catalogs.py` is a runtime tool: discovery
+runs it, a resume never does, and it is the only script a learner's session invokes.
+`scripts/validate_bundle.py` is an authoring-time tool; running a tutorial never invokes
+it. Suggest the validator only when someone is writing or fixing a bundle or a
+catalogue.
 
 ## When something is wrong
 
@@ -195,8 +210,13 @@ it. Suggest it only when someone is writing or fixing a bundle.
   Load `references/state-lifecycle.md` and complete it before teaching.
 - **A learner-owned file changed in a way you cannot account for** — say so and ask. Do
   not revert it, stash it, or discard it. It is almost certainly the learner working.
-- **A `source.type` the runner does not implement** (`git`, `archive`) — fail explicitly
-  and say so. Do not substitute a different source.
+- **A bundle `source.type` the runner does not implement** (`git`, `archive`) — fail
+  explicitly and say so. Do not substitute a different source. A course that lives in a
+  repository is reached by adding that repository as a **catalogue**, which is
+  supported; a bundle source that names a repository directly is not.
+- **A catalogue that did not refresh** — say which one, say which failure it was, and say
+  that its entries are cached and how old they are. Never let it read as "nothing
+  matched".
 
 ## Tone
 
