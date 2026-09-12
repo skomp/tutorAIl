@@ -34,7 +34,10 @@ Exit codes:
 A run may also print WARNINGS. A warning never changes the exit code and
 never makes a bundle invalid: it is for a rule that is real but whose only
 available evidence is circumstantial, where reporting a finding would fail
-bundles that are correct. Checks 23 and 25 are where they come from.
+bundles that are correct. Checks 23 and 25 are where they come from in bundle
+mode. Catalogue check 3 warns for a different and stronger reason: a
+catalogue is data a newer runner may extend, so an unrecognised entry field
+is named and the catalogue still passes.
 
 Stdlib only. Python 3.11. PyYAML is used when importable; otherwise a
 restricted reader parses the deliberately shallow subset the format uses and
@@ -3634,7 +3637,8 @@ def validate(target: Path, mode: str) -> Report:
 CATALOG_CHECKS: dict[int, str] = {
     1: "the file parses, is a mapping, and catalog_version is known",
     2: "tutorials is a non-empty list of mappings",
-    3: "every entry carries the required fields, with the right shapes",
+    3: "every entry carries the required fields, with the right shapes; "
+    "an unrecognised field WARNS",
     4: "every id is unique in the file and matches [a-z0-9-]+",
     5: "every source names a known, implemented type with its required fields",
     6: "every bundle path resolves to a directory holding tutorial.yaml and "
@@ -3659,6 +3663,38 @@ CATALOG_TEXT_FIELDS = ("title", "description", "level", "scope", "workspace_kind
 # bundle. Named for the count it holds, and NOT `optional_lessons`, which is
 # a mapping of lesson path to offer metadata in a bundle's tutorial.yaml.
 CATALOG_COUNT_FIELDS = ("optional_lesson_count",)
+# Every entry field catalogue-format.md section 5 defines, required and
+# optional together. Check 3 WARNS about a key that is not in here.
+#
+# This is a list of FIELD NAMES, and it is matched against the keys of the
+# PARSED entry mapping. It never searches the catalogue's text, and that is
+# not a style preference - see the docstring on unknown_entry_fields().
+CATALOG_KNOWN_ENTRY_FIELDS = (
+    "aliases",
+    "assumes",
+    "covers",
+    "description",
+    "id",
+    "level",
+    "optional_lesson_count",
+    "recommended_follow_ups",
+    "recommended_previous_bundles",
+    "scope",
+    "source",
+    "style",
+    "subjects",
+    "title",
+    "workspace_kind",
+)
+# How far from a known field a key may be and still be called a near miss.
+#
+# Two, because plain Levenshtein scores a transposed pair of characters as
+# two edits and a transposition is the commonest typo there is. A shorter
+# field gets one: at two edits from `id` sits most of the two-character
+# strings there are, and a suggestion that fits everything says nothing.
+CATALOG_NEAR_MISS_DISTANCE = 2
+CATALOG_NEAR_MISS_SHORT_FIELD = 5
+
 CATALOG_ENTRY_SOURCE_TYPES = ("local", "git", "archive")
 CATALOG_ENTRY_SOURCE_IMPLEMENTED = ("local",)
 KNOWN_CATALOG_VERSIONS = (1,)
@@ -3685,10 +3721,111 @@ CATALOG_LIMITATIONS = """What a pass does and does not mean
   catalog.yaml that ships inside a bundles repository, where every bundle
   must travel with the catalogue.
 
+  Check 3 reports an unrecognised entry field as a WARNING and never as a
+  finding, so the catalogue still passes with one. That is deliberate: a
+  catalogue is data a newer runner may extend, and an older reader must
+  degrade rather than refuse - bundle-format.md section 13, applied to the
+  catalogue. So the warning is the only report you will get about a
+  misspelled field, and it is worth reading: a runner ignores a field name
+  it does not know, so a misspelling costs the entry that field silently and
+  the course then advertises nothing by it.
+
+  That part of check 3 reads the KEYS of each parsed entry. A field name
+  written in a comment, or inside a description, is not a key and is never
+  reported - a generated catalogue names `optional_lesson_count` in its
+  header comment, and that comment is not a field.
+
   Nothing here checks a catalogue entry against the bundle's own
   tutorial.yaml. The two are allowed to differ - the bundle is authoritative
   once resolved - and reporting every difference would reject valid
   catalogues whose entries are deliberately shorter."""
+
+
+def _edit_distance(left: str, right: str) -> int:
+    """Levenshtein distance, iterative, two rows.
+
+    Plain Levenshtein and not Damerau-Levenshtein: a transposition costs two
+    here, which CATALOG_NEAR_MISS_DISTANCE is set to accept. Adding the
+    transposition case would let the threshold drop to one, and one edit
+    from a five-character field is a large neighbourhood - `level` would
+    then suggest itself for `levels`, `lever` and `bevel` alike.
+    """
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+    previous = list(range(len(right) + 1))
+    for i, a in enumerate(left, start=1):
+        current = [i]
+        for j, b in enumerate(right, start=1):
+            current.append(
+                min(
+                    previous[j] + 1,  # delete
+                    current[j - 1] + 1,  # insert
+                    previous[j - 1] + (a != b),  # substitute
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
+def near_misses(name: str, known: tuple[str, ...]) -> list[str]:
+    """The known fields `name` is closest to, or [] when it is close to none.
+
+    Returns every field at the SMALLEST qualifying distance rather than one
+    arbitrary winner: a tie means the evidence does not pick between them,
+    and naming one would be a guess presented as a suggestion.
+    """
+    best: list[str] = []
+    best_distance = CATALOG_NEAR_MISS_DISTANCE + 1
+    for candidate in known:
+        budget = (
+            1
+            if len(candidate) < CATALOG_NEAR_MISS_SHORT_FIELD
+            else CATALOG_NEAR_MISS_DISTANCE
+        )
+        distance = _edit_distance(name, candidate)
+        if distance > budget:
+            continue
+        if distance < best_distance:
+            best_distance, best = distance, [candidate]
+        elif distance == best_distance:
+            best.append(candidate)
+    return sorted(best)
+
+
+def unknown_entry_fields(entry: dict) -> list[str]:
+    """The keys of one parsed catalogue entry that section 5 does not define.
+
+    READ THE KEYS OF THE PARSED MAPPING. Never search the catalogue's text
+    for a field name, and this is the constraint the whole check is built
+    around rather than an implementation detail.
+
+    A catalogue carries comments, and this project's own generator writes a
+    header comment that NAMES `optional_lesson_count` into every catalogue
+    it produces. A text search therefore counts that comment as though it
+    were a field. The arithmetic is worse than one miscount: the loose
+    count is (entries carrying the field) + 1 for the comment, so it equals
+    the entry count EXACTLY when precisely one entry is missing the field -
+    the single case such a check exists to catch is the single case it
+    passes. Measured on the real catalogue in skomp/tutorail-bundles,
+    which has 5 entries and a header comment naming the field:
+
+                                                   as it   with one field
+                                                   ships   removed
+        entries                                        5         5
+        loose    grep -c optional_lesson_count          6         5  <- reads
+                                                                        complete
+        anchored grep -c '^    optional_lesson_count: ' 5         4  <- reports
+                                                                        the gap
+
+    A key has a position in the parsed structure. A comment and a
+    description string do not, so neither can reach this function.
+    """
+    known = set(CATALOG_KNOWN_ENTRY_FIELDS)
+    return sorted((str(key) for key in entry if str(key) not in known), key=str)
 
 
 def catalog_root(target: Path) -> Path:
@@ -3700,22 +3837,31 @@ def catalog_root(target: Path) -> Path:
     the catalogue on the command line.
 
     `target.parent` does not. `Path("catalog.yaml").parent` is `Path(".")`,
-    and `catalogs.escapes()` decides containment on the strings alone: it
-    asks whether `normpath(root + os.sep + relative)` is `str(root)` or
-    starts with `str(root) + os.sep`. With a root of `"."` the join
-    collapses - `normpath("./durable-event-broker")` is
+    and `catalogs.escapes()` USED to decide containment by comparing
+    strings: it asked whether `normpath(root + os.sep + relative)` was
+    `str(root)`, or started with `str(root) + os.sep`. With a root of `"."`
+    the join collapsed - `normpath("./durable-event-broker")` is
     `"durable-event-broker"` - so EVERY contained path looked like an
     escape and check 7 reported every entry in a valid catalogue. The two
     spellings that carry a directory component took the other branch and
     passed, which is how one file both passed and failed (issue #14).
 
-    `os.path.abspath` normalises and anchors without touching the
-    filesystem, so `catalog.yaml`, `./catalog.yaml`, `../dir/catalog.yaml`
-    and an absolute path all reduce to one root, and check 7 keeps the
-    purely textual predicate the runtime uses. Symlinks are deliberately
-    NOT resolved: `escapes()` is documented as a string test, because
-    discovery must not stat anything under a bundle path, and resolving
-    only one side of the comparison would be worse than resolving neither.
+    That predicate is gone (issue #16). `escapes()` is now STRUCTURAL: a
+    path escapes when it is absolute, when it starts with `~`, or when it
+    keeps a `..` component after normalisation. The verdict no longer
+    depends on the root at all, so check 7 can no longer be broken by how
+    the root is spelled.
+
+    `catalog_root()` stays because CHECK 6 still resolves every bundle
+    directory against it, and that question is unchanged: a relative
+    bundle path must name one directory however the caller spelled the
+    catalogue. `os.path.abspath` normalises and anchors without touching
+    the filesystem, so `catalog.yaml`, `./catalog.yaml`,
+    `../dir/catalog.yaml` and an absolute path all reduce to one root.
+    Symlinks are deliberately NOT resolved: discovery must not stat
+    anything under a bundle path, so the runtime decides on the strings,
+    and an authoring-time root that resolved them would ask check 6 about
+    a directory the runner never looks in.
     """
     return Path(os.path.abspath(target)).parent
 
@@ -3862,7 +4008,57 @@ def validate_catalog(target: Path, portable: bool) -> Report:
                 f"workspace_kind is {kind!r}, which is not one of "
                 f"{', '.join(WORKSPACE_KINDS)}",
             )
-    report.ran(3, f"{len(entries)} entr{'y' if len(entries) == 1 else 'ies'}")
+    # -- still check 3: a field this document does not define.
+    #
+    # A WARNING and never a finding, and that is the whole design. A
+    # catalogue is data a NEWER runner may extend, and bundle-format.md
+    # section 13 settled what an older reader does with a key it has never
+    # heard of: it degrades, it does not refuse. A validator that rejected
+    # an unrecognised key would turn a valid catalogue into an unusable one
+    # the day the format grows - the one failure the additive-key policy
+    # exists to prevent. So the key is named, loudly, and the catalogue
+    # still passes: `exit_code()` never consults `warnings`, so this can
+    # never stop a course.
+    #
+    # It is part of check 3 rather than a check of its own because check 3
+    # IS the question about an entry's fields, and because a catalogue
+    # check that can only ever warn would be a number in the table that can
+    # never change the verdict. Bundle check 23 is the precedent: it
+    # reports shape errors as findings and alias collisions as warnings.
+    unknown_fields = 0
+    for where, item in entries:
+        for name in unknown_entry_fields(item):
+            unknown_fields += 1
+            suggestions = near_misses(name, CATALOG_KNOWN_ENTRY_FIELDS)
+            if suggestions:
+                report.warn(
+                    3,
+                    where,
+                    f"unknown field {name!r}, which is a near miss for "
+                    f"{' or '.join(repr(s) for s in suggestions)}. A runner "
+                    f"reads an entry by field name and ignores a name it "
+                    f"does not know, so a misspelling is silently absent "
+                    f"rather than reported: the entry advertises nothing by "
+                    f"it. Correct the spelling. This is a WARNING and the "
+                    f"catalogue is still usable",
+                )
+            else:
+                report.warn(
+                    3,
+                    where,
+                    f"unknown field {name!r}. A runner ignores a field name "
+                    f"it does not know, so this entry advertises nothing by "
+                    f"it. That is correct for a field a newer catalogue "
+                    f"adds, which is why this is a WARNING and the "
+                    f"catalogue is still usable. The fields this document "
+                    f"defines are "
+                    f"{', '.join(CATALOG_KNOWN_ENTRY_FIELDS)}",
+                )
+    report.ran(
+        3,
+        f"{len(entries)} entr{'y' if len(entries) == 1 else 'ies'}, "
+        f"{unknown_fields} unknown field(s)",
+    )
 
     # -- check 4: identity
     seen: dict[str, str] = {}

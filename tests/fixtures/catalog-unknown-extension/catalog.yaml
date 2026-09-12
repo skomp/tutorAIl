@@ -1,0 +1,45 @@
+# A catalogue carrying a field this validator has never heard of.
+#
+# `estimated_hours` is not a near miss for anything section 5 defines. It is
+# what a NEWER catalogue looks like to an OLDER validator, and the whole
+# reason check 8 warns instead of rejecting: a validator that refused an
+# unrecognised key would turn a valid catalogue into an unusable one the day
+# the format grows. bundle-format.md section 13 settled that shape for
+# bundles, and a catalogue is the same argument.
+#
+# The second entry carries no unknown field, so this fixture also shows the
+# check reporting about ONE entry rather than about the file.
+
+catalog_version: 1
+tutorials:
+  - id: rust-cli-basics
+    title: Build a Command-Line Tool in Rust
+    description: >
+      A short project-driven course that builds a small command-line tool.
+    subjects: [rust, command-line-tools]
+    aliases: [cli, argument-parsing]
+    level: beginner
+    style: [project-driven]
+    scope: "3 lessons; an afternoon"
+    optional_lesson_count: 3
+    estimated_hours: 40
+    workspace_kind: new-repository
+    source:
+      type: local
+      path: ../rust-cli-basics
+
+  - id: durable-event-broker
+    title: Build a Durable Event Broker
+    description: >
+      Build a single-node event broker with a retained log, topic partitions
+      and offsets.
+    subjects: [go, event-streaming]
+    aliases: [message-broker, event-log]
+    level: intermediate
+    style: [project-driven, long-form]
+    scope: "15 lessons; a few weeks"
+    optional_lesson_count: 0
+    workspace_kind: new-repository
+    source:
+      type: local
+      path: ../durable-event-broker

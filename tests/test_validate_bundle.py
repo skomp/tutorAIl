@@ -4161,9 +4161,371 @@ def test_catalog_root_normalises_every_spelling() -> None:
         )
         record(
             all(r.is_absolute() for r in roots.values()),
-            "and it is absolute, which is what makes the string test meaningful",
+            "and it is absolute, which is what makes check 6's resolution of "
+            "a relative bundle path mean one directory",
             f"got {roots}",
         )
+
+
+# --------------------------------------------------------------------------
+# Catalogue mode, check 3: an entry field this document does not define
+# --------------------------------------------------------------------------
+#
+# Issue #18. A catalogue entry could carry ANY key and nothing reported it,
+# so `optional_lesson_cnt: 3` validated clean, the runner never saw it, the
+# course advertised no optional lessons, and no tool told anybody.
+#
+# It is part of check 3, which is already the question about an entry's
+# fields, and not a check of its own. A catalogue check that could only ever
+# warn would be a number in the table that can never change the verdict, and
+# `test_catalogs.test_catalog_check_coverage` requires every number there to
+# be demonstrated producing a FINDING - a real oracle worth not weakening.
+# Bundle check 23 is the precedent for one check doing both: shape errors as
+# findings, alias collisions as warnings.
+#
+# The report WARNS and never rejects, and that is the part worth defending.
+# bundle-format.md section 13 settled the shape for bundles: a newer writer
+# may add a key and an OLDER reader degrades rather than refusing. A
+# catalogue is the same argument - it is data a newer runner may extend - so
+# a validator that rejected an unrecognised key would turn a valid catalogue
+# into an unusable one the day the format grows.
+#
+# The second constraint comes from the issue's comment, and it is the reason
+# these cases are written against PARSED KEYS. A generated catalogue's header
+# comment names `optional_lesson_count`, so `grep -c optional_lesson_count`
+# counts (entries carrying the field) + 1. That equals the entry count
+# EXACTLY when precisely one entry is missing the field - the single case
+# such a check exists to catch is the single case it passes.
+
+# The phrase every unrecognised-field report opens with. Shared between the
+# assertions rather than retyped, so a reworded message cannot leave a test
+# searching for a string nothing produces and passing on the empty result.
+UNKNOWN_FIELD_PHRASE = "unknown field "
+
+UNKNOWN_FIXTURES = {
+    "misspelling": FIXTURES / "catalog-unknown-misspelling" / "catalog.yaml",
+    "extension": FIXTURES / "catalog-unknown-extension" / "catalog.yaml",
+    "comment": FIXTURES / "catalog-unknown-comment" / "catalog.yaml",
+}
+
+REAL_CATALOGUE = Path.home() / "src/github.com/skomp/tutorail-bundles/catalog.yaml"
+
+
+def _warnings_for(report, check: int) -> list:
+    return [w for w in report.warnings if w.check == check]
+
+
+def test_near_miss_distance() -> None:
+    """The suggestion helper, before anything relies on what it suggests.
+
+    A suggestion that fires for everything is as useless as one that never
+    fires, so the negative cases matter as much as the positive ones.
+    """
+    print("\ncatalogue check 3: which unknown keys are near misses:")
+    known = vb.CATALOG_KNOWN_ENTRY_FIELDS
+    expected = [
+        # the issue's own example, two edits away
+        ("optional_lesson_cnt", ["optional_lesson_count"]),
+        ("workspace_knd", ["workspace_kind"]),
+        # a transposition, which plain Levenshtein scores as two
+        ("worksapce_kind", ["workspace_kind"]),
+        ("descripton", ["description"]),
+        # a tie names BOTH rather than picking one
+        ("ttile", ["style", "title"]),
+        # far from everything: a plausible forward-compatible extension
+        ("estimated_hours", []),
+        ("curriculum_owner", []),
+        # the bundle key with the same stem - six edits, so NOT a near miss.
+        # The plain-unknown message lists every known field instead.
+        ("optional_lessons", []),
+    ]
+    for name, want in expected:
+        got = vb.near_misses(name, known)
+        record(
+            got == want,
+            f"{name!r} -> {want}",
+            f"got {got}",
+        )
+    # A field the validator SHAPE-CHECKS but forgot to list as known would
+    # be warned about and validated at the same time, which is incoherent
+    # and easy to introduce when the next field lands.
+    declared = (
+        set(vb.CATALOG_REQUIRED_FIELDS)
+        | set(vb.CATALOG_TEXT_FIELDS)
+        | set(vb.CATALOG_LIST_FIELDS)
+        | set(vb.CATALOG_COUNT_FIELDS)
+    )
+    record(
+        declared <= set(known),
+        "every field the validator shape-checks is also one it recognises",
+        f"shape-checked but not recognised: {sorted(declared - set(known))}",
+    )
+    record(
+        all(not vb.near_misses(a, tuple(b for b in known if b != a)) for a in known),
+        "no known field is within the threshold of another, so a suggestion "
+        "is never ambiguous between two real fields",
+        "; ".join(
+            f"{a}: {vb.near_misses(a, tuple(b for b in known if b != a))}"
+            for a in known
+            if vb.near_misses(a, tuple(b for b in known if b != a))
+        ),
+    )
+
+
+def test_catalog_unknown_field_warns_and_never_rejects() -> None:
+    print("\ncatalogue check 3: an unknown entry field is WARNED, not rejected:")
+
+    # -- the misspelled known field: the defect the issue was filed for
+    report = vb.validate_catalog(UNKNOWN_FIXTURES["misspelling"], False)
+    warned = _warnings_for(report, 3)
+    record(
+        len(warned) == 1,
+        "a misspelled known field produces exactly one check-3 warning",
+        f"got {[str(w) for w in report.warnings]}",
+    )
+    if warned:
+        record(
+            "'optional_lesson_cnt'" in warned[0].message,
+            "the warning NAMES the misspelled key",
+            warned[0].message,
+        )
+        record(
+            "'optional_lesson_count'" in warned[0].message,
+            "and names the known field it is a near miss for",
+            warned[0].message,
+        )
+        record(
+            warned[0].where == "tutorials[0] (rust-cli-basics)",
+            "and says WHICH entry carries it",
+            f"where = {warned[0].where!r}",
+        )
+    record(
+        not report.findings,
+        "the run produced NO finding at all - an unrecognised field is "
+        "reported through report.warn(), which exit_code() never consults",
+        "; ".join(str(f) for f in report.findings),
+    )
+    record(
+        report.exit_code() == 0,
+        "and the exit code is 0 - a warning must not reject a catalogue",
+        f"exit {report.exit_code()}: "
+        + ("; ".join(str(f) for f in report.findings) or f"blocked={report.blocked_checks}"),
+    )
+
+    # -- the forward-compatible extension: an older validator must degrade
+    report = vb.validate_catalog(UNKNOWN_FIXTURES["extension"], False)
+    warned = _warnings_for(report, 3)
+    record(
+        len(warned) == 1 and "'estimated_hours'" in warned[0].message,
+        "a field no known field is near produces one warning that names it",
+        f"got {[str(w) for w in report.warnings]}",
+    )
+    if warned:
+        record(
+            "near miss" not in warned[0].message,
+            "and does NOT invent a spelling suggestion for it",
+            warned[0].message,
+        )
+        record(
+            "optional_lesson_count" in warned[0].message,
+            "it lists the fields this document defines, so an author can "
+            "check the name against them",
+            warned[0].message,
+        )
+        record(
+            warned[0].where == "tutorials[0] (rust-cli-basics)",
+            "the clean second entry is not warned about",
+            f"warned about {[w.where for w in warned]}",
+        )
+    record(
+        report.exit_code() == 0,
+        "the catalogue carrying it is still USABLE - exit 0, every check ran",
+        f"exit {report.exit_code()}: "
+        + ("; ".join(str(f) for f in report.findings) or f"blocked={report.blocked_checks}"),
+    )
+    document = vb.load_yaml(UNKNOWN_FIXTURES["extension"].read_text(), "catalog.yaml")
+    record(
+        [e["id"] for e in document["tutorials"]]
+        == ["rust-cli-basics", "durable-event-broker"],
+        "and both entries are still there to be offered",
+        f"got {document}",
+    )
+
+
+def test_catalog_unknown_field_reads_keys_not_text() -> None:
+    """The constraint from the issue's comment, in both directions.
+
+    A field name in a comment or a description must not produce a warning,
+    AND must not suppress one. Each half is asserted against a positive
+    control: the text really does carry the name, so a text search WOULD
+    have fired here, and the entry really does carry an unknown key, so the
+    check is not simply silent on this file.
+    """
+    print("\ncatalogue check 3: it matches KEYS, never the file's text:")
+    path = UNKNOWN_FIXTURES["comment"]
+    raw = path.read_text()
+
+    # The needle guard. If the fixture ever loses the string, every
+    # assertion below passes for the wrong reason.
+    loose = raw.count("optional_lesson_cnt")
+    record(
+        loose >= 1,
+        f"the fixture's TEXT really does contain 'optional_lesson_cnt' "
+        f"({loose} time(s)) - the positive control for a text search",
+        "the fixture no longer carries the string, so this test proves nothing",
+    )
+    document = vb.load_yaml(raw, path.name)
+    positional = sum(
+        1 for entry in document["tutorials"] if "optional_lesson_cnt" in entry
+    )
+    record(
+        positional == 0,
+        "and NO entry carries it as a key, which is the fact that matters",
+        f"{positional} entr(y/ies) carry the key",
+    )
+
+    report = vb.validate_catalog(path, False)
+    warned = _warnings_for(report, 3)
+    record(
+        not any("optional_lesson_cnt" in w.message for w in warned),
+        "check 3 says nothing about the name in the comment and the "
+        "description, where a text search would have reported a field",
+        "; ".join(str(w) for w in warned),
+    )
+    record(
+        len(warned) == 1
+        and "'curriculum_owner'" in warned[0].message
+        and warned[0].where == "tutorials[1] (durable-event-broker)",
+        "and the comment does not SUPPRESS the real unknown key in the "
+        "second entry - exactly one warning, about that entry",
+        f"got {[str(w) for w in warned]}",
+    )
+    record(
+        report.exit_code() == 0,
+        "exit 0 throughout",
+        f"exit {report.exit_code()}: "
+        + ("; ".join(str(f) for f in report.findings) or f"blocked={report.blocked_checks}"),
+    )
+
+
+def test_real_catalogue_gains_no_warning() -> None:
+    """The best available regression, and its own positive control.
+
+    The catalogue in skomp/tutorail-bundles is generated, and its header
+    comment names `optional_lesson_count` in exactly the shape the issue
+    describes. It must still validate at exit 0 with NO new warning.
+    """
+    print("\ncatalogue check 3 against the real generated catalogue:")
+    if not REAL_CATALOGUE.is_file():
+        note(f"  SKIPPED: {REAL_CATALOGUE} is not present, so it was not checked")
+        print(f"  skip {REAL_CATALOGUE} (not present)")
+        return
+    raw = REAL_CATALOGUE.read_text()
+    document = vb.load_yaml(raw, REAL_CATALOGUE.name)
+    entries = document["tutorials"]
+
+    # The header comment is what makes this file the regression it is. If
+    # the generator ever stops writing it, this test still passes but no
+    # longer proves the comment case, so say so rather than assume.
+    header = raw.split("catalog_version:")[0]
+    record(
+        "optional_lesson_count" in header,
+        "the real catalogue's header comment NAMES optional_lesson_count, "
+        "which is what makes it the regression for the comment case",
+        "the generated header no longer names the field; this file no "
+        "longer exercises the case and another fixture must",
+    )
+    loose = raw.count("optional_lesson_count")
+    carrying = sum(1 for e in entries if "optional_lesson_count" in e)
+    record(
+        loose == carrying + 1,
+        f"a loose text count over it returns {loose} for {len(entries)} "
+        f"entries - over by exactly the one comment, which is the miscount "
+        f"issue #18 was filed about",
+        f"loose={loose} carrying={carrying} entries={len(entries)}",
+    )
+
+    report = vb.validate_catalog(REAL_CATALOGUE, True)
+    record(
+        report.exit_code() == 0,
+        "it validates at exit 0 with --portable",
+        "; ".join(str(f) for f in report.findings)
+        or f"blocked = {report.blocked_checks}",
+    )
+    record(
+        not report.warnings,
+        "and produces NO warning at all, the unknown-field report included",
+        "; ".join(str(w) for w in report.warnings),
+    )
+
+    # The positive control. A clean result from a check that cannot report
+    # on this file would prove nothing, so plant a key and watch it fire.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        planted = Path(tmpdir) / "catalog.yaml"
+        first = raw.index("\n    title:")
+        planted.write_text(raw[:first] + "\n    optional_lesson_cnt: 3" + raw[first:])
+        planted_report = vb.validate_catalog(planted, False)
+        warned = _warnings_for(planted_report, 3)
+        record(
+            len(warned) == 1 and "'optional_lesson_cnt'" in warned[0].message,
+            "the SAME run DOES warn when the key is planted in the first "
+            "entry of that same file",
+            f"got {[str(w) for w in planted_report.warnings]}; findings "
+            f"{[str(f) for f in planted_report.findings]}",
+        )
+        record(
+            not any(
+                UNKNOWN_FIELD_PHRASE in f.message for f in planted_report.findings
+            ),
+            "and still never as a finding",
+            "; ".join(str(f) for f in planted_report.findings),
+        )
+
+
+def test_unknown_field_is_never_a_finding() -> None:
+    """Swept, so the claim is about the check and not about one fixture.
+
+    Check 3 does produce findings - a missing required field, a wrong shape
+    - so "check 3 never fires" would be false and useless. The property
+    that matters is narrower and is the one the format turns on: the
+    UNRECOGNISED-FIELD report is never one of them.
+    """
+    print("\ncatalogue: an unrecognised field is never a finding:")
+    catalogues = [
+        FIXTURES / "catalog-relationships" / "catalog.yaml",
+        FIXTURES / "catalog-optional-lessons" / "catalog.yaml",
+        *UNKNOWN_FIXTURES.values(),
+    ]
+    if REAL_CATALOGUE.is_file():
+        catalogues.append(REAL_CATALOGUE)
+    warned = 0
+    offenders: list[str] = []
+    for path in catalogues:
+        for portable in (False, True):
+            report = vb.validate_catalog(path, portable)
+            warned += sum(
+                1 for w in report.warnings if UNKNOWN_FIELD_PHRASE in w.message
+            )
+            offenders += [
+                f"{path.name}: {f}"
+                for f in report.findings
+                if UNKNOWN_FIELD_PHRASE in f.message
+            ]
+    record(
+        not offenders,
+        f"no finding carries {UNKNOWN_FIELD_PHRASE!r} across "
+        f"{len(catalogues)} catalogue(s), both --portable and not",
+        "; ".join(offenders),
+    )
+    # The negative result above is only worth something if the same sweep
+    # can produce a positive, so count what it warned about.
+    record(
+        warned > 0,
+        f"and the same sweep DID produce {warned} such warning(s), so the "
+        f"clean finding list is a real result and not an empty search",
+        "the sweep produced no unknown-field warning at all, so it proves "
+        "nothing about whether one would be a finding",
+    )
 
 
 def test_alias_normalisation_matches_the_runtime() -> None:
@@ -4459,6 +4821,11 @@ def main() -> int:
     test_supplies_scope_rule()
     test_catalog_root_normalises_every_spelling()
     test_catalog_path_spelling_never_changes_the_verdict()
+    test_near_miss_distance()
+    test_catalog_unknown_field_warns_and_never_rejects()
+    test_catalog_unknown_field_reads_keys_not_text()
+    test_real_catalogue_gains_no_warning()
+    test_unknown_field_is_never_a_finding()
     test_run_case_checks_where()
     test_alias_normalisation_matches_the_runtime()
     test_assumes_reviewed_is_bundle_only()
