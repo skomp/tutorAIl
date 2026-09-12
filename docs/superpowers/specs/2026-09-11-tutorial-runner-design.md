@@ -1177,10 +1177,16 @@ caches a *bundle* that a learner has not chosen.
 8. ~~**What happens when a `required_for` gate blocks a lesson and the learner refuses the
    lesson anyway.**~~ **Settled 2026-09-12: the tutor teaches the repair inline.** See
    "A `required_for` gate is on the failure" below.
-9. **An anticipated failure that persists after its lesson was taken** falls back to
-   ordinary coaching, which is the loop guard. Whether a course should be able to say
-   "this failure means the lesson did not land" is not decided, and answering it wrongly
-   reintroduces the loop.
+9. ~~**An anticipated failure that persists after its lesson was taken.**~~ **Settled
+   2026-09-12: ordinary coaching, permanently.** A complete lesson is never re-offered,
+   whatever recurs. A failure that persists is a teaching problem in the moment and is
+   handled inside the current lesson. **The loop guard is the feature, not a limitation** —
+   a course that may re-open a completed lesson on recurrence has a loop one iteration long
+   instead of none, and the learner experiencing it is the one least able to escape it.
+
+   An author whose lesson does not land should fix the lesson. Recurrence is evidence about
+   the *lesson*, not about the learner, and the places to act on it are the quality checker
+   and the dry-run harness — not the tutor, mid-course, against the person in front of it.
 10. **`optional: true` duplicates the manifest.** It is deliberate redundancy of the same
     class as `id` restating the slug, and it is checked, but it is still a second place
     for one fact. Recorded because the argument will be had again.
