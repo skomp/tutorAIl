@@ -10,5 +10,5 @@ belong in the design specification when they concern the format or the runner, s
 file is usually empty.
 
 Deferred design work lives in
-`docs/superpowers/specs/2026-09-11-tutorial-runner-design.md`, sections 15a to 15c
+`docs/superpowers/specs/2026-09-11-tutorial-runner-design.md`, sections 15a to 15d
 (settled decisions) and 16 (telemetry, deliberately not built).

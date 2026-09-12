@@ -7,8 +7,13 @@ and *rejects* anything outside it rather than guessing.
 
 Two scripts need this reader, so it lives in one place:
 
-  * validate_bundle.py - authoring-time, reads tutorial.yaml and catalogues;
-  * catalogs.py        - runtime, reads catalogs.yaml and catalogue files.
+  * validate_bundle.py - reads tutorial.yaml and catalogues. An author runs it;
+                         the runner also runs it once, at materialization.
+  * catalogs.py        - reads catalogs.yaml and catalogue files, on every
+                         discovery request.
+
+Both run on a learner's machine, which is why neither may import a third-party
+parser.
 
 Guessing is the failure this module exists to avoid. A reader that silently
 mis-parses an anchor, a tag or a multi-line plain scalar turns a structural

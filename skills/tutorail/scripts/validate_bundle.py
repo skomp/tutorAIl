@@ -410,9 +410,10 @@ LIMITATIONS = """What a pass does and does not mean
       finished by a learner who declines every offer. Section 13 of
       bundle-format.md makes that an authoring obligation, and it is not
       mechanically decidable - a green run does not certify it. A
-      `required_for` gate is the one declared exception, and the validator
-      cannot tell a gate you meant from a prerequisite you hid.
-    nothing checks `repair_in` against the instance's `resume_at`, for the
+      `required_for` gate is not an exception to it: the gate holds on the
+      failure, not on the lesson, so a learner who declines is coached through
+      the repair rather than blocked. The validator cannot tell a gate you
+      meant from a prerequisite you hid.
       same reason nothing checks `after:` against it. `repair_in` is in the
       manifest and answers "whose work is now wrong"; `resume_at` is in the
       instance and answers "where does the learner stand". They differ
@@ -2706,7 +2707,7 @@ def check_supplies(
                             f"when that lesson opens, from the instance, and "
                             f"materialization copies only '{LESSONS_DIR}/' - "
                             f"so this file will not exist when the tutor needs "
-                            f"it. Move it into this lesson's folder, or declare "
+                            f"it. Move it anywhere under '{LESSONS_DIR}/', or declare "
                             f"it in tutorial.yaml, where placement happens "
                             f"while the bundle source is still in reach.",
                         )
