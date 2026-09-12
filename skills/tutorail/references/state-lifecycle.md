@@ -165,10 +165,15 @@ Steps, in order:
 
    Say the entry's `describe` line when you report it — it is the author's sentence about
    what these files are, and telling the learner is the only reason the field exists.
-   Under `ownership_policy: tutor-must-not-edit-learner-owned` you MAY **create** a
-   declared target that does not exist, even where it falls under a `learner_owned` glob,
-   and you may **never modify** one that does. That exemption is create-only and covers
-   declared paths only. Then start teaching.
+   Under `ownership_policy: tutor-must-not-edit-learner-owned` **and under `on-request`**
+   you MAY **create** a declared target that does not exist, even where it falls under a
+   `learner_owned` glob, and under `on-request` you do not ask first: placing a declared
+   supply is not the tutor being asked for a change, and a course using that policy would
+   otherwise have to interrupt the learner for permission to unpack its own fixtures.
+   `unrestricted` needs no exemption at all. Under **every** policy, `unrestricted`
+   included, you may **never modify** a target that already exists — placement never
+   rewrites a file that is already there, whatever the policy would otherwise allow. The
+   exemption is create-only and covers declared paths only. Then start teaching.
 
 ### Workspace kinds
 

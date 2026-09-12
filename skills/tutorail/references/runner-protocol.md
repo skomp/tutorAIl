@@ -241,12 +241,19 @@ every session. Do not carry an assumption from a different tutorial.
 
 | `ownership_policy` | You may edit a learner-owned path |
 |---|---|
-| `tutor-must-not-edit-learner-owned` | never |
-| `on-request` | only when the learner explicitly asks for that change |
+| `tutor-must-not-edit-learner-owned` | never — but see the supplies exemption below |
+| `on-request` | only when the learner explicitly asks for that change — the supplies exemption below needs no asking |
 | `unrestricted` | yes |
 
 Before any change to a file, ask: does this path match a `learner_owned` glob? If it
 does, and the policy does not permit it, you may read it and you may not change it.
+
+**One exemption crosses that table, and only one.** Creating a file the bundle declares in
+`supplies` is placement, not editing, and it is not a change the learner has to be asked
+for: under `tutor-must-not-edit-learner-owned` **and** under `on-request` alike you MAY
+create a declared target that does not exist, without asking. It runs the other way under
+**every** policy, `unrestricted` included: a declared target that already exists is never
+modified. Section 10 states it in full, and `bundle-format.md` section 2 is the contract.
 
 `tutor_owned` — typically `tutorial/STATE.md` and `tutorial/DESIGN.md` — is yours.
 Everything in the workspace that is neither listed is the learner's by default. When in
@@ -279,7 +286,10 @@ These are not:
 - inspecting a diff, listing a directory, or checking whether a path exists;
 - naming a type, a function signature, a standard-library item, or the concept to look
   up;
-- writing `tutorial/STATE.md` and `tutorial/DESIGN.md`.
+- writing `tutorial/STATE.md` and `tutorial/DESIGN.md`;
+- placing a file the bundle declares in `supplies` (section 10). The author is forbidden
+  to use that key to hand over what a lesson asks the learner to write, which is what
+  keeps this entry off the list above.
 
 ### When the learner is stuck
 
@@ -930,10 +940,24 @@ section 2 states them in full:
 Say the entry's `describe` line when you report it. It is the author's sentence about what
 these files are, and telling the learner is the only reason the field exists.
 
-Under `ownership_policy: tutor-must-not-edit-learner-owned` you MAY **create** a declared
-supplies target that does not exist, even where it falls under a `learner_owned` glob, and
-you may **never modify** one that does. The exemption is create-only, and it covers
-declared paths only — an undeclared path gets none of it, however convenient it would be.
+Under `ownership_policy: tutor-must-not-edit-learner-owned` **and under `on-request`** you
+MAY **create** a declared supplies target that does not exist, even where it falls under a
+`learner_owned` glob. `on-request` needs the exemption for the same reason the stricter
+policy does: that policy lets you edit learner files when you are asked, and placing a
+declared supply is not you being asked — without the exemption a course using it would have
+to interrupt the learner for permission to unpack its own fixtures. **Do not ask.**
+`unrestricted` needs no exemption at all.
+
+The other half holds under **every** policy, `unrestricted` included: you may **never
+modify** a declared target that already exists. Placement never rewrites a file that is
+already there, whatever the policy would otherwise allow — which is rule 1 above, restated
+as an ownership rule so that no policy value reads as permission to ignore it.
+
+The exemption is create-only, and it covers declared paths only — an undeclared path gets
+none of it, however convenient it would be. The author is held to the matching limit: a
+`supplies` entry MUST NOT hand the learner what a lesson asks them to write, or the
+declaration list becomes the widening lever the policy was stopped from being
+(`bundle-format.md` section 2).
 
 ### 10.1 A bundle written before the key existed
 
