@@ -62,6 +62,7 @@ _notes: list[str] = []
 _passed = 0
 _fired_kinds: set[str] = set()
 _fired_catalog_checks: set[int] = set()
+_fired_provenance: set[str] = set()
 
 
 def record(ok: bool, label: str, detail: str = "") -> None:
@@ -1461,6 +1462,848 @@ def test_cli() -> None:
 
 
 # --------------------------------------------------------------------------
+# Concept-based discovery and the relationship index
+# --------------------------------------------------------------------------
+#
+# The fixture is the design's normative example: a broker that TEACHES the
+# log model, a query engine that ASSUMES it, and a third-party course that
+# names the broker as a previous bundle although the broker has never heard
+# of it. Every behaviour below is one a reviewer can get wrong silently, so
+# each has a fixture that would fail loudly if it were got wrong.
+
+RELATIONSHIP_CATALOG = HERE / "fixtures" / "catalog-relationships" / "catalog.yaml"
+
+
+def relationship_env(env: "Env") -> None:
+    env.write_config(file_config(("rel", RELATIONSHIP_CATALOG)))
+
+
+def why_kinds(match: dict) -> list[str]:
+    kinds = [w["kind"] for w in match.get("why", [])]
+    _fired_provenance.update(kinds)
+    return kinds
+
+
+def matched_ids(payload: dict) -> list[str]:
+    for match in payload.get("matches", []):
+        why_kinds(match)
+    return [m["id"] for m in payload.get("matches", [])]
+
+
+def find_match(payload: dict, identifier: str) -> dict | None:
+    for match in payload.get("matches", []):
+        if match["id"] == identifier:
+            why_kinds(match)
+            return match
+    return None
+
+
+def test_concept_query_exact_and_alias() -> None:
+    print("\nconcept discovery, tiers 1 to 3:")
+    with temp_env() as env:
+        relationship_env(env)
+
+        code, payload = env.run_json("covers", "partition-offsets")
+        record(
+            code == 0 and matched_ids(payload) == ["durable-event-broker"],
+            "an exact covers id finds the bundle that teaches it",
+            f"exit {code}, {matched_ids(payload)}",
+        )
+        match = find_match(payload, "durable-event-broker")
+        record(
+            "exact-concept" in why_kinds(match),
+            "and the result says it was an exact concept match",
+            repr(why_kinds(match)),
+        )
+        detail = next(
+            w["detail"] for w in match["why"] if w["kind"] == "exact-concept"
+        )
+        record(
+            detail == "Exact concept match: partition-offsets",
+            "the explanation names the concept, in the design's own words",
+            detail,
+        )
+
+        # The same concept, written the way a person says it out loud.
+        code, spoken = env.run_json("covers", "Partition Offsets")
+        record(
+            matched_ids(spoken) == ["durable-event-broker"]
+            and "exact-concept" in why_kinds(find_match(spoken, "durable-event-broker")),
+            "a spoken phrase normalises onto the exact id, with no fuzzy match",
+            f"{matched_ids(spoken)}",
+        )
+
+        code, payload = env.run_json("covers", "stream-offsets")
+        match = find_match(payload, "durable-event-broker")
+        record(
+            code == 0 and matched_ids(payload) == ["durable-event-broker"],
+            "a per-concept alias finds the bundle",
+            f"exit {code}, {matched_ids(payload)}",
+        )
+        detail = next(
+            (w["detail"] for w in match["why"] if w["kind"] == "concept-alias"), ""
+        )
+        record(
+            detail.startswith("Alias match: stream-offsets"),
+            "and it says which alias matched, and of which concept",
+            detail,
+        )
+
+        code, payload = env.run_json("covers", "logical offsets")
+        match = find_match(payload, "durable-event-broker")
+        record(
+            code == 0 and match is not None and "concept-text" in why_kinds(match),
+            "words from a concept summary match at the text tier",
+            f"exit {code}, {matched_ids(payload)}",
+        )
+        record(
+            match is not None
+            and any(
+                "summary of retained-event-logs" in w["detail"]
+                for w in match["why"]
+                if w["kind"] == "concept-text"
+            ),
+            "and the explanation names the field the words were found in",
+            repr(match and [w["detail"] for w in match["why"]]),
+        )
+
+
+def test_a_bundle_that_only_assumes_a_concept_does_not_teach_it() -> None:
+    print("\nthe distinction the whole feature rests on:")
+    with temp_env() as env:
+        relationship_env(env)
+        code, payload = env.run_json("covers", "retained-event-logs")
+        ids = matched_ids(payload)
+
+        # streaming-query-engine assumes retained-event-logs at level
+        # conceptual and covers nothing of the sort. A learner asking who
+        # TEACHES it must never be sent to the course that starts where they
+        # are stuck.
+        record(
+            "streaming-query-engine" not in ids,
+            "a bundle that only ASSUMES the concept is not returned as "
+            "covering it",
+            f"it was returned: {ids}",
+        )
+        # Positive control: the same probe, against the same query, does find
+        # the bundles that really do cover it. Without this, the assertion
+        # above would pass just as well if the query matched nothing at all.
+        record(
+            ids == ["durable-event-broker", "log-replay-forensics"],
+            "and the same query does find both bundles that DO cover it",
+            f"{ids}",
+        )
+        engine = find_match(payload, "streaming-query-engine")
+        record(engine is None, "no result at all carries that bundle", repr(engine))
+
+        # The concept IS in its assumes - so the fixture really does exercise
+        # the case, rather than passing because the metadata is absent.
+        code, entries = env.run_json("discover")
+        entry = next(
+            e for e in entries["tutorials"] if e["id"] == "streaming-query-engine"
+        )
+        record(
+            "retained-event-logs" in (entry.get("assumes") or {}),
+            "the fixture really does assume the concept it must not be "
+            "returned for",
+            repr(sorted(entry.get("assumes") or {})),
+        )
+        record(
+            "retained-event-logs" not in (entry.get("covers") or {}),
+            "and really does not cover it",
+            repr(sorted(entry.get("covers") or {})),
+        )
+
+        # A bundle may legally do both. log-replay-forensics assumes
+        # retained-event-logs at working level AND teaches it deeper, and the
+        # covering query must still return it.
+        entry = next(
+            e for e in entries["tutorials"] if e["id"] == "log-replay-forensics"
+        )
+        record(
+            "retained-event-logs" in (entry.get("assumes") or {})
+            and "retained-event-logs" in (entry.get("covers") or {}),
+            "the overlap case is in the fixture: one bundle both assumes and "
+            "covers one concept",
+            repr(entry.get("assumes")),
+        )
+        record(
+            "log-replay-forensics" in ids,
+            "and it is returned, because what decides is `covers`",
+            f"{ids}",
+        )
+
+
+def test_more_than_one_bundle_covers_a_concept() -> None:
+    print("\nnever collapse to one result:")
+    with temp_env() as env:
+        relationship_env(env)
+        code, payload = env.run_json("covers", "retained event logs")
+        ids = matched_ids(payload)
+        record(
+            len(ids) == 2 and set(ids) == {"durable-event-broker", "log-replay-forensics"},
+            "two bundles cover one concept and both are returned",
+            f"{ids}",
+        )
+        record(
+            payload["match_count"] == 2,
+            "the count in the machine-readable form agrees",
+            repr(payload["match_count"]),
+        )
+        # durable-event-broker is the one named in
+        # recommended_previous_bundles. The result must not shrink to it.
+        record(
+            ids[0] == "durable-event-broker" and ids[1] == "log-replay-forensics",
+            "the recommended one ranks first without hiding the other",
+            f"{ids}",
+        )
+
+
+def test_broad_subject_is_the_last_tier_and_never_a_recommendation() -> None:
+    print("\nbroad subject fallback:")
+    with temp_env() as env:
+        relationship_env(env)
+        code, payload = env.run_json("covers", "event-streaming")
+        ids = matched_ids(payload)
+        record(
+            code == 0 and len(ids) == 3,
+            "a subject nobody declares as a concept still finds the bundles",
+            f"exit {code}, {ids}",
+        )
+        for identifier in ids:
+            match = find_match(payload, identifier)
+            record(
+                [w["kind"] for w in match["why"]] == ["broad-subject"],
+                f"{identifier} matched only at the broad-subject tier",
+                repr(match["why"]),
+            )
+            record(
+                match["author_recommended"] is False,
+                f"and {identifier} is NOT presented as an author recommendation",
+                repr(match["author_recommended"]),
+            )
+            record(
+                all(w["rank"] == 5 for w in match["why"]),
+                f"and {identifier} ranks below every concept tier",
+                repr(match["why"]),
+            )
+        _, text = env.run("covers", "event-streaming")
+        record(
+            "NOT author recommendations" in text
+            and "[not an author recommendation]" in text,
+            "the report says so on the section AND on every line",
+            text[:400],
+        )
+        record(
+            "recommended by an author" not in text,
+            "and prints no author-recommendation section at all here",
+            text[:400],
+        )
+
+
+def test_provenance_is_kept_when_a_bundle_arrives_by_several_routes() -> None:
+    print("\nprovenance survives deduplication:")
+    with temp_env() as env:
+        relationship_env(env)
+        code, payload = env.run_json("covers", "retained-event-logs")
+        ids = matched_ids(payload)
+        record(
+            ids.count("durable-event-broker") == 1,
+            "the bundle appears exactly once, however many routes reached it",
+            f"{ids}",
+        )
+        match = find_match(payload, "durable-event-broker")
+        kinds = why_kinds(match)
+        record(
+            "exact-concept" in kinds and "recommended-previous" in kinds,
+            "and it keeps BOTH the concept route and the recommendation route",
+            repr(kinds),
+        )
+        declaring = sorted(
+            w.get("bundle")
+            for w in match["why"]
+            if w["kind"] == "recommended-previous"
+        )
+        record(
+            declaring == ["log-replay-forensics", "streaming-query-engine"],
+            "two different authors recommended it, and both are kept "
+            "separately",
+            repr(declaring),
+        )
+        record(
+            all(
+                w.get("because")
+                for w in match["why"]
+                if w["kind"] == "recommended-previous"
+            ),
+            "each author's own reason travels with their recommendation",
+            repr(match["why"]),
+        )
+        record(
+            match["author_recommended"] is True,
+            "the bundle is author-recommended, because one route really is",
+            repr(match["author_recommended"]),
+        )
+        concept_routes = [
+            w for w in match["why"] if w["kind"] == "exact-concept"
+        ]
+        record(
+            concept_routes and all(
+                w["author_recommendation"] is False for w in concept_routes
+            ),
+            "but the concept route is still marked as NOT a recommendation, "
+            "so the two claims never merge into one",
+            repr(concept_routes),
+        )
+
+
+def test_follow_ups_read_the_reverse_index() -> None:
+    print("\nthe reverse index - a third party attaches itself:")
+    with temp_env() as env:
+        relationship_env(env)
+        code, entries = env.run_json("discover")
+        broker = next(
+            e for e in entries["tutorials"] if e["id"] == "durable-event-broker"
+        )
+        named = [r["bundle"] for r in broker.get("recommended_follow_ups") or []]
+        record(
+            "log-replay-forensics" not in named,
+            "the broker does NOT name the third-party bundle anywhere",
+            repr(named),
+        )
+
+        code, payload = env.run_json("follow-ups", "durable-event-broker")
+        ids = matched_ids(payload)
+        record(
+            "log-replay-forensics" in ids,
+            "yet follow-up discovery finds it, through its own "
+            "recommended_previous_bundles",
+            f"exit {code}, {ids}",
+        )
+        match = find_match(payload, "log-replay-forensics")
+        record(
+            "declared-previous" in why_kinds(match),
+            "and says which direction the declaration came from",
+            repr(match["why"]),
+        )
+        record(
+            "log-replay-forensics names durable-event-broker"
+            in match["why"][0]["detail"],
+            "in words that name both bundles, so it cannot be mistaken for "
+            "the broker's own recommendation",
+            repr(match["why"][0]["detail"]),
+        )
+        record(
+            match["why"][0]["because"].startswith("It builds the retained log"),
+            "carrying the third party's own reason",
+            repr(match["why"][0].get("because")),
+        )
+
+
+def test_forward_recommendations_keep_manifest_order() -> None:
+    print("\nauthor order is display order:")
+    doc = """catalog_version: 1
+tutorials:
+  - id: origin
+    title: The origin course
+    description: A course that recommends two follow-ups.
+    subjects: [ordering]
+    level: beginner
+    workspace_kind: new-repository
+    recommended_follow_ups:
+      - bundle: zeta-course
+        because: Take this one second in the alphabet but FIRST by the author.
+      - bundle: alpha-course
+        because: Take this one first in the alphabet but SECOND by the author.
+    source: { type: local, path: origin }
+  - id: alpha-course
+    title: The alpha course
+    description: Alphabetically first, and listed first in the catalogue.
+    subjects: [ordering]
+    level: beginner
+    workspace_kind: new-repository
+    source: { type: local, path: alpha }
+  - id: zeta-course
+    title: The zeta course
+    description: Alphabetically last, and listed last in the catalogue.
+    subjects: [ordering]
+    level: beginner
+    workspace_kind: new-repository
+    source: { type: local, path: zeta }
+"""
+    with temp_env() as env:
+        path = env.write_catalog("ordered.yaml", doc)
+        env.write_config(file_config(("ordered", path)))
+        code, payload = env.run_json("follow-ups", "origin")
+        ids = matched_ids(payload)
+        # Author order is zeta then alpha, which is neither alphabetical order
+        # nor the order the catalogue lists them in. A sort by anything else
+        # fails here.
+        record(
+            ids == ["zeta-course", "alpha-course"],
+            "forward recommendations come back in the author's order, not "
+            "alphabetical and not catalogue order",
+            f"{ids}",
+        )
+        orders = [
+            find_match(payload, i)["why"][0]["detail"] for i in ids
+        ]
+        record(
+            all(d == "Recommended by origin as a follow-up" for d in orders),
+            "and each says who recommended it",
+            repr(orders),
+        )
+
+
+def test_follow_ups_put_the_authors_own_list_first() -> None:
+    print("\nauthor-curated first, reverse-declared second, inferred last:")
+    with temp_env() as env:
+        relationship_env(env)
+        code, payload = env.run_json("follow-ups", "durable-event-broker")
+        ids = matched_ids(payload)
+        record(
+            ids == ["streaming-query-engine", "log-replay-forensics"],
+            "the bundle the author named comes before the one that named "
+            "itself",
+            f"{ids}",
+        )
+        engine = find_match(payload, "streaming-query-engine")
+        kinds = why_kinds(engine)
+        record(
+            kinds[0] == "author-follow-up",
+            "the author's own route ranks first on the bundle itself",
+            repr(kinds),
+        )
+        record(
+            "declared-previous" in kinds and "assumes-covered" in kinds,
+            "and the other two routes to the same bundle are kept as well",
+            repr(kinds),
+        )
+        inferred = [w for w in engine["why"] if w["kind"] == "assumes-covered"]
+        record(
+            inferred and all(w["author_recommendation"] is False for w in inferred),
+            "the inferred route is flagged as inferred even on a bundle the "
+            "author did recommend",
+            repr(inferred),
+        )
+        record(
+            any("Assumes retained-event-logs" in w["detail"] for w in inferred),
+            "and it says which concept connects them",
+            repr([w["detail"] for w in inferred]),
+        )
+
+
+def test_an_unavailable_recommendation_is_reported_not_fatal() -> None:
+    print("\na recommendation nothing carries:")
+    with temp_env() as env:
+        relationship_env(env)
+        code, payload = env.run_json("follow-ups", "durable-event-broker")
+        record(
+            code == 0 and payload["matches"],
+            "an unresolved forward recommendation does not fail the query",
+            f"exit {code}",
+        )
+        unresolved = [u["bundle"] for u in payload["unresolved"]]
+        record(
+            unresolved == ["distributed-log-broker"],
+            "the unresolved reference is named rather than dropped",
+            repr(payload["unresolved"]),
+        )
+        record(
+            all(m["id"] != "distributed-log-broker" for m in payload["matches"]),
+            "and it is not offered as though it were available",
+            repr(matched_ids(payload)),
+        )
+        _, text = env.run("follow-ups", "durable-event-broker")
+        record(
+            "no configured catalogue carries it" in text,
+            "the report says why it is not in the list",
+            text[-500:],
+        )
+
+
+def test_prepare_searches_covers_against_assumes() -> None:
+    print("\npreparing for a bundle:")
+    with temp_env() as env:
+        relationship_env(env)
+        code, payload = env.run_json("prepare", "streaming-query-engine")
+        ids = matched_ids(payload)
+        record(
+            code == 0 and ids == ["durable-event-broker", "log-replay-forensics"],
+            "every bundle covering an assumed concept is offered, not just "
+            "the one the author named",
+            f"exit {code}, {ids}",
+        )
+        broker = find_match(payload, "durable-event-broker")
+        kinds = why_kinds(broker)
+        record(
+            "author-previous" in kinds,
+            "the author's own previous-bundle recommendation is there",
+            repr(kinds),
+        )
+        record(
+            "declared-follow-up" in kinds,
+            "so is the reverse route, because the broker names it as a "
+            "follow-up",
+            repr(kinds),
+        )
+        record(
+            "covers-assumed" in kinds,
+            "so is the concept route",
+            repr(kinds),
+        )
+        concepts = sorted(
+            w["concept"] for w in broker["why"] if w["kind"] == "covers-assumed"
+        )
+        record(
+            concepts == ["partition-offsets", "retained-event-logs", "topic-partitions"],
+            "with one entry per assumed concept it covers",
+            repr(concepts),
+        )
+        other = find_match(payload, "log-replay-forensics")
+        record(
+            other["author_recommended"] is False
+            and why_kinds(other) == ["covers-assumed"],
+            "a bundle reached only by concept is not shown as recommended",
+            repr(other["why"]),
+        )
+        uncovered = " ".join(payload["notes"])
+        record(
+            "go-programming" in uncovered and "consumer-offsets" in uncovered,
+            "an assumed concept nothing covers is said out loud, not left as "
+            "a silent gap in the list",
+            repr(payload["notes"]),
+        )
+
+
+def test_a_recommended_previous_bundle_answers_a_concept_query() -> None:
+    print("\ntier 4 - an author points at where a concept is taught:")
+    doc = """catalog_version: 1
+tutorials:
+  - id: thin-broker
+    title: The thin broker course
+    description: A course whose metadata names no concepts at all.
+    subjects: [messaging]
+    level: beginner
+    workspace_kind: new-repository
+    source: { type: local, path: thin }
+  - id: engine
+    title: The engine course
+    description: A course that assumes a concept and says where to learn it.
+    subjects: [querying]
+    level: advanced
+    workspace_kind: new-repository
+    assumes:
+      group-commit:
+        level: working
+        summary: Many writes share one fsync, and you can reason about it.
+    recommended_previous_bundles:
+      - bundle: thin-broker
+        because: It builds the commit path this course measures.
+    source: { type: local, path: engine }
+"""
+    with temp_env() as env:
+        path = env.write_catalog("tier4.yaml", doc)
+        env.write_config(file_config(("tier4", path)))
+        code, payload = env.run_json("covers", "group-commit")
+        ids = matched_ids(payload)
+        record(
+            ids == ["thin-broker"],
+            "the bundle the author recommends is returned, and the bundle "
+            "that merely assumes the concept is not",
+            f"exit {code}, {ids}",
+        )
+        match = find_match(payload, "thin-broker")
+        record(
+            why_kinds(match) == ["recommended-previous"]
+            and match["author_recommended"] is True,
+            "and it is honestly labelled: this one IS an author "
+            "recommendation, because an author wrote it",
+            repr(match["why"]),
+        )
+        record(
+            match["why"][0]["detail"].startswith("Recommended by engine"),
+            "the explanation names the author who recommended it",
+            repr(match["why"][0]["detail"]),
+        )
+        record(
+            match["why"][0]["rank"] == 4,
+            "it ranks below every direct concept match",
+            repr(match["why"][0]["rank"]),
+        )
+
+
+def test_the_query_needle_is_guarded() -> None:
+    print("\nthe needle is guarded, and the probe is shown finding something:")
+    with temp_env() as env:
+        relationship_env(env)
+        # Positive control FIRST: this probe can and does report a match.
+        code, payload = env.run_json("covers", "group-commit")
+        record(
+            code == 0 and matched_ids(payload) == ["durable-event-broker"],
+            "the probe finds a concept that is really there",
+            f"exit {code}, {matched_ids(payload)}",
+        )
+        for empty in ("   ", "!!", "?? ..."):
+            code, payload = env.run_json("covers", empty)
+            record(
+                code == 2 and payload.get("found") is False,
+                f"a query of {empty!r} is refused as a usage error, not "
+                f"answered with every bundle",
+                f"exit {code}, {payload}",
+            )
+        code, payload = env.run_json("covers", "no-such-concept-anywhere")
+        record(
+            code == 3 and payload["matches"] == [],
+            "a query that names nothing returns nothing, and says so with "
+            "exit 3",
+            f"exit {code}, {payload.get('match_count')}",
+        )
+        code, payload = env.run_json("follow-ups", "no-such-bundle")
+        record(
+            code == 3 and payload.get("found") is False,
+            "an unknown bundle id is refused and the available ids are named",
+            repr(payload),
+        )
+        record(
+            "durable-event-broker" in (payload.get("available") or []),
+            "including the ones that do exist",
+            repr(payload.get("available")),
+        )
+
+
+def test_question_words_are_a_second_pass_and_are_announced() -> None:
+    print("\na whole question, rather than a concept id:")
+    with temp_env() as env:
+        relationship_env(env)
+        code, payload = env.run_json(
+            "covers", "which tutorial teaches retained event logs"
+        )
+        ids = matched_ids(payload)
+        record(
+            ids == ["durable-event-broker", "log-replay-forensics"],
+            "a question sentence still reaches the exact concept",
+            f"exit {code}, {ids}",
+        )
+        record(
+            any("question words removed" in n for n in payload["notes"]),
+            "and the looser pass is announced, never passed off as a direct "
+            "hit",
+            repr(payload["notes"]),
+        )
+        match = find_match(payload, "durable-event-broker")
+        record(
+            "exact-concept" in why_kinds(match),
+            "the second pass still uses the exact tiers, not a fuzzy match",
+            repr(match["why"]),
+        )
+        # The stripping never damages a query that already works.
+        code, direct = env.run_json("covers", "retained-event-logs")
+        record(
+            direct["notes"] == [],
+            "a query that works as written is never re-run with words removed",
+            repr(direct["notes"]),
+        )
+
+
+def test_concept_discovery_needs_no_service_and_no_bundle() -> None:
+    print("\ndeterministic, offline, and still metadata-only:")
+    with temp_env() as env:
+        relationship_env(env)
+        for path in ("durable-event-broker", "streaming-query-engine"):
+            record(
+                not (RELATIONSHIP_CATALOG.parent / path).exists(),
+                f"the fixture's {path} bundle directory really is absent",
+                "it exists",
+            )
+        with path_only(env.empty_bin):
+            record(
+                shutil.which("git") is None,
+                "git is not on PATH for this check",
+                repr(shutil.which("git")),
+            )
+            code, payload = env.run_json("covers", "partition-offsets")
+            record(
+                code == 0 and matched_ids(payload) == ["durable-event-broker"],
+                "an exact concept query answers with no git, no network and "
+                "no bundle on disk",
+                f"exit {code}, {matched_ids(payload)}",
+            )
+            record(
+                payload["semantic_matching"] is False,
+                "and it reports that no semantic matcher was involved",
+                repr(payload.get("semantic_matching")),
+            )
+        first = env.run_json("covers", "offsets")[1]
+        second = env.run_json("covers", "offsets")[1]
+        record(
+            matched_ids(first) == matched_ids(second)
+            and [w["kind"] for m in first["matches"] for w in m["why"]]
+            == [w["kind"] for m in second["matches"] for w in m["why"]],
+            "the same query gives the same answer, in the same order",
+            f"{matched_ids(first)} vs {matched_ids(second)}",
+        )
+        record(
+            matched_ids(first) == ["durable-event-broker"]
+            and "concept-text" in why_kinds(first["matches"][0]),
+            "a bare word reaches the concept whose id carries it, at the "
+            "text tier and not as an exact match",
+            f"{matched_ids(first)}: "
+            f"{first['matches'] and first['matches'][0]['why']}",
+        )
+
+
+def test_relationship_metadata_never_removes_a_tutorial() -> None:
+    print("\nmalformed relationship metadata is a note, not a lost course:")
+    doc = """catalog_version: 1
+tutorials:
+  - id: broken-metadata
+    title: The broken metadata course
+    description: A course whose optional relationship metadata is wrong.
+    subjects: [testing]
+    level: beginner
+    workspace_kind: new-repository
+    covers:
+      Not A Concept Id:
+        summary: The id is not [a-z0-9-]+.
+      no-summary-here:
+        aliases: [something]
+      fine-concept:
+        summary: This one is correct and must survive its broken neighbours.
+    assumes:
+      wrong-level:
+        level: expert
+        summary: There is no such level as expert.
+    recommended_follow_ups:
+      - bundle: broken-metadata
+        because: A bundle may not recommend itself.
+      - bundle: no-reason-given
+    source: { type: local, path: broken }
+"""
+    with temp_env() as env:
+        path = env.write_catalog("broken.yaml", doc)
+        env.write_config(file_config(("broken", path)))
+        code, payload = env.run_json("discover")
+        record(
+            code == 0 and [e["id"] for e in payload["tutorials"]] == ["broken-metadata"],
+            "the tutorial is still offered - relationship metadata is "
+            "optional, and a mistake in it must not hide a working course",
+            f"exit {code}",
+        )
+        code, payload = env.run_json("covers", "fine-concept")
+        record(
+            matched_ids(payload) == ["broken-metadata"],
+            "the concepts that are well formed still match",
+            f"{matched_ids(payload)}",
+        )
+        notes = " ".join(payload["index_notes"])
+        for fragment, label in (
+            ("Not A Concept Id", "a concept id that is not [a-z0-9-]+"),
+            ("no-summary-here", "a concept with no summary"),
+            ("expert", "an assumes level that is not one of the four"),
+            ("recommends the bundle itself", "a self-recommendation"),
+            ("no 'because'", "a recommendation with no reason"),
+        ):
+            record(
+                fragment in notes,
+                f"{label} is reported rather than silently dropped",
+                notes[:600],
+            )
+        code, payload = env.run_json("covers", "no-summary-here")
+        record(
+            code == 3 and payload["matches"] == [],
+            "and a concept that was dropped does not match, so the note is "
+            "the only place it appears",
+            f"exit {code}",
+        )
+
+
+def test_entries_without_the_new_fields_still_work() -> None:
+    print("\nbackward compatibility:")
+    with temp_env() as env:
+        mine = env.write_catalog("plain.yaml", catalog_doc(("plain", "bundles/plain")))
+        env.write_config(file_config(("plain", mine)))
+        code, payload = env.run_json("discover")
+        record(
+            code == 0 and [e["id"] for e in payload["tutorials"]] == ["plain"],
+            "a catalogue with none of the four new fields still discovers",
+            f"exit {code}",
+        )
+        code, payload = env.run_json("follow-ups", "plain")
+        record(
+            code == 3 and payload["matches"] == [] and payload["unresolved"] == [],
+            "asking for its follow-ups is an empty answer, not an error",
+            repr(payload),
+        )
+        code, payload = env.run_json("prepare", "plain")
+        record(
+            code == 3 and payload["matches"] == [],
+            "and so is asking how to prepare for it",
+            repr(payload),
+        )
+        code, payload = env.run_json("covers", "testing")
+        record(
+            code == 0 and matched_ids(payload) == ["plain"],
+            "its `subjects` still match, at the broad tier",
+            f"exit {code}, {matched_ids(payload)}",
+        )
+
+
+def test_a_cached_catalogue_is_said_so_before_nothing_matched() -> None:
+    print("\nhonesty when a catalogue is missing from a concept query:")
+    with temp_env() as env:
+        env.write_config(
+            file_config(
+                ("rel", RELATIONSHIP_CATALOG),
+                ("gone", env.root / "not-written.yaml"),
+            )
+        )
+        code, text = env.run("covers", "partition-offsets")
+        record(
+            code == 1,
+            "a query whose catalogues did not all answer exits 1, not 0",
+            f"exit {code}",
+        )
+        record(
+            "could not be served at all" in text,
+            "and says which catalogue is missing from the answer",
+            text[:600],
+        )
+        record(
+            text.index("could not be served at all") < text.index("bundles that COVER"),
+            "before the results, so 'nothing matched' can never be read as "
+            "'nothing exists'",
+            text[:600],
+        )
+        code, text = env.run("covers", "nothing-here-at-all")
+        record(
+            "could not be served at all" in text and "(no bundle matched)" in text,
+            "the same holds when the answer really is empty",
+            text[:600],
+        )
+
+
+def test_provenance_kind_coverage() -> None:
+    print("\nmeta: every provenance kind has a fixture that makes it fire:")
+    for kind, (rank, recommendation, description) in sorted(
+        cat.PROVENANCE_KINDS.items()
+    ):
+        record(
+            kind in _fired_provenance,
+            f"provenance kind {kind!r} was demonstrated firing  "
+            f"({description[:48]})",
+            "NO fixture in this suite produces this kind, so it is a false "
+            "oracle: it can only be shown not happening.",
+        )
+    record(
+        cat.SEMANTIC_MATCHING_AVAILABLE is False
+        and "semantic" not in cat.PROVENANCE_KINDS,
+        "the semantic tier is absent rather than declared-and-never-fired",
+        repr(cat.SEMANTIC_MATCHING_AVAILABLE),
+    )
+
+
+# --------------------------------------------------------------------------
 # Meta
 # --------------------------------------------------------------------------
 
@@ -1520,6 +2363,23 @@ def main() -> int:
         test_offline,
         test_validator_catalog_mode,
         test_cli,
+        test_concept_query_exact_and_alias,
+        test_a_bundle_that_only_assumes_a_concept_does_not_teach_it,
+        test_more_than_one_bundle_covers_a_concept,
+        test_broad_subject_is_the_last_tier_and_never_a_recommendation,
+        test_provenance_is_kept_when_a_bundle_arrives_by_several_routes,
+        test_follow_ups_read_the_reverse_index,
+        test_forward_recommendations_keep_manifest_order,
+        test_follow_ups_put_the_authors_own_list_first,
+        test_an_unavailable_recommendation_is_reported_not_fatal,
+        test_prepare_searches_covers_against_assumes,
+        test_a_recommended_previous_bundle_answers_a_concept_query,
+        test_the_query_needle_is_guarded,
+        test_question_words_are_a_second_pass_and_are_announced,
+        test_concept_discovery_needs_no_service_and_no_bundle,
+        test_relationship_metadata_never_removes_a_tutorial,
+        test_entries_without_the_new_fields_still_work,
+        test_a_cached_catalogue_is_said_so_before_nothing_matched,
     ):
         try:
             test()
@@ -1528,6 +2388,7 @@ def main() -> int:
 
     test_kind_coverage()
     test_catalog_check_coverage()
+    test_provenance_kind_coverage()
 
     if _notes:
         print("\nnotes:")

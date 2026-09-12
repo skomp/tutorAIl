@@ -13,6 +13,12 @@ Usage:
                                     is already on disk; fetch nothing
     catalogs.py resolve <id>        print one merged entry and the bundle
                                     directory it resolves to; fetch nothing
+    catalogs.py covers <query>      print the bundles that TEACH a concept
+    catalogs.py follow-ups <id>     print what could be taken after a bundle
+    catalogs.py prepare <id>        print what covers the concepts a bundle
+                                    assumes
+
+The last three fetch nothing either, unless given --refresh.
 
 Options:
     --config PATH       the catalogue of catalogues
@@ -42,6 +48,13 @@ Three rules this script exists to keep:
     is used and marked as cached. Stale results are never presented as
     current: every catalogue is reported with the timestamp of its last
     successful refresh.
+
+  * **Covering is not assuming.** `covers` says what a bundle teaches;
+    `assumes` says what it expects you to bring. A concept query reads
+    `covers` and never `assumes`, because a bundle that assumes a concept
+    starts where a learner asking about it is stuck. Every result carries
+    the route it arrived by, and an inferred relation is never shown as
+    something an author recommended.
 
   * **Failures are not collapsed.** "The host is unreachable", "you have no
     access to this repository" and "this repository has no catalogue file"
@@ -1118,6 +1131,850 @@ def merge(results: list[CatalogResult]) -> tuple[list[MergedEntry], list[dict]]:
 
 
 # --------------------------------------------------------------------------
+# Relationships: concepts, recommendations, and the reverse index
+# --------------------------------------------------------------------------
+#
+# Four optional catalogue fields carry this: `covers`, `assumes`,
+# `recommended_follow_ups` and `recommended_previous_bundles`. They are
+# entry-level metadata for the same reason `subjects` is: discovery loads
+# metadata only, and a bundle's own tutorial.yaml may not even be on this
+# machine yet.
+#
+# Three rules this section exists to keep, each of which is easy to break by
+# accident and impossible to notice afterwards:
+#
+#   * **A query for bundles COVERING a concept searches `covers`, never
+#     `assumes`.** A bundle that assumes retained-event-logs does not teach
+#     it, and returning it as though it did sends a learner to a course that
+#     starts where they are stuck.
+#
+#   * **Provenance is kept, never flattened.** Every result says which route
+#     it arrived by, and a bundle that arrives by several routes keeps all of
+#     them. An inferred relation is NEVER presented as an author
+#     recommendation; the two are rendered in separate sections and carry a
+#     separate flag in the JSON.
+#
+#   * **The reverse index is the point.** A third party publishes a follow-up
+#     to someone else's bundle by naming it in
+#     `recommended_previous_bundles`, without touching the original. So
+#     follow-up discovery reads that field BACKWARDS, across every configured
+#     catalogue, and the original author never has to know.
+#
+# No semantic-search service is required, or used. The ranking ladder in the
+# design ends with an optional semantic tier "only if the architecture
+# already has it"; this architecture does not have one, so that tier is never
+# produced. Everything below is exact string work on normalised text, which
+# means the same catalogues always give the same answer.
+SEMANTIC_MATCHING_AVAILABLE = False
+
+CONCEPT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+ASSUMES_LEVELS = ("awareness", "conceptual", "working", "advanced")
+
+# Every provenance kind, with the rank it carries inside the query that
+# produces it, and whether it is an AUTHOR RECOMMENDATION - a human wrote
+# this bundle down - or an inference this script made.
+#
+# The rank is meaningful within one query type. A concept query ranks
+# 1 exact concept id, 2 exact per-concept alias, 3 normalised text,
+# 4 an author's recommended previous bundle, 5 broad subject; that is the
+# design's ladder, and tier 6, semantic, is never produced. A relationship
+# query ranks the author's own list first, the reverse-declared list second
+# and the inferred relatives third.
+#
+# `recommendation` is load-bearing and not cosmetic: it is what keeps a broad
+# subject match from being shown as something an author recommended.
+PROVENANCE_KINDS: dict[str, tuple[int, bool, str]] = {
+    # concept queries
+    "exact-concept": (1, False, "the query is a concept id the bundle covers"),
+    "concept-alias": (2, False, "the query is an alias of a concept it covers"),
+    "concept-text": (3, False, "the query's words appear in a covered concept"),
+    "recommended-previous": (
+        4,
+        True,
+        "an author recommends this bundle before a bundle that assumes the concept",
+    ),
+    "broad-subject": (5, False, "the query matches a subject or a bundle alias"),
+    # "what could I take after X"
+    "author-follow-up": (1, True, "X's author recommends it as a follow-up"),
+    "declared-previous": (2, True, "it names X as a recommended previous bundle"),
+    "assumes-covered": (3, False, "it assumes a concept X covers"),
+    # "how do I prepare for X"
+    "author-previous": (1, True, "X's author recommends it as a previous bundle"),
+    "declared-follow-up": (2, True, "it names X as a recommended follow-up"),
+    "covers-assumed": (3, False, "it covers a concept X assumes"),
+}
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+# Stripped from a QUERY only, and only on a second pass after the query as
+# written found nothing. The corpus is never stripped, so an exact concept id
+# or alias can never be damaged by this list.
+QUESTION_WORDS = frozenset(
+    """
+    a an and any are as at be bundle bundles by can could course courses do
+    does for from how i in is it me more of on or should show take teach
+    teaches tell that the their them then there these this to tutorial
+    tutorials want what when where which who whose will with would you your
+    about after before cover covers covering learn learning need next
+    prepare find list please available
+    """.split()
+)
+
+
+def normalise(text: Any) -> str:
+    """Fold any phrasing onto the shape a concept id has.
+
+    "Partition Offsets", "partition offsets" and "partition-offsets" are all
+    `partition-offsets`, which is what lets a learner's words hit an exact id
+    without a fuzzy matcher anywhere.
+    """
+    return "-".join(_WORD_RE.findall(str(text).lower()))
+
+
+def tokenise(text: Any) -> list[str]:
+    return _WORD_RE.findall(str(text).lower())
+
+
+class QueryError(Exception):
+    """The query itself cannot be used - it is empty, or names nothing."""
+
+
+@dataclass(frozen=True)
+class Concept:
+    """One entry of `covers` or `assumes`."""
+
+    id: str
+    summary: str
+    aliases: tuple[str, ...] = ()
+    level: str | None = None
+
+    @property
+    def alias_slugs(self) -> tuple[str, ...]:
+        return tuple(normalise(a) for a in self.aliases)
+
+    def id_tokens(self) -> set[str]:
+        return set(tokenise(self.id))
+
+    def alias_tokens(self) -> set[str]:
+        out: set[str] = set()
+        for alias in self.aliases:
+            out |= set(tokenise(alias))
+        return out
+
+    def summary_tokens(self) -> set[str]:
+        return set(tokenise(self.summary))
+
+    def as_dict(self) -> dict:
+        out: dict[str, Any] = {"id": self.id, "summary": self.summary}
+        if self.aliases:
+            out["aliases"] = list(self.aliases)
+        if self.level is not None:
+            out["level"] = self.level
+        return out
+
+
+@dataclass(frozen=True)
+class Recommendation:
+    """One entry of a recommendation list, with its place in author order."""
+
+    bundle: str
+    because: str
+    order: int
+
+    def as_dict(self) -> dict:
+        return {"bundle": self.bundle, "because": self.because, "order": self.order}
+
+
+@dataclass
+class IndexedBundle:
+    """One merged catalogue entry, with its relationship metadata read out."""
+
+    merged: MergedEntry
+    position: int
+    covers: dict[str, Concept] = field(default_factory=dict)
+    assumes: dict[str, Concept] = field(default_factory=dict)
+    follow_ups: list[Recommendation] = field(default_factory=list)
+    previous: list[Recommendation] = field(default_factory=list)
+
+    @property
+    def id(self) -> str:
+        return self.merged.id
+
+    @property
+    def title(self) -> str:
+        return str(self.merged.entry.get("title", self.id))
+
+    @property
+    def subjects(self) -> list[str]:
+        return [str(s) for s in _as_list(self.merged.entry.get("subjects"))]
+
+    @property
+    def aliases(self) -> list[str]:
+        return [str(s) for s in _as_list(self.merged.entry.get("aliases"))]
+
+    def as_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "catalog": self.merged.catalog_id,
+            "freshness": self.merged.freshness,
+            "subjects": self.subjects,
+            "aliases": self.aliases,
+            "covers": {k: v.as_dict() for k, v in self.covers.items()},
+            "assumes": {k: v.as_dict() for k, v in self.assumes.items()},
+            "recommended_follow_ups": [r.as_dict() for r in self.follow_ups],
+            "recommended_previous_bundles": [r.as_dict() for r in self.previous],
+        }
+
+
+def _as_list(value: Any) -> list:
+    if value is None:
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def read_concepts(
+    raw: Any, where: str, kind: str
+) -> tuple[dict[str, Concept], list[str]]:
+    """Read `covers` or `assumes`, tolerantly.
+
+    This is the RUNTIME reader, not the validator. A malformed concept is
+    dropped with a note and the tutorial is still offered: relationship
+    metadata is optional, so a mistake in it must never take a working course
+    out of the catalogue. Rejecting the same shapes outright is
+    validate_bundle.py's job, where an author is asking to be told.
+    """
+    concepts: dict[str, Concept] = {}
+    notes: list[str] = []
+    if raw is None:
+        return concepts, notes
+    if not isinstance(raw, dict):
+        notes.append(f"{where}: '{kind}' is not a mapping of concept id to detail")
+        return concepts, notes
+    for concept_id, detail in raw.items():
+        cid = str(concept_id)
+        if not CONCEPT_ID_RE.match(cid):
+            notes.append(
+                f"{where}: the {kind} concept id {cid!r} is not [a-z0-9-]+, so it "
+                f"was left out of the index"
+            )
+            continue
+        if not isinstance(detail, dict):
+            notes.append(f"{where}: the {kind} concept {cid!r} has no detail mapping")
+            continue
+        summary = detail.get("summary")
+        if not isinstance(summary, str) or not summary.strip():
+            notes.append(
+                f"{where}: the {kind} concept {cid!r} has no summary, so a learner "
+                f"could not tell what it means; it was left out of the index"
+            )
+            continue
+        aliases: list[str] = []
+        raw_aliases = detail.get("aliases")
+        if raw_aliases is not None:
+            if not isinstance(raw_aliases, list):
+                notes.append(
+                    f"{where}: the aliases of {kind} concept {cid!r} are not a list"
+                )
+            else:
+                seen: set[str] = set()
+                for alias in raw_aliases:
+                    text = str(alias).strip()
+                    slug = normalise(text)
+                    if not slug:
+                        notes.append(
+                            f"{where}: an empty alias on {kind} concept {cid!r}"
+                        )
+                        continue
+                    if slug in seen:
+                        notes.append(
+                            f"{where}: the alias {text!r} on {kind} concept {cid!r} "
+                            f"repeats after normalisation"
+                        )
+                        continue
+                    seen.add(slug)
+                    aliases.append(text)
+        level = None
+        if kind == "assumes":
+            level = detail.get("level")
+            level = str(level) if level is not None else None
+            if level not in ASSUMES_LEVELS:
+                notes.append(
+                    f"{where}: the assumed concept {cid!r} has level {level!r}, "
+                    f"which is not one of {', '.join(ASSUMES_LEVELS)}; it is "
+                    f"indexed without a level"
+                )
+                level = None
+        concepts[cid] = Concept(
+            id=cid,
+            summary=" ".join(summary.split()),
+            aliases=tuple(aliases),
+            level=level,
+        )
+    return concepts, notes
+
+
+def read_recommendations(
+    raw: Any, where: str, field_name: str, self_id: str
+) -> tuple[list[Recommendation], list[str]]:
+    """Read one recommendation list, keeping AUTHOR ORDER.
+
+    Author order is display order, so the index keeps each entry's position
+    and never sorts a recommendation list by anything else.
+    """
+    out: list[Recommendation] = []
+    notes: list[str] = []
+    if raw is None:
+        return out, notes
+    if not isinstance(raw, list):
+        notes.append(f"{where}: '{field_name}' is not a list")
+        return out, notes
+    seen: set[str] = set()
+    for position, item in enumerate(raw):
+        label = f"{where}: {field_name}[{position}]"
+        if not isinstance(item, dict):
+            notes.append(f"{label} is not a mapping with 'bundle' and 'because'")
+            continue
+        bundle = item.get("bundle")
+        because = item.get("because")
+        if not bundle or not str(bundle).strip():
+            notes.append(f"{label} names no bundle")
+            continue
+        bundle = str(bundle).strip()
+        if not because or not str(because).strip():
+            notes.append(
+                f"{label} recommends {bundle!r} with no 'because'; a "
+                f"recommendation with no reason is not shown"
+            )
+            continue
+        if bundle == self_id:
+            notes.append(f"{label} recommends the bundle itself, which was ignored")
+            continue
+        if bundle in seen:
+            notes.append(
+                f"{label} repeats {bundle!r}, which is already in this list; the "
+                f"first one is kept"
+            )
+            continue
+        seen.add(bundle)
+        out.append(
+            Recommendation(
+                bundle=bundle,
+                because=" ".join(str(because).split()),
+                order=len(out),
+            )
+        )
+    return out, notes
+
+
+@dataclass(frozen=True)
+class Provenance:
+    """WHY one bundle is in one result list. Never flattened away."""
+
+    kind: str
+    detail: str
+    concept: str | None = None
+    bundle: str | None = None
+    because: str | None = None
+    order: int = 0
+
+    @property
+    def rank(self) -> int:
+        return PROVENANCE_KINDS[self.kind][0]
+
+    @property
+    def recommendation(self) -> bool:
+        """True only when a human author wrote this relationship down."""
+        return PROVENANCE_KINDS[self.kind][1]
+
+    def key(self) -> tuple:
+        return (self.kind, self.concept, self.bundle)
+
+    def as_dict(self) -> dict:
+        out: dict[str, Any] = {
+            "kind": self.kind,
+            "rank": self.rank,
+            "author_recommendation": self.recommendation,
+            "detail": self.detail,
+        }
+        for name in ("concept", "bundle", "because"):
+            value = getattr(self, name)
+            if value is not None:
+                out[name] = value
+        return out
+
+
+@dataclass
+class Match:
+    """One bundle, and EVERY route by which this query reached it."""
+
+    bundle: IndexedBundle
+    provenance: list[Provenance] = field(default_factory=list)
+
+    def add(self, item: Provenance) -> None:
+        if any(p.key() == item.key() for p in self.provenance):
+            return
+        self.provenance.append(item)
+
+    @property
+    def id(self) -> str:
+        return self.bundle.id
+
+    @property
+    def rank(self) -> int:
+        return min(p.rank for p in self.provenance)
+
+    @property
+    def order(self) -> int:
+        best = min(p.rank for p in self.provenance)
+        return min(p.order for p in self.provenance if p.rank == best)
+
+    @property
+    def author_recommended(self) -> bool:
+        return any(p.recommendation for p in self.provenance)
+
+    def sort_key(self) -> tuple:
+        return (self.rank, self.order, self.bundle.position)
+
+    def as_dict(self) -> dict:
+        out = self.bundle.as_dict()
+        out["rank"] = self.rank
+        out["author_recommended"] = self.author_recommended
+        out["why"] = [p.as_dict() for p in self.provenance]
+        out["resolved_path"] = self.bundle.merged.resolved_path
+        return out
+
+
+class Collector:
+    """Deduplicate by bundle id while keeping every provenance."""
+
+    def __init__(self) -> None:
+        self._matches: dict[str, Match] = {}
+
+    def add(self, bundle: IndexedBundle, item: Provenance) -> None:
+        match = self._matches.get(bundle.id)
+        if match is None:
+            match = Match(bundle=bundle)
+            self._matches[bundle.id] = match
+        match.add(item)
+
+    def sorted(self) -> list[Match]:
+        return sorted(self._matches.values(), key=lambda m: m.sort_key())
+
+
+@dataclass
+class QueryResult:
+    kind: str
+    query: str
+    matches: list[Match]
+    notes: list[str] = field(default_factory=list)
+    unresolved: list[dict] = field(default_factory=list)
+    subject_of: str | None = None
+
+    @property
+    def recommended(self) -> list[Match]:
+        return [m for m in self.matches if m.author_recommended]
+
+    @property
+    def inferred(self) -> list[Match]:
+        return [m for m in self.matches if not m.author_recommended]
+
+    def as_dict(self) -> dict:
+        return {
+            "query_kind": self.kind,
+            "query": self.query,
+            "subject_of": self.subject_of,
+            "match_count": len(self.matches),
+            "matches": [m.as_dict() for m in self.matches],
+            "notes": list(self.notes),
+            "unresolved": list(self.unresolved),
+        }
+
+
+class RelationshipIndex:
+    """Every relationship the merged catalogues declare, both ways round."""
+
+    def __init__(self, entries: list[MergedEntry]) -> None:
+        self.bundles: dict[str, IndexedBundle] = {}
+        self.order: list[str] = []
+        self.notes: list[str] = []
+        # The reverse index. `declared_previous[a]` holds the bundles that
+        # name `a` under recommended_previous_bundles - the third-party
+        # follow-ups `a` has never heard of.
+        self.declared_previous: dict[str, list[tuple[str, Recommendation]]] = {}
+        self.declared_follow_up: dict[str, list[tuple[str, Recommendation]]] = {}
+        for position, merged in enumerate(entries):
+            entry = merged.entry
+            where = f"{merged.id} (from the {merged.catalog_id} catalogue)"
+            indexed = IndexedBundle(merged=merged, position=position)
+            covers, notes = read_concepts(entry.get("covers"), where, "covers")
+            indexed.covers = covers
+            self.notes += notes
+            assumes, notes = read_concepts(entry.get("assumes"), where, "assumes")
+            indexed.assumes = assumes
+            self.notes += notes
+            follow_ups, notes = read_recommendations(
+                entry.get("recommended_follow_ups"),
+                where,
+                "recommended_follow_ups",
+                merged.id,
+            )
+            indexed.follow_ups = follow_ups
+            self.notes += notes
+            previous, notes = read_recommendations(
+                entry.get("recommended_previous_bundles"),
+                where,
+                "recommended_previous_bundles",
+                merged.id,
+            )
+            indexed.previous = previous
+            self.notes += notes
+            self.bundles[merged.id] = indexed
+            self.order.append(merged.id)
+        for identifier in self.order:
+            indexed = self.bundles[identifier]
+            for rec in indexed.previous:
+                self.declared_previous.setdefault(rec.bundle, []).append(
+                    (identifier, rec)
+                )
+            for rec in indexed.follow_ups:
+                self.declared_follow_up.setdefault(rec.bundle, []).append(
+                    (identifier, rec)
+                )
+
+    # -- concept matching ------------------------------------------------
+
+    def _concept_hit(
+        self, concept: Concept, slug: str, tokens: list[str]
+    ) -> tuple[str, str, str] | None:
+        """Which tier of the ladder this concept answers on, if any.
+
+        Returns (kind, matched-term, where-it-matched), or None. Tiers 1 and 2
+        are exact on normalised text, so an identifier or an alias always
+        wins, deterministically and with no service of any kind.
+        """
+        if slug and slug == concept.id:
+            return ("exact-concept", concept.id, "id")
+        if slug:
+            for alias, alias_slug in zip(concept.aliases, concept.alias_slugs):
+                if slug == alias_slug:
+                    return ("concept-alias", alias, "alias")
+        if not tokens:
+            return None
+        wanted = set(tokens)
+        if wanted <= concept.id_tokens():
+            return ("concept-text", concept.id, "id")
+        if wanted <= concept.alias_tokens():
+            return ("concept-text", ", ".join(concept.aliases), "aliases")
+        if wanted <= concept.summary_tokens():
+            return ("concept-text", concept.id, "summary")
+        return None
+
+    def _covering_pass(self, query: str, collector: Collector) -> bool:
+        """Tiers 1-5 for one spelling of the query. True if anything matched.
+
+        THE `covers` LOOP READS `covers` AND NOTHING ELSE. A bundle that only
+        assumes the concept is not teaching it, and tier 4 below is the one
+        route by which an assuming bundle contributes - and even then it
+        contributes the bundle its AUTHOR recommends, never itself.
+        """
+        slug = normalise(query)
+        tokens = tokenise(query)
+        found = False
+        for identifier in self.order:
+            bundle = self.bundles[identifier]
+            for concept in bundle.covers.values():
+                hit = self._concept_hit(concept, slug, tokens)
+                if hit is None:
+                    continue
+                kind, term, where = hit
+                if kind == "exact-concept":
+                    detail = f"Exact concept match: {concept.id}"
+                elif kind == "concept-alias":
+                    detail = f"Alias match: {term} (an alias of {concept.id})"
+                else:
+                    detail = (
+                        f"Text match on the {where} of {concept.id}: "
+                        f"\"{query.strip()}\""
+                    )
+                collector.add(
+                    bundle, Provenance(kind=kind, detail=detail, concept=concept.id)
+                )
+                found = True
+
+        # Tier 4. An author who says "take that bundle first" is telling us
+        # where a concept they ASSUME can be learnt. The assuming bundle is
+        # not returned; the bundle its author points at is.
+        for identifier in self.order:
+            bundle = self.bundles[identifier]
+            for concept in bundle.assumes.values():
+                if self._concept_hit(concept, slug, tokens) is None:
+                    continue
+                for rec in bundle.previous:
+                    target = self.bundles.get(rec.bundle)
+                    if target is None or target.id == identifier:
+                        continue
+                    collector.add(
+                        target,
+                        Provenance(
+                            kind="recommended-previous",
+                            detail=(
+                                f"Recommended by {identifier} as a previous "
+                                f"bundle; {identifier} assumes {concept.id}"
+                            ),
+                            concept=concept.id,
+                            bundle=identifier,
+                            because=rec.because,
+                            order=rec.order,
+                        ),
+                    )
+                    found = True
+
+        # Tier 5. Broad classification, and never an author recommendation.
+        for identifier in self.order:
+            bundle = self.bundles[identifier]
+            for label, values in (
+                ("subject", bundle.subjects),
+                ("alias", bundle.aliases),
+            ):
+                for value in values:
+                    if not self._broad_hit(value, slug, tokens):
+                        continue
+                    detail = (
+                        f"Related subject: {value}"
+                        if label == "subject"
+                        else f"Related bundle alias: {value}"
+                    )
+                    collector.add(
+                        bundle,
+                        Provenance(
+                            kind="broad-subject", detail=detail, concept=value
+                        ),
+                    )
+                    found = True
+        return found
+
+    @staticmethod
+    def _broad_hit(value: str, slug: str, tokens: list[str]) -> bool:
+        if slug and slug == normalise(value):
+            return True
+        return bool(tokens) and set(tokens) <= set(tokenise(value))
+
+    def covering(self, query: str) -> QueryResult:
+        """Bundles that TEACH the concept the query names.
+
+        Two passes at most: the query exactly as the learner wrote it, then -
+        only if that found nothing - the same query with the question words
+        removed. The second pass is announced in the result's notes, so a
+        looser match is never passed off as a direct hit.
+        """
+        if not tokenise(query):
+            raise QueryError(
+                "the query holds no letters or digits, so it names no concept. "
+                "An empty query would match every bundle, which is worse than "
+                "no answer"
+            )
+        collector = Collector()
+        notes: list[str] = []
+        if not self._covering_pass(query, collector):
+            stripped = " ".join(
+                t for t in tokenise(query) if t not in QUESTION_WORDS
+            )
+            if stripped and normalise(stripped) != normalise(query):
+                if self._covering_pass(stripped, collector):
+                    notes.append(
+                        f"nothing matched {query.strip()!r} as written; these "
+                        f"matched {stripped!r}, the same query with the question "
+                        f"words removed"
+                    )
+        return QueryResult(
+            kind="covering", query=query, matches=collector.sorted(), notes=notes
+        )
+
+    # -- relationship queries --------------------------------------------
+
+    def follow_ups(self, bundle_id: str) -> QueryResult:
+        """What a learner could take AFTER this bundle.
+
+        The author's own list first, in author order. Then the reverse index:
+        every available bundle that names this one as a recommended previous
+        bundle, which is how a third party attaches a follow-up to a course
+        whose author has never heard of them. Inferred relatives last, and
+        marked as inferred.
+        """
+        bundle = self._require(bundle_id)
+        collector = Collector()
+        unresolved: list[dict] = []
+        for rec in bundle.follow_ups:
+            target = self.bundles.get(rec.bundle)
+            if target is None:
+                unresolved.append(
+                    {
+                        "bundle": rec.bundle,
+                        "because": rec.because,
+                        "declared_by": bundle.id,
+                        "field": "recommended_follow_ups",
+                    }
+                )
+                continue
+            collector.add(
+                target,
+                Provenance(
+                    kind="author-follow-up",
+                    detail=f"Recommended by {bundle.id} as a follow-up",
+                    bundle=bundle.id,
+                    because=rec.because,
+                    order=rec.order,
+                ),
+            )
+        for other_id, rec in self.declared_previous.get(bundle.id, []):
+            other = self.bundles[other_id]
+            if other.id == bundle.id:
+                continue
+            collector.add(
+                other,
+                Provenance(
+                    kind="declared-previous",
+                    detail=(
+                        f"{other.id} names {bundle.id} as a recommended previous "
+                        f"bundle"
+                    ),
+                    bundle=other.id,
+                    because=rec.because,
+                    order=rec.order,
+                ),
+            )
+        for identifier in self.order:
+            other = self.bundles[identifier]
+            if other.id == bundle.id:
+                continue
+            for concept in other.assumes.values():
+                if concept.id not in bundle.covers:
+                    continue
+                level = f" at level {concept.level}" if concept.level else ""
+                collector.add(
+                    other,
+                    Provenance(
+                        kind="assumes-covered",
+                        detail=(
+                            f"Assumes {concept.id}{level}, which {bundle.id} "
+                            f"covers"
+                        ),
+                        concept=concept.id,
+                        order=0,
+                    ),
+                )
+        return QueryResult(
+            kind="follow-ups",
+            query=bundle.id,
+            subject_of=bundle.id,
+            matches=collector.sorted(),
+            notes=[],
+            unresolved=unresolved,
+        )
+
+    def prepare_for(self, bundle_id: str) -> QueryResult:
+        """What a learner could take BEFORE this bundle.
+
+        The author's own `recommended_previous_bundles` first, in author
+        order; then bundles whose author names this one as a follow-up; then
+        every available bundle that COVERS a concept this one ASSUMES, which
+        is the concept-level answer and the reason `assumes` carries a summary
+        at all.
+        """
+        bundle = self._require(bundle_id)
+        collector = Collector()
+        unresolved: list[dict] = []
+        for rec in bundle.previous:
+            target = self.bundles.get(rec.bundle)
+            if target is None:
+                unresolved.append(
+                    {
+                        "bundle": rec.bundle,
+                        "because": rec.because,
+                        "declared_by": bundle.id,
+                        "field": "recommended_previous_bundles",
+                    }
+                )
+                continue
+            collector.add(
+                target,
+                Provenance(
+                    kind="author-previous",
+                    detail=f"Recommended by {bundle.id} as a previous bundle",
+                    bundle=bundle.id,
+                    because=rec.because,
+                    order=rec.order,
+                ),
+            )
+        for other_id, rec in self.declared_follow_up.get(bundle.id, []):
+            other = self.bundles[other_id]
+            if other.id == bundle.id:
+                continue
+            collector.add(
+                other,
+                Provenance(
+                    kind="declared-follow-up",
+                    detail=(
+                        f"{other.id} names {bundle.id} as a recommended follow-up"
+                    ),
+                    bundle=other.id,
+                    because=rec.because,
+                    order=rec.order,
+                ),
+            )
+        notes: list[str] = []
+        for concept in bundle.assumes.values():
+            level = f" at level {concept.level}" if concept.level else ""
+            covered = False
+            for identifier in self.order:
+                other = self.bundles[identifier]
+                if other.id == bundle.id:
+                    continue
+                if concept.id not in other.covers:
+                    continue
+                covered = True
+                collector.add(
+                    other,
+                    Provenance(
+                        kind="covers-assumed",
+                        detail=(
+                            f"Covers {concept.id}, which {bundle.id} assumes"
+                            f"{level}"
+                        ),
+                        concept=concept.id,
+                        order=0,
+                    ),
+                )
+            if not covered:
+                # Said out loud, because the alternative is a list that looks
+                # complete. An assumed concept nothing here teaches is a real
+                # answer to "how do I prepare", and it is not a blocker: the
+                # learner decides, and may already know it.
+                notes.append(
+                    f"no available bundle covers {concept.id}, which "
+                    f"{bundle.id} assumes{level}: {concept.summary}"
+                )
+        return QueryResult(
+            kind="prepare",
+            query=bundle.id,
+            subject_of=bundle.id,
+            matches=collector.sorted(),
+            notes=notes,
+            unresolved=unresolved,
+        )
+
+    def _require(self, bundle_id: str) -> IndexedBundle:
+        bundle = self.bundles.get(bundle_id)
+        if bundle is None:
+            available = ", ".join(self.order) or "(none)"
+            raise QueryError(
+                f"no catalogue supplies {bundle_id!r}. Available: {available}"
+            )
+        return bundle
+
+
+# --------------------------------------------------------------------------
 # Rendering
 # --------------------------------------------------------------------------
 
@@ -1235,6 +2092,7 @@ def render_entries(
             if key in entry and entry[key] not in (None, "", []):
                 text = " ".join(_join(entry[key]).split())
                 print(f"      {label + ':':<16}{text}", file=stream)
+        render_entry_relationships(entry, stream)
         for catalog_id, origin in item.shadowed:
             print(
                 f"      OVERRIDES:      the {catalog_id} catalogue also "
@@ -1252,6 +2110,117 @@ def render_entries(
                 f"{item['shadowed_by']} catalogue supplies this id instead",
                 file=stream,
             )
+        print("", file=stream)
+
+
+def render_entry_relationships(entry: dict, stream) -> None:
+    """The relationship metadata of one entry, in one line per field.
+
+    Concept ids only. The summaries belong in a concept query's answer, where
+    the learner asked about a concept; repeating them for every entry in a
+    discovery listing buries the fields a learner chooses on.
+    """
+    where = str(entry.get("id", "an entry"))
+    covers, _ = read_concepts(entry.get("covers"), where, "covers")
+    assumes, _ = read_concepts(entry.get("assumes"), where, "assumes")
+    follow_ups, _ = read_recommendations(
+        entry.get("recommended_follow_ups"), where, "recommended_follow_ups", where
+    )
+    previous, _ = read_recommendations(
+        entry.get("recommended_previous_bundles"),
+        where,
+        "recommended_previous_bundles",
+        where,
+    )
+    if covers:
+        print(f"      {'covers:':<16}{', '.join(covers)}", file=stream)
+    if assumes:
+        shown = ", ".join(
+            f"{c.id} ({c.level})" if c.level else c.id for c in assumes.values()
+        )
+        print(f"      {'assumes:':<16}{shown}", file=stream)
+    if follow_ups:
+        print(
+            f"      {'after this:':<16}"
+            f"{', '.join(r.bundle for r in follow_ups)} (recommended by the author)",
+            file=stream,
+        )
+    if previous:
+        print(
+            f"      {'before this:':<16}"
+            f"{', '.join(r.bundle for r in previous)} (recommended by the author)",
+            file=stream,
+        )
+
+
+def render_match(match: Match, stream) -> None:
+    merged = match.bundle.merged
+    print("", file=stream)
+    print(
+        f"  {match.id}  [{merged.freshness}]  from the {merged.catalog_id} "
+        f"catalogue",
+        file=stream,
+    )
+    print(f"      {'title:':<16}{match.bundle.title}", file=stream)
+    for item in match.provenance:
+        # The tag is the whole of rule "an inferred match is never presented
+        # as an author recommendation", written on every single line rather
+        # than once at the top of a section.
+        tag = (
+            "[author recommendation]"
+            if item.recommendation
+            else "[not an author recommendation]"
+        )
+        print(f"      {'why:':<16}{item.detail}  {tag}", file=stream)
+        if item.because:
+            print(
+                f"      {'':<16}  because ({item.bundle}): {item.because}",
+                file=stream,
+            )
+
+
+def render_query(result: QueryResult, heading: str, stream) -> None:
+    """One query's answer, with the author-curated part kept separate.
+
+    The two sections are not decoration. A broad subject match and an author's
+    written recommendation are different claims about a course, and merging
+    them into one ranked list is the failure this split exists to prevent.
+    """
+    print(heading, file=stream)
+    print("", file=stream)
+    for text in result.notes:
+        print(f"note: {text}", file=stream)
+    if result.notes:
+        print("", file=stream)
+    if not result.matches:
+        print("  (no bundle matched)", file=stream)
+    recommended = result.recommended
+    inferred = result.inferred
+    if recommended:
+        print(
+            f"recommended by an author ({len(recommended)}), in author order:",
+            file=stream,
+        )
+        for match in recommended:
+            render_match(match, stream)
+        print("", file=stream)
+    if inferred:
+        print(
+            f"related, found by matching metadata ({len(inferred)}) - these are "
+            f"NOT author recommendations:",
+            file=stream,
+        )
+        for match in inferred:
+            render_match(match, stream)
+        print("", file=stream)
+    for item in result.unresolved:
+        print(
+            f"unresolved: {item['declared_by']} recommends {item['bundle']!r} "
+            f"under {item['field']}, and no configured catalogue carries it. "
+            f"Say so; it is a pointer, not a requirement.",
+            file=stream,
+        )
+    if result.unresolved:
         print("", file=stream)
 
 
@@ -1480,6 +2449,115 @@ def command_resolve(args, stream) -> int:
 
 
 # --------------------------------------------------------------------------
+# The relationship commands
+# --------------------------------------------------------------------------
+#
+# None of these fetches by default. A concept query is asked in the middle of
+# a conversation, often several times, and refreshing once per question is
+# the "refresh per turn" failure the catalogue document forbids. `discover`
+# refreshes; these read what that left behind, exactly as `resolve` does.
+# `--refresh` is there for a learner who has just added a catalogue.
+
+
+def query_exit_code(results: list[CatalogResult], matches: list) -> int:
+    if not matches:
+        return 3
+    if any(r.state != "current" for r in results):
+        return 1
+    return 0
+
+
+def run_query(args, stream, build, heading, missing_code: int) -> int:
+    cache = Cache(expand(args.cache_dir))
+    config = expand(args.config)
+    run = gather(config, cache, bool(getattr(args, "refresh", False)), args.timeout)
+    index = RelationshipIndex(run.entries)
+    try:
+        result = build(index)
+    except QueryError as exc:
+        if args.json:
+            print(
+                json.dumps(
+                    {
+                        "command": args.command,
+                        "found": False,
+                        "error": str(exc),
+                        "available": [e.id for e in run.entries],
+                        "exit_code": missing_code,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                ),
+                file=stream,
+            )
+        else:
+            print(f"error: {exc}", file=sys.stderr)
+            render_warnings(run.results, stream)
+        return missing_code
+    code = query_exit_code(run.results, result.matches)
+    if args.json:
+        payload = result.as_dict()
+        payload.update(
+            {
+                "command": args.command,
+                "config": str(config),
+                "index_notes": index.notes,
+                "catalogs": [r.as_dict() for r in run.results],
+                "semantic_matching": SEMANTIC_MATCHING_AVAILABLE,
+                "exit_code": code,
+            }
+        )
+        print(json.dumps(payload, indent=2, sort_keys=True), file=stream)
+        return code
+    render_header(args.command, config, run.note, cache, stream)
+    render_warnings(run.results, stream)
+    render_query(result, heading, stream)
+    for text in index.notes:
+        print(f"metadata problem: {text}", file=stream)
+    if index.notes:
+        print("", file=stream)
+    print(
+        "Matching used concept ids, aliases and subjects only - no semantic "
+        "search and no service. Every line above says why that bundle is "
+        "there. Offer them; never auto-start one.",
+        file=stream,
+    )
+    return code
+
+
+def command_covers(args, stream) -> int:
+    return run_query(
+        args,
+        stream,
+        lambda index: index.covering(args.query),
+        f"bundles that COVER {args.query.strip()!r} "
+        f"(what they teach, never what they assume):",
+        missing_code=2,
+    )
+
+
+def command_follow_ups(args, stream) -> int:
+    return run_query(
+        args,
+        stream,
+        lambda index: index.follow_ups(args.id),
+        f"bundles to take AFTER {args.id}:",
+        missing_code=3,
+    )
+
+
+def command_prepare(args, stream) -> int:
+    return run_query(
+        args,
+        stream,
+        lambda index: index.prepare_for(args.id),
+        f"bundles that prepare for {args.id} "
+        f"(they cover what it assumes; none of them is required):",
+        missing_code=3,
+    )
+
+
+# --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
 
@@ -1517,6 +2595,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     resolve.add_argument("id", help="the tutorial id the learner chose")
     resolve.set_defaults(run=command_resolve, offline=True)
+
+    covers = sub.add_parser(
+        "covers", help="which bundles TEACH a concept (never which assume it)"
+    )
+    covers.add_argument("query", help="a concept id, an alias, or a phrase")
+    covers.add_argument(
+        "--refresh",
+        action="store_true",
+        help="refresh the catalogues first; by default this reads what "
+        "`discover` left on disk",
+    )
+    covers.set_defaults(run=command_covers)
+
+    follow_ups = sub.add_parser(
+        "follow-ups", help="what a learner could take after a bundle"
+    )
+    follow_ups.add_argument("id", help="the bundle just finished")
+    follow_ups.add_argument("--refresh", action="store_true")
+    follow_ups.set_defaults(run=command_follow_ups)
+
+    prepare = sub.add_parser(
+        "prepare", help="what covers the concepts a bundle assumes"
+    )
+    prepare.add_argument("id", help="the bundle the learner wants to be ready for")
+    prepare.add_argument("--refresh", action="store_true")
+    prepare.set_defaults(run=command_prepare)
     return parser
 
 

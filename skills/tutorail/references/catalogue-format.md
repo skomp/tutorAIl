@@ -103,9 +103,17 @@ the `git` command, and nothing else.
 | `catalogs.py discover` | a discovery request starts | refreshes every catalogue, then prints the merged catalogue and the status of each source |
 | `catalogs.py status` | the learner asks what is configured, or a failure needs explaining | prints each catalogue's state from disk; fetches nothing |
 | `catalogs.py resolve <id>` | the learner has chosen | prints that entry and the bundle directory it resolves to, and checks the bundle is really there |
+| `catalogs.py covers <query>` | the learner asks who **teaches** a concept | prints every bundle whose `covers` answers, with the reason each one matched |
+| `catalogs.py follow-ups <id>` | a course finished, or the learner asks what comes next | prints the author's follow-ups, then the bundles that name this one as a previous bundle |
+| `catalogs.py prepare <id>` | the learner asks how to get ready for a course | prints the bundles that cover what it `assumes` |
+
+The last three are **section 12**, and they fetch nothing unless given `--refresh`. A
+concept question is asked in the middle of a conversation, often several times, and
+refreshing once per question is the per-turn refresh this document forbids below.
 
 Useful options: `--json` for an exact machine-readable form, `--offline` to serve what is
-on disk without fetching, `--timeout SECONDS` for a slow host.
+on disk without fetching, `--timeout SECONDS` for a slow host. A query that starts with a
+`-` needs `--` before it, as with any command.
 
 Exit codes: `0` every catalogue answered; `1` at least one was served from cache or could
 not be served, and there is still something to offer; `2` the configuration is unusable and
@@ -156,6 +164,10 @@ tutorials:
 | `style` | SHOULD | `project-driven`, `exercise-based`, `interactive`, `long-form`. |
 | `scope` | SHOULD | Honest size. "23 lessons; months of work" is a service to the learner. |
 | `workspace_kind` | MUST | What the course needs of a workspace. Surfaced at choice time. |
+| `covers` | SHOULD | The concepts the course **teaches**, each with a `summary` and optional `aliases`. Section 12. |
+| `assumes` | SHOULD | The concepts the course **expects you to bring**, each with a `level` and a `summary`. Never a gate. Section 12. |
+| `recommended_follow_ups` | MAY | Courses the author suggests **after** this one, each with a `because`. Author order is display order. |
+| `recommended_previous_bundles` | MAY | Courses the author suggests **before** this one, each with a `because`. This is how a course attaches itself to an earlier one. |
 | `source` | MUST | Where the bundle is. See section 5.1. |
 
 The entry duplicates fields that also appear in the bundle's `tutorial.yaml`. That is
@@ -258,6 +270,10 @@ Show git's message as it stands rather than deciding for it.
 
 Matching is agent judgement against `subjects`, `aliases`, `title`, `description`,
 `level` and `style`. It is not a scoring function, and there is no threshold to tune.
+
+**When the learner names a concept rather than a subject, section 12 is the answer** and
+it is not judgement: `catalogs.py covers <concept>` is deterministic, and it tells you
+which bundles teach that concept and why each one is in the list.
 
 Rules, all of which matter more than ranking quality:
 
@@ -430,3 +446,188 @@ where every bundle must travel with the catalogue.
 - **Managing credentials.** No tokens, no secrets, no prompting. Git already has the
   user's access, or the user has a repair to make.
 - **Materializing before the learner has chosen.** Presenting is free; copying is not.
+
+---
+
+## 12. Concepts — `covers`, `assumes` and recommendations
+
+Four optional entry fields carry the relationships between courses. They are metadata, in
+the catalogue, for the same reason `subjects` is: section 1 holds, and a concept question
+must be answerable without opening a bundle that may not be on this machine at all.
+
+> **Named bundles are recommendations. Concepts are the educational contract. Neither one
+> gates access to a tutorial, and neither one asks the learner to prove anything.**
+
+```yaml
+covers:
+  retained-event-logs:
+    summary: >
+      Records remain available after they are read and can be replayed from
+      logical offsets.
+    aliases: [append-only-log, replayable-log]
+
+assumes:
+  go-programming:
+    level: working          # awareness | conceptual | working | advanced
+    summary: >
+      Write, test, and refactor ordinary Go programs using packages,
+      goroutines, channels, errors, and contexts.
+
+recommended_follow_ups:
+  - bundle: distributed-log-broker
+    because: >
+      Extend the broker with multi-node placement, replication,
+      acknowledgement policies, and failure recovery.
+
+recommended_previous_bundles:
+  - bundle: durable-event-broker
+    because: >
+      It teaches the retained-log, topic-partition, and offset model used here.
+```
+
+| Field | Holds | Each concept needs |
+|---|---|---|
+| `covers` | what the course **teaches** | `summary`; `aliases` optional |
+| `assumes` | what the course **uses without teaching from first principles** | `level` and `summary`, both |
+
+A concept id is `[a-z0-9-]+`, names a technical concept and never a lesson filename, and
+is stable once published. There is **no central registry**: two authors who pick the same
+id have agreed about a concept, and that is the whole mechanism.
+
+| `assumes` level | The learner can |
+|---|---|
+| `awareness` | recognise the concept and its purpose |
+| `conceptual` | explain the model and its major consequences |
+| `working` | apply it in ordinary implementation or diagnosis |
+| `advanced` | reason about hard edge cases and trade-offs with no introduction |
+
+One concept may appear in both `covers` and `assumes` — a course that expects a baseline
+and then teaches it deeper. That overlap is legal, and what decides a "who teaches this"
+query is `covers`.
+
+`subjects` keeps its meaning exactly. `covers` does not replace it: `subjects` is broad
+classification for finding a course, and `covers` is a precise claim about what it teaches.
+
+### 12.1 `covers` answers "who teaches this". `assumes` never does.
+
+> **A query for bundles covering a concept searches `covers`, and never `assumes`.**
+
+This is the single distinction the whole feature rests on. A course that *assumes*
+retained event logs begins where a learner asking about them is stuck, so returning it as
+a course that *teaches* them wastes exactly the time the question was asked to save.
+
+`catalogs.py covers <query>` keeps the rule mechanically. Run it rather than reading the
+entries yourself.
+
+### 12.2 The ranking, and why each result explains itself
+
+`covers` ranks its answers on a fixed ladder, and prints the reason on every line:
+
+| Rank | Route | The line it prints |
+|---|---|---|
+| 1 | the query is a concept id in `covers` | `Exact concept match: partition-offsets` |
+| 2 | the query is one of that concept's `aliases` | `Alias match: stream-offsets (an alias of partition-offsets)` |
+| 3 | the query's words appear in the concept's id, aliases or summary | `Text match on the summary of retained-event-logs: "logical offsets"` |
+| 4 | an author names this bundle as the way into a concept **they** assume | `Recommended by streaming-query-engine as a previous bundle` |
+| 5 | the query matches a `subject` or a bundle-level alias | `Related subject: event-streaming` |
+
+Ranks 1 and 2 are exact comparisons on normalised text, so "Partition Offsets",
+"partition offsets" and `partition-offsets` are one query and always give the same answer.
+**No semantic-search service is used or required**, and there is no scoring function to
+tune. A question asked as a whole sentence is tried as written first; only if that finds
+nothing is it retried with the question words removed, and the report says so when it was.
+
+Pass these reasons on to the learner. "Best match" is not a reason; "it covers
+`partition-offsets`, which is the phrase you used" is.
+
+### 12.3 Several answers, kept several
+
+- **Never collapse to one result.** A concept a learner asks about may be taught by three
+  courses; all three are offered. The one named in someone's `recommended_previous_bundles`
+  ranks first and hides nothing.
+- **Never drop a lower tier.** A broad subject match is a weaker answer, not a wrong one.
+  Rank it lower and say why it is lower. Section 8 applies here unchanged.
+
+### 12.4 Provenance, and the line that must never be crossed
+
+Every result carries **why** it is in the list, and a bundle reached by several routes
+keeps **all** of them rather than the best one.
+
+> **An inferred match is never presented as an author recommendation.**
+
+An author recommendation is a sentence a human wrote in `recommended_follow_ups` or
+`recommended_previous_bundles`, and it arrives with that author's own `because`. Everything
+else — a shared concept id, an overlapping subject — is this runner noticing a pattern. The
+report prints the two in separate sections and tags every single line
+`[author recommendation]` or `[not an author recommendation]`. Keep that separation when
+you present them; do not merge them into one ranked list, and do not paraphrase an
+inference into "the author suggests".
+
+### 12.5 After a course: `follow-ups`, and the reverse index
+
+`catalogs.py follow-ups <id>` answers "what could I take after this", from three places, in
+this order:
+
+1. the finished bundle's own `recommended_follow_ups`, **in author order**;
+2. every available bundle that names the finished one in its
+   `recommended_previous_bundles` — read **backwards**, across every configured catalogue;
+3. bundles that `assume` a concept the finished one `covers`, marked as inferred.
+
+Point 2 is the reason the design is shaped this way. **A third party publishes a follow-up
+to somebody else's course by naming it under `recommended_previous_bundles`, and the
+original author never has to know, never has to agree, and never has to change a file.**
+There is no registry and no central list; the link exists because one author wrote it down,
+and it is found because the index reads that field in both directions.
+
+A forward recommendation that no configured catalogue carries is **reported and not
+fatal** — it is a pointer to a course that exists somewhere, not a dependency. Say that it
+is unavailable; never fail a completed course over it, and never offer it as though it were
+on the machine.
+
+### 12.6 Before a course: `prepare`
+
+`catalogs.py prepare <id>` answers "how do I get ready for this", from the bundle's own
+`recommended_previous_bundles` first, then bundles whose authors name it as a follow-up,
+then every available bundle that **covers** a concept it **assumes**. An assumed concept
+that nothing available covers is stated plainly rather than left as a silent gap.
+
+None of it is a requirement. `assumes` is not a gate, an entitlement check or a completion
+check, and this runner has no way to express one:
+
+- **Never ask whether another bundle was completed**, and never look for a previous
+  instance, licence or workspace to decide whether a learner may start.
+- **Never auto-start, install, purchase or materialise** anything from a recommendation.
+- **Never copy a previous course's workspace** because of relationship metadata.
+  `recommended_previous_bundles` says *this is a good course to take earlier* and nothing
+  else; what a workspace starts from is the workspace contract's business.
+- The learner reads `assumes`, and the learner decides.
+
+### 12.7 Exit codes and metadata problems
+
+`covers`, `follow-ups` and `prepare` use the same codes as the rest of the script: `0` all
+catalogues answered and something matched, `1` something matched but a catalogue was cached
+or missing, `3` nothing matched or the bundle id is unknown, `2` the query is unusable — an
+empty query is refused rather than answered with every bundle.
+
+Relationship metadata is **optional**, so a mistake in it never takes a working course out
+of the catalogue. A malformed concept or recommendation is dropped from the index and
+reported as a `metadata problem` line. Pass those on to whoever can fix the entry;
+`validate_bundle.py` is where an author asks to be told about them properly.
+
+### 12.8 Failure modes to refuse, for concepts
+
+- **Answering "who teaches X" from `assumes`.** It sends the learner to the course that
+  begins where they are stuck. Section 12.1.
+- **Collapsing a concept query to the one bundle somebody recommended.** Section 12.3.
+- **Presenting a shared subject, or a shared concept id, as something the author
+  recommended.** Section 12.4.
+- **Dropping the reason a bundle matched.** A result that cannot explain itself cannot be
+  corrected by the learner. Section 12.2.
+- **Treating `assumes` as a prerequisite check**, asking whether an earlier course was
+  finished, or refusing to start one. Section 12.6.
+- **Failing a completed course because a recommended follow-up is not installed.**
+  Section 12.5.
+- **Requiring a semantic search service.** Exact ids and aliases are deterministic, and
+  nothing here may depend on a service being reachable. Section 12.2.
+- **Inventing a concept id an entry does not carry**, or reading a course's content to
+  guess at one. Section 1 still holds: discovery loads metadata only.

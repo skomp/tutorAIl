@@ -1,0 +1,169 @@
+# The normative relationship example, as a catalogue.
+#
+# Three bundles, from section 10 of the bundle-relationships design:
+#
+#   durable-event-broker     teaches the log, offset and partition model, and
+#                            recommends two follow-ups - one of which no
+#                            catalogue here carries, deliberately.
+#   streaming-query-engine   ASSUMES that model and names the broker as a
+#                            previous bundle. It must never be returned as a
+#                            bundle that COVERS retained-event-logs.
+#   log-replay-forensics     a fictional THIRD PARTY. It names the broker as
+#                            a previous bundle; the broker has never heard of
+#                            it. Follow-up discovery finds it anyway, through
+#                            the reverse index, and that case is the whole
+#                            reason the design is open-ended.
+#
+# The bundle directories are deliberately NOT here. Concept discovery loads
+# metadata only and never opens anything under a bundle path, and a fixture
+# whose bundles are absent is what proves it.
+
+catalog_version: 1
+tutorials:
+  - id: durable-event-broker
+    title: Build a Durable Event Broker
+    description: >
+      Build a single-node event broker with a retained log, topic partitions,
+      offsets and a group commit protocol.
+    subjects: [event-streaming, storage-engines, go]
+    aliases: [message-broker, event-log]
+    level: intermediate
+    style: [project-driven, long-form]
+    scope: "18 lessons; weeks of work"
+    workspace_kind: new-repository
+    covers:
+      retained-event-logs:
+        summary: >
+          Records remain available after they are read and can be replayed
+          from logical offsets.
+        aliases: [append-only-log, replayable-log]
+      partition-offsets:
+        summary: >
+          A consumer position is a numeric offset inside one partition, owned
+          by the consumer and not by the broker.
+        aliases: [stream-offsets, consumer-position]
+      topic-partitions:
+        summary: >
+          A topic is split into partitions, and ordering is guaranteed inside
+          a partition and nowhere else.
+      group-commit:
+        summary: >
+          Many writes share one fsync, which is what makes a durable log fast
+          enough to be useful.
+    assumes:
+      go-programming:
+        level: working
+        summary: >
+          Write, test, and refactor ordinary Go programs using packages,
+          goroutines, channels, errors, and contexts.
+    recommended_follow_ups:
+      - bundle: distributed-log-broker
+        because: >
+          Extend the broker with multi-node placement, replication,
+          acknowledgement policies, and failure recovery.
+      - bundle: streaming-query-engine
+        because: >
+          Query the log you just built, instead of consuming it record by
+          record.
+    source:
+      type: local
+      path: durable-event-broker
+
+  - id: streaming-query-engine
+    title: Build a Streaming Query Engine
+    description: >
+      Parse and run bounded and continuous queries over a partitioned event
+      stream, with windowed aggregation.
+    subjects: [event-streaming, query-engines, go]
+    aliases: [stream-sql, continuous-queries]
+    level: advanced
+    style: [project-driven, long-form]
+    scope: "21 lessons; months of work"
+    workspace_kind: new-repository
+    covers:
+      stream-query-parsing:
+        summary: >
+          Turn a query written as text into a plan a stream executor can run.
+      bounded-stream-queries:
+        summary: >
+          Answer a query over a finite range of a stream and then stop.
+      continuous-stream-queries:
+        summary: >
+          Keep a query open and emit results as new records arrive.
+      windowed-aggregation:
+        summary: >
+          Aggregate over tumbling, sliding and session windows, and decide
+          what a late record does to a closed window.
+    assumes:
+      go-programming:
+        level: working
+        summary: >
+          Write, test, and refactor ordinary Go programs using packages,
+          goroutines, channels, errors, and contexts.
+      retained-event-logs:
+        level: conceptual
+        summary: >
+          Explain why a record stays readable after it is consumed, and what
+          replay from an offset means.
+      partition-offsets:
+        level: working
+        summary: >
+          Track and commit a consumer position, and reason about what
+          replaying from an earlier offset does to a result.
+      topic-partitions:
+        level: conceptual
+        summary: >
+          Explain why ordering holds inside a partition and not across a
+          topic.
+      consumer-offsets:
+        level: working
+        summary: >
+          Manage where a consumer group is in each partition, and what a
+          rebalance does to it.
+    recommended_previous_bundles:
+      - bundle: durable-event-broker
+        because: >
+          It teaches the retained-log, topic-partition, and offset model used
+          here.
+    source:
+      type: local
+      path: streaming-query-engine
+
+  - id: log-replay-forensics
+    title: Forensic Replay of a Retained Event Log
+    description: >
+      Reconstruct what a system did by replaying its retained log, and
+      instrument the replay so the reconstruction can be trusted.
+    subjects: [observability, event-streaming]
+    aliases: [incident-replay, log-forensics]
+    level: intermediate
+    style: [exercise-based]
+    scope: "9 lessons; a few days of work"
+    workspace_kind: existing-or-new-repository
+    covers:
+      offset-lag-monitoring:
+        summary: >
+          Measure how far behind a consumer is, per partition, and tell a
+          slow consumer apart from a stalled one.
+        aliases: [consumer-lag, lag-monitoring]
+      retained-event-logs:
+        summary: >
+          Read a retained log as evidence: what replay guarantees, what it
+          does not, and where a gap in the log comes from.
+    assumes:
+      retained-event-logs:
+        level: working
+        summary: >
+          Replay a log from an offset and predict what a consumer sees.
+      partition-offsets:
+        level: working
+        summary: >
+          Read a committed offset and say what it means about a consumer.
+    recommended_previous_bundles:
+      - bundle: durable-event-broker
+        because: >
+          It builds the retained log this course reads, which makes the
+          guarantees concrete rather than assumed.
+    source:
+      type: local
+      path: log-replay-forensics
