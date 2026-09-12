@@ -126,3 +126,39 @@ and leaving it out because a catalogue entry should stay short.
 The change is in `tutorail-authoring`'s `catalog.py` and in `catalogue-format.md`, not in
 the runner. Nothing is blocked on it: an unlisted optional lesson is still offered at the
 point its bundle names.
+
+---
+
+## Wording follow-up after `supplies:` merges — owed 2026-09-12
+
+Decisions 8 and 9 in the design spec settled two behaviours. The reference documents still
+describe them in wording that admits the reading we ruled out. **Neither is a format
+change** — no key added, no key removed, nothing an authored bundle must do differently.
+
+**Do this only after the `supplies:` branch has merged**, and as its own commit. Two
+unrelated contract changes in one diff put both in front of one reviewer.
+
+### `bundle-format.md`, `runner-protocol.md`
+
+A `required_for` gate is on the **failure standing**, not on the lesson having been taken.
+The current phrase "cannot be completed while an anticipated failure stands" is correct but
+reads both ways, and `required_for` being described as "the one way an optional lesson stops
+being optional" pulls toward the wrong one.
+
+A learner who declined the optional lesson and meets the gate gets the repair **coached
+inline** in the current lesson — no transition, no fresh offer — and the gate opens when the
+failure clears. Without this, the only exit is a lesson the learner refused twice, which
+contradicts the rule that a course must be completable by a learner who declines every offer.
+
+### `runner-protocol.md`, `state-lifecycle.md`
+
+A complete lesson is **never** re-offered, whatever recurs. A failure that persists after its
+lesson was taken is ordinary coaching, permanently. The loop guard is the feature.
+
+Recurrence is evidence about the **lesson**, not the learner. It belongs to the quality
+checker and the dry-run harness, not to the tutor mid-course.
+
+### How to know the branch landed
+
+Do not wait to be told. `git log --oneline` on main, or check whether `validate_bundle.py`
+has a check 22 and `bundle-format.md` mentions `supplies`.
