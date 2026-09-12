@@ -163,7 +163,7 @@ tutorials:
 | `level` | MUST | `beginner`, `intermediate`, `intermediate-to-advanced`, and so on. |
 | `style` | SHOULD | `project-driven`, `exercise-based`, `interactive`, `long-form`. |
 | `scope` | SHOULD | Honest size, on the **main path**. "23 lessons; months of work" is a service to the learner. |
-| `optional_lesson_count` | MAY | How many lessons the course carries **beside** the main path, which `scope` does not count. A whole number, zero or more. Omit it when the course has none. Section 5.2. |
+| `optional_lesson_count` | MAY | How many lessons the course carries **beside** the main path, which `scope` does not count. A whole number, zero or more. A generator writes it in every entry, `0` included; absence means the catalogue predates the field. Section 5.2. |
 | `workspace_kind` | MUST | What the course needs of a workspace. Surfaced at choice time. |
 | `covers` | SHOULD | The concepts the course **teaches**, each with a `summary` and optional `aliases`. Section 12. |
 | `assumes` | SHOULD | The concepts the course **expects you to bring**, each with a `level` and a `summary`. Never a gate. Section 12. |
@@ -228,9 +228,21 @@ optional_lesson_count: 6
 | | |
 |---|---|
 | **Shape** | a whole number, zero or more |
-| **Absent** | this catalogue does not say. It is **not** a claim that the course has none. |
-| **`0`** | legal, and says the same thing as omitting the field. Prefer omitting it. |
+| **`0`** | the course has no optional lessons. **Write it.** |
+| **Absent** | this catalogue predates the field, or was written by hand. It is **not** a claim that the course has none. |
 | **Author** | derived from the length of the bundle's `optional_lessons` map, exactly as `scope` is derived from the length of its `lessons` list. |
+
+**Write the field in every entry, including zero.** An earlier draft of this section said
+to omit it at zero, and that made the format contradict itself: if `0` and absence mean the
+same thing, then absence *is* the claim "this course has none", which the row above denies.
+
+Written always, the two separate cleanly. `0` says the course has none. Absence says only
+that this catalogue is older than the field or was typed by hand — a fact about the
+catalogue, never about the course. A reader that cannot tell those apart cannot report
+either honestly.
+
+A hand-written catalogue may still omit it; nothing rejects that. A **generator** writes it
+every time, and `catalog.py` in `skomp/tutorail-authoring` does.
 
 **The name is deliberate.** A bundle's `tutorial.yaml` already has a key called
 `optional_lessons`, and there it is a **mapping of lesson path to offer metadata**. One
