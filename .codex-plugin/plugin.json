@@ -2,6 +2,10 @@
   "name": "tutorail",
   "version": "0.1.0",
   "description": "Runs interactive, project-driven tutorials inside a coding agent. Discovers courses from a catalogue, keeps progress in the learner's own repository, and loads one lesson at a time.",
+  "author": {
+    "name": "skomp",
+    "url": "https://github.com/skomp"
+  },
   "homepage": "https://github.com/skomp/tutorAIl",
   "repository": "https://github.com/skomp/tutorAIl",
   "license": "MIT",
@@ -21,7 +25,11 @@
     "longDescription": "Discovers tutorials from a local catalogue, materializes the course into your own repository, and teaches one task at a time. You write the code; the tutor explains, validates and tracks progress. Progress lives in the repository, so a fresh conversation resumes exactly where you stopped.",
     "developerName": "skomp",
     "category": "Developer Tools",
-    "capabilities": ["Interactive", "Read", "Write"],
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
     "defaultPrompt": [
       "I want to learn Rust.",
       "Continue the tutorial."
