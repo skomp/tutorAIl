@@ -213,7 +213,9 @@ MUST contain:
 - a high-level map of the chapters or lessons, in order
 - milestone or checkpoint structure, if the course has one
 
-MAY contain: topic-coverage requirements, optional paths, prerequisites.
+SHOULD contain: a coverage list, described below.
+
+MAY contain: optional paths, prerequisites.
 
 MUST NOT contain:
 
@@ -222,6 +224,46 @@ MUST NOT contain:
 - `Status: Complete`, `In progress`, `Next`, `Current lesson`, `resume marker`,
   or any equivalent
 - a snapshot of anyone's code
+
+### The coverage list
+
+> A `COURSE.md` **SHOULD** declare a **coverage list**: a section naming the topics the
+> course must eventually cover.
+
+Give it a heading that says what it is — "Rust coverage requirements", "Topics this course
+must cover" — and then a plain list of topic names, one per line. Name each topic the way
+a learner would ask about it (`lifetimes`, `interior mutability`, `error design`), not the
+way one of your lessons happens to title it. A topic MAY have no lesson yet: the list
+states what the course owes its learners, not what it currently contains.
+
+Keep it a list of **topics**, not of lessons. A list that names lesson files duplicates
+the chapter map above it, and the two then drift apart.
+
+**What the list is used for at teaching time.** Every other part of `COURSE.md` is prose
+for a learner to read. This one part is read by the tutor, mechanically, and it is the
+reason the section is worth writing carefully rather than as an afterthought.
+
+A tutor may write an extra lesson into one learner's instance when the course does not
+carry what that learner needs (section 8). The hard case is a learner who is stuck, because
+two opposite situations look identical from outside: stuck because a concept they need was
+never taught, and stuck because the exercise is hard. The first wants a side lesson. The
+second **is** the lesson, and writing anything for it takes the exercise away. Your
+coverage list is what decides between them. The tutor names the concept blocking the
+learner and looks it up:
+
+| The blocking concept | What the tutor does |
+|---|---|
+| is in your list, and no completed lesson taught it | writes a side lesson for it — your course has a genuine hole here |
+| is in your list, and was taught already | coaches, and writes nothing |
+| is not in your list | tells the learner the topic is outside this course, rather than quietly widening it |
+
+So the list does two jobs at once: it records what the course owes, and it tells every
+tutor teaching your course where your course stops.
+
+**A bundle with no coverage list still works.** The tutor falls back to its own judgement
+of whether a blocking concept is a missing prerequisite or intended difficulty, and makes
+that call separately for every learner who gets stuck. Nothing breaks, and you lose the
+only means the format gives you to say "that one is not mine to teach". Declare the list.
 
 ### Worked example of the mistake
 
@@ -478,7 +520,9 @@ without a lesson file yet are simply not listed, and are added to `lessons` when
 Know what this costs at teaching time. A tutor that reaches a chapter `COURSE.md` maps and
 `lessons` does not carry may draft one into the learner's instance — a *main-path draft*,
 section 8. That draft is one learner's, written against one learner's code, and it is not
-your lesson until you promote it.
+your lesson until you promote it. The learner is told, in so many words, that the chapter
+was not written and is being drafted as they arrive at it — so an unwritten chapter is
+visible to them, not a seam they never notice.
 
 Prefer a small number of good lessons over a large number of thin ones.
 
@@ -494,6 +538,16 @@ During a course, a tutor may write a lesson into the instance's
 the main path does not reach, or a **main-path draft**, a chapter `COURSE.md` maps that has
 no lesson file yet. Those files are tutor-owned, they belong to one learner, and they carry
 provenance frontmatter recording when they were written and why.
+
+A third route produces one: the learner asks for a side lesson outright, on a topic outside
+the lesson they are in. Those carry the same provenance, and `reason:` records that the
+learner asked.
+
+Whether a tutor may write a side lesson unprompted is decided against the coverage list
+your `COURSE.md` declares (section 3). A concept in your list that no lesson taught is a
+hole and gets a lesson; a concept your list does not name is reported to the learner as
+outside the course instead. That is the mechanical use of the list, and it is why a bundle
+that declares one keeps tighter control of its own scope.
 
 ### A bundle MUST NOT contain `lessons.generated/`
 
@@ -573,6 +627,11 @@ Compare `kind`, `after:` and `reason:` across the instances you can see:
   drafts it again, differently. Author the lesson.
 - **one `side-lesson`, once** — usually one learner's background rather than a gap in the
   course. Evidence of nothing. Leave it.
+- **a lesson the learner asked for** — `reason:` says so. That is one learner's curiosity
+  or one learner's background, not a hole in your course. Take it as interest in the topic
+  and weigh it far below a detour the tutor judged necessary. Several learners asking for
+  the same topic is worth a look, but it is a signal about the topic, not about the lesson
+  they were in when they asked.
 
 `reason:` is the field that carries this signal, which is why the format requires it and
 why it is written for you rather than for the learner.

@@ -155,6 +155,12 @@ blocked on a concept the main path never reaches, or they have arrived at a chap
 only in this instance, and the manifest's `lessons` list is never changed — a generated
 lesson is an overlay, positioned by its `after:` field.
 
+Being stuck is not automatically a gap: name the concept blocking the learner and test it
+against the coverage list `COURSE.md` declares, and coach instead when the course already
+taught it. A learner may also ask for a side lesson outright, on anything but the active
+lesson's own objectives; and when a drafted chapter becomes the active lesson, say plainly
+in your first sentence about it that it was not written yet.
+
 A gap is not a defect. A lesson file the manifest lists but does not have, an undeclared
 validator, a dangling `design_ref`: those are reported, never drafted over.
 `references/runner-protocol.md` section 7 carries that test and the advancement rule;

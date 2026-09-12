@@ -328,7 +328,8 @@ ownership of this one path is settled by the runner and not by the manifest.
 5. **Add the provenance frontmatter** below, alongside the ordinary lesson fields.
 6. **Say what you wrote and why, before teaching it.** A lesson that appears in the
    learner's workspace unannounced is indistinguishable from the course changing
-   underneath them.
+   underneath them. For a `main-path-draft` this is not optional and not a footnote:
+   `runner-protocol.md` section 7.4 says what the learner must be told, and when.
 
 A generated lesson SHOULD be a single file. It MAY be a folder containing `LESSON.md` when
 it genuinely ships material, and every folder rule then applies unchanged: exact case, and
@@ -357,7 +358,7 @@ validators: [cargo-check]
 | `generated` | MUST | Always `true`. Marks the file as an overlay rather than an authored lesson. |
 | `generated_at` | MUST | The date it was written. Orders two detours that share one `after:`. |
 | `kind` | MUST | `side-lesson` or `main-path-draft`. |
-| `reason` | MUST | One sentence, written for a bundle author who was not in the room. This is the evidence section 8.6 depends on. |
+| `reason` | MUST | One sentence, written for a bundle author who was not in the room. When the learner asked for this lesson rather than you judging it necessary, `reason` MUST say so and say what they asked for — the two mean different things about the course. This is the evidence `bundle-format.md` section 8 depends on. |
 | `after` | MUST | The lesson this one follows. MUST be an entry in the manifest's `lessons` list — an authored lesson, never another generated one. |
 | `design_refs` | SHOULD | Anchors that already exist in the instance's `DESIGN.md`. |
 | `validators` | SHOULD | Names already declared in the manifest's `validators` map. |

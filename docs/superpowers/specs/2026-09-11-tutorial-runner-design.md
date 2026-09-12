@@ -329,6 +329,90 @@ generated files are the evidence.
 to report, not to paper over. Generation is a recorded, provenanced act for a course that
 is working as intended.
 
+#### Decision: a coverage list decides whether "stuck" is a gap
+
+An earlier draft listed "the learner is stuck" as a flat non-reason to generate a lesson,
+alongside "you would rather teach something else". That is too blunt, and it is wrong in
+one of the two situations it covers. **Stuck because a prerequisite concept was never
+taught is exactly the case a side lesson exists for. Stuck because the exercise is hard is
+the learning itself, and a lesson written to relieve it takes the exercise away.** The two
+present identically — a learner who cannot proceed — so a rule that resolves them by the
+tutor's judgement resolves them differently for every learner and every tutor.
+
+The oracle is a list the course already declares. AutomatonDB's `COURSE.md` carries a
+"Rust coverage requirements" section naming the topics the main path must eventually
+exercise; the runner tests the **blocking concept** against it:
+
+| Blocking concept | Reading | Action |
+|---|---|---|
+| in the coverage list, not yet taught by a completed lesson | a genuine prerequisite gap | generate a side lesson |
+| in the coverage list, already taught | ordinary difficulty | coach; generate nothing |
+| absent from the coverage list | outside the course's scope | tell the learner; do not widen the course silently |
+
+Three things make this the right shape:
+
+- **it is the course's own declaration, not the tutor's opinion.** The author said what
+  the course covers. The rule only reads it back;
+- **it gives the format a mechanical use for a section that had none.** Coverage
+  requirements were previously prose a learner might read. The rule makes writing one pay
+  off, so `bundle-format.md` raises it from MAY to SHOULD;
+- **"already taught" is answered from `STATE.md`**, from *Concepts demonstrated* and the
+  *Generated lessons* record — never by opening completed lesson files, which would
+  violate the context budget §8 exists to protect. Where `STATE.md` does not settle it,
+  the tutor asks the learner, who is a cheaper and better witness than a reconstruction.
+
+A bundle with no coverage list is still valid — hence SHOULD, not MUST; the shipped
+`examples/rust-cli-basics` has none. The tutor then falls back to its own judgement and
+states which reading it took, so the learner can disagree.
+
+#### Decision: a learner may request a side lesson, with one guard
+
+A learner asking for a side lesson outright ("give me a side lesson on lifetimes") is
+first-class, and it sidesteps the judgement problem above entirely by putting the person
+who knows what they do not know in charge of the call.
+
+**The single guard: a learner may not request a side lesson on the active lesson's own
+declared objectives.** "Teach me lifetimes" during a lifetimes lesson is a request for the
+answer with extra steps — the lesson exists to make the learner arrive at that concept, and
+delivering it as a lesson hands over the exercise in a form that looks legitimate. This is
+the same rule as `solution_code`, applied to a longer vehicle. Everything outside the
+active lesson's declared objectives is permitted, including topics the coverage list never
+names: the third row of the table above forbids widening the course *silently*, and a
+learner's explicit request is the opposite of silent.
+
+A requested lesson is an ordinary generated lesson — same structure, same provenance, same
+completion conditions, same placement. `reason:` records that the learner asked. That
+distinction matters downstream: `bundle-format.md` reads generated lessons as the course's
+only quality signal from real use, and a lesson the learner chose is evidence about that
+learner's interest, not about a hole in the course. Without the marker in `reason:` an
+author would count it as a hole.
+
+#### Decision: a `main-path-draft` announces itself to the learner
+
+A drafted chapter occupies the same position in the course, uses the same structure, and
+reads in the same voice as a lesson an author wrote and reviewed — and it carries none of
+the same warrant. It was written that morning, by the tutor, against one learner's code,
+reviewed by nobody. **The learner currently has no way to tell.**
+
+So: when a `kind: main-path-draft` lesson becomes active, the tutor states plainly, in one
+sentence at the start, that this chapter was not written yet and is being drafted from
+where the learner has got to. Not in a closing note, not parenthetically, not only in
+`STATE.md`.
+
+Two reasons, both the learner's rather than the system's:
+
+- **it changes how a confident claim in that lesson should be read.** Authored prose and
+  drafted prose are indistinguishable on the page; the learner is entitled to weigh them
+  differently and to push back harder on the draft;
+- **the learner will want to know which lessons were drafted.** Drafts are the raw material
+  of promotion, described earlier in this section, and the learner who took one is the
+  only person who can
+  say whether it worked. They can only answer that if they knew at the time.
+
+A `side-lesson` is deliberately exempt. Its nature is already evident — either the learner
+asked for it, or the tutor announced the detour when proposing it — and a second
+announcement is noise that makes the one that matters easier to miss.
+
 > **A rejected design, recorded so it is not retried.** An earlier draft made `COURSE.md`
 > the lesson index and cross-referenced it against `lessons/` by scanning its prose for
 > lesson paths. On a real bundle that check was **inert**: the course map names lessons as
