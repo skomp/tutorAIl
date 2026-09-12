@@ -103,6 +103,10 @@ rust-automaton-db/
     └── interior-mutability.md   an optional lesson, offered rather than sequenced
 ```
 
+A bundle may also declare `supplies` in `tutorial.yaml` or in a lesson — files it hands
+your workspace, such as a model or a dataset — which the tutor places and reports as setup
+rather than asking you to copy them yourself.
+
 ## Lessons the tutor offers instead of teaching
 
 Most lessons sit on the main path and every learner walks them in order. A course can also

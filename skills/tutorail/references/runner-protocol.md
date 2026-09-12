@@ -19,8 +19,9 @@ tutorial it has never seen.
 Load, every turn:
 
 - the instance `tutorial.yaml` — the manifest, including `lessons`, `validators`,
-  `learner_owned`, `tutor_owned`, `ownership_policy`, the teaching switches, and
-  `optional_lessons` and `failure_modes` where the bundle declares them (section 8);
+  `learner_owned`, `tutor_owned`, `ownership_policy`, the teaching switches,
+  `optional_lessons` and `failure_modes` where the bundle declares them (section 8), and
+  `supplies` where it declares that (section 10);
 - `tutorial/STATE.md` — where the learner is;
 - the single lesson file named by `STATE.md`'s `active_lesson` — which is normally an
   entry in `lessons`, and may be a key in `optional_lessons` (section 8) or a file under
@@ -331,7 +332,9 @@ Then, in order:
    lesson whose `after:` is the lesson just finished takes precedence over the next entry.
    Update `STATE.md` per `state-lifecycle.md`.
 5. **Load the new lesson and nothing else.** Discard the previous lesson from working
-   context. Do not summarise it into `STATE.md` beyond the concepts it demonstrated.
+   context. Do not summarise it into `STATE.md` beyond the concepts it demonstrated. If
+   the new lesson declares `supplies`, place them before you state its first task
+   (section 10).
 
 If `active_lesson` is the last entry in `lessons` and no incomplete generated lesson
 claims it, the course is finished. Set `status` to `complete`, say what the learner built
@@ -836,6 +839,10 @@ the cheaper mistake than writing a new one.
 
 ## 9. Failure modes to refuse
 
+- **Assigning a file copy as a task.** The tutor never writes a file-copying task. Moving
+  files the bundle already carries into the learner's workspace is the runner's work,
+  whether the bundle declares it in `supplies` or only says so in prose. Place them,
+  report it as setup, and spend the lesson on the subject. Section 10.
 - **Advancing on assertion.** When `advance_on` is `validated-evidence-only`, "it works
   now" is not evidence. Run the validators.
 - **Batching tasks to save turns.** The budget this protects is the learner's attention,
@@ -888,3 +895,70 @@ the cheaper mistake than writing a new one.
   kinds; report the one that happened.
 - **Offering a cached entry as current.** When a catalogue was served from its last
   successful copy, say so and say how old it is, every time you present an entry from it.
+
+---
+
+## 10. Supplied files
+
+A bundle MAY declare `supplies`: the files it hands the learner's workspace. You place
+them and you say so. You never assign them.
+
+Manifest-scope entries are placed once, at materialization — `state-lifecycle.md`
+section 3 carries that moment. **A lesson's own entries are placed when that lesson opens,
+before you state its first task**: when you advance into it (section 6), when a session
+resumes into it, and when the learner accepts an optional lesson that declares some. The
+four placement rules are the same ones materialization uses, and `bundle-format.md`
+section 2 states them in full:
+
+1. **Never overwrite.** A target that already exists is left exactly as it is. Not
+   compared, not merged, not renamed aside and replaced — left.
+2. **Say nothing when every target of an entry already exists.** The entry has been
+   applied already, so there is nothing to report and the learner is not told twice about
+   a file they have had since their first session. This is what makes re-entering a lesson
+   idempotent with **no new state**: nothing is written to `STATE.md`, nothing is
+   consulted in the instance stamp, and the workspace itself is the only record of what
+   has been placed.
+3. **When some targets were missing, place those, name them, and name the ones you left
+   alone.** Report a partial placement in full — these are new, these were already here
+   and were not touched. Naming only what you placed is the failure that matters here: the
+   learner is left wondering whether a file of their own was quietly replaced, and the
+   format's promise that it never was becomes an authority you are visibly not keeping.
+4. **Name it as setup, not as a lesson.** Say what you placed for what it is, a setup
+   step, and then teach. Placed files are not an accomplishment, not a task the learner
+   completed, and not progress: nothing about them goes into `STATE.md`.
+
+Say the entry's `describe` line when you report it. It is the author's sentence about what
+these files are, and telling the learner is the only reason the field exists.
+
+Under `ownership_policy: tutor-must-not-edit-learner-owned` you MAY **create** a declared
+supplies target that does not exist, even where it falls under a `learner_owned` glob, and
+you may **never modify** one that does. The exemption is create-only, and it covers
+declared paths only — an undeclared path gets none of it, however convenient it would be.
+
+### 10.1 A bundle written before the key existed
+
+Most courses in circulation predate `supplies` and solved the same problem in prose: a
+lesson tells the learner to copy, download or unzip files the bundle itself already
+carries.
+
+**Do it.** Place those files, report it as setup handled, and note once — to the learner,
+in a sentence — that the bundle should declare it in `supplies:` instead. **Never write it
+as a task.** A file copy the bundle could have performed teaches nothing, and asking the
+learner to perform it spends a lesson on toil, which is the whole reason the key exists.
+
+This is a judgement you make with the lesson in front of you. The question is whether the
+bundle carries those files and the prose is only moving them into place. **It must never
+become a lexical detector.** Do not build, and do not follow, a list of trigger words —
+"copy", "download", "unzip" — that decides for you.
+
+A regex deciding when the tutor may write to learner-owned paths would be a false oracle
+guarding an ownership policy, which is the worst thing it could be guarding. Its false
+positives hand the tutor permission to write files nobody declared. Its false negatives are
+worse: they silently reinstate the toil task this whole key removes, and they report
+nothing while doing it, so the course looks like it is working. A lesson that says
+"provide a direct-copy composition shader before adding effects" is teaching, and no word
+in that sentence tells you which of the two it is.
+
+When the prose asks for something the bundle does **not** carry — a file to fetch from the
+internet, a tool to install, an account to create — this rule does not apply. That work is
+the learner's, and the lesson is right to ask for it.

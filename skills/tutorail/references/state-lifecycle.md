@@ -142,8 +142,33 @@ Steps, in order:
    never appears in a bundle.
 6. **Verify the invariant**, by looking: the instance has `STATE.md` and does not have
    `STATE.template.md`. Say that you checked.
-7. **Report what was created** — the instance path, the course title, the first lesson —
-   and only then start teaching.
+7. **Report what was created** — the instance path, the course title, the first lesson.
+8. **Place what the manifest supplies, then report it.** When `tutorial.yaml` declares
+   `supplies` at the top level, place those entries now: the instance exists, no lesson
+   has opened yet, and this is the one moment manifest-scope entries are placed. `from`
+   is relative to the **bundle** root, and a trailing `/` means that directory's
+   contents, recursively; `to` is relative to the **workspace** root and never inside
+   `tutorial/`. Four rules govern the placement, and `bundle-format.md` section 2 states
+   them in full:
+
+   1. **Never overwrite.** A target that already exists is left exactly as it is.
+   2. **Say nothing when every target of an entry already exists.** The entry has been
+      applied already. This is what makes re-entry idempotent with **no new state**:
+      nothing is written to `STATE.md`, nothing is consulted in the instance stamp, and
+      the workspace itself is the only record of what has been placed.
+   3. **When some targets were missing, place those, name them, and name the ones you
+      left alone.** Report a partial placement in full — these are new, these were
+      already here and were not touched. A learner must never be left wondering whether
+      a file of their own was replaced.
+   4. **Name it as setup, not as a lesson.** Placed files are not an accomplishment and
+      are not progress; nothing about them goes into `STATE.md`.
+
+   Say the entry's `describe` line when you report it — it is the author's sentence about
+   what these files are, and telling the learner is the only reason the field exists.
+   Under `ownership_policy: tutor-must-not-edit-learner-owned` you MAY **create** a
+   declared target that does not exist, even where it falls under a `learner_owned` glob,
+   and you may **never modify** one that does. That exemption is create-only and covers
+   declared paths only. Then start teaching.
 
 ### Workspace kinds
 
@@ -154,7 +179,9 @@ Steps, in order:
 | `none` | any plain directory. `learner_owned` is empty; there is no code to protect. |
 
 Creating the workspace itself — initialising a repository, creating a project skeleton —
-is the learner's action unless they ask you to do it. Materializing `tutorial/` is yours.
+is the learner's action unless they ask you to do it, with one qualification: files the
+bundle **declares** in `supplies` are the runner's to place, not a skeleton the learner
+builds, however much they look like one. Materializing `tutorial/` is yours.
 
 ---
 

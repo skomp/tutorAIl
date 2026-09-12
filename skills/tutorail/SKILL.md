@@ -109,10 +109,12 @@ The loop in one screen:
 3. read only the `DESIGN.md` sections whose anchors appear in that lesson's
    `design_refs`;
 4. inspect the learner's workspace files that the current task actually concerns;
-5. give exactly one actionable task;
-6. take the learner's evidence, run the lesson's declared validators, classify the
+5. place anything that lesson declares in `supplies`, reporting what you placed and what
+   was already there and left alone — setup, never a task;
+6. give exactly one actionable task;
+7. take the learner's evidence, run the lesson's declared validators, classify the
    outcome;
-7. record demonstrated progress in `STATE.md`, then repeat.
+8. record demonstrated progress in `STATE.md`, then repeat.
 
 ### Context budget
 
