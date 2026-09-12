@@ -1152,8 +1152,8 @@ caches a *bundle* that a learner has not chosen.
    `TUTORIAL*.md` files. Left uncommitted; the owner decides.
 2. **Fate of `TUTORIAL.md` / `TUTORIAL.updated.md`** now that the bundle exists — keep as
    historical source, or remove. Not decided.
-3. **Bundle update after a learner has started.** A bundle revision while an instance is
-   live has no reconciliation story. Deferred, documented.
+3. ~~**Bundle update after a learner has started.**~~ **Settled 2026-09-12: detect and
+   report, never apply.** See "Bundle revisions" below.
 4. **Multiple concurrent tutorials in one workspace.** Not supported; `tutorial/` is
    singular. Deferred.
 5. ~~**Remote repositories.**~~ **Settled 2026-09-12.** All four repositories exist as
@@ -1178,6 +1178,50 @@ caches a *bundle* that a learner has not chosen.
 10. **`optional: true` duplicates the manifest.** It is deliberate redundancy of the same
     class as `id` restating the slug, and it is checked, but it is still a second place
     for one fact. Recorded because the argument will be had again.
+
+---
+
+## 15a. Bundle revisions reaching a live instance
+
+**Decided 2026-09-12.** A runner detects that the bundle an instance came from has changed,
+reports it, and stops. It never reconciles on its own.
+
+**Why detection has to come first.** The instance stamp records where an instance came from
+but not *which version*:
+
+```yaml
+instance:
+  materialized_from: local:../tutorail-bundles/rust-automaton-db
+  materialized_at: 2026-09-11
+```
+
+So today a runner cannot tell that an update exists at all. The stamp gains a revision and a
+content hash, and everything else becomes possible:
+
+```yaml
+  source_revision: 76dcdce          # a commit for a git source; absent for a local path
+  content_hash: sha256:...          # over the bundle's files, so a local source works too
+```
+
+**Why it must not apply automatically.** `DESIGN.md` and `lessons/` are not purely bundle
+content once materialized. The tutor appends durable decisions to `DESIGN.md` as the learner
+makes them, and generated lessons accumulate beside the authored ones. An overwrite destroys
+the learner's own design history — the record of what *they* decided — which no upstream
+revision can reconstruct.
+
+**What a resume does.** Name what changed and stop:
+
+> This course was revised upstream since you started. Two lessons you have not reached
+> changed (`04`, `07`), and `DESIGN.md` gained a section. Your `DESIGN.md` has three local
+> additions. Update, review the differences, or carry on unchanged?
+
+**What is out of scope for now.** The three-way merge — silently updating unreached lessons,
+leaving completed ones alone, preserving local `DESIGN.md` additions while appending upstream
+ones. That is the correct end state and considerably more to build and test. Detection is
+what has to exist before any policy can be chosen, and reporting is useful on its own.
+
+**Implementation note.** The stamp is defined in `state-lifecycle.md` and the resume path in
+`runner-protocol.md`. Neither is changed by this entry; this records the decision only.
 
 ---
 
