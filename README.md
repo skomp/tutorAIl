@@ -46,11 +46,21 @@ month later in a fresh session, and the tutor resumes at the right task.
 **Codex**
 
 ```
-codex plugin marketplace add https://github.com/skomp/tutorAIl
-codex plugin add tutorail
+git clone git@github.com:skomp/tutorAIl.git ~/src/tutorAIl
+mkdir -p ~/.agents/skills
+ln -s ~/src/tutorAIl/skills/tutorail ~/.agents/skills/tutorail
 ```
 
-One skill body serves both hosts. Only the packaging manifest differs.
+`~/.agents/skills/` is Codex's documented user scope, and it follows symlinks, so
+edits to the clone take effect immediately.
+
+Not `codex plugin add`. Codex refuses a marketplace entry whose source path is the
+marketplace root — it registers the marketplace and then enumerates nothing, with no
+error — and putting the plugin in a subdirectory whose `skills/` is a symlink installs a
+plugin with no skills in it, also without an error. Until that is resolved, the skills
+directory is the supported Codex install.
+
+One skill body serves both hosts.
 
 ## Use
 

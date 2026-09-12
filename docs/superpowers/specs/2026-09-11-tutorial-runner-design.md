@@ -772,7 +772,37 @@ supported; and what happens when transmission fails (it must never block a lesso
 
 ---
 
-## 17. Implementation status
+## 17. Known issue: Codex plugin distribution
+
+Claude Code installs cleanly from the GitHub repo: `claude plugin marketplace add
+skomp/tutorAIl` then `claude plugin install tutorail@tutorail`. Measured cost, ~255 tokens
+always-on and ~3.5k on invoke — the four reference documents are ~11k words and cost
+nothing until loaded, which is the progressive-disclosure design paying off.
+
+Codex is installed via `~/.agents/skills/tutorail`, its documented user scope, verified by
+rendering the model-visible prompt and confirming the skill is injected. The plugin route
+does not work, for two reasons found by probing:
+
+- **A marketplace entry whose `source.path` is the marketplace root is silently ignored.**
+  `"./"`, `"."`, `""` and `"./."` all register the marketplace and then enumerate zero
+  plugins, with no error. A probe marketplace in the subdirectory shape lists correctly, so
+  the root path is the cause, not the manifest.
+- **A subdirectory plugin whose `skills/` is a symlink to the shared directory installs
+  nothing.** `codex plugin add` reports success; only `.codex-plugin/` is copied into the
+  cache, and the installed plugin contains no skill at all. A false success.
+
+Resolving it means either duplicating `skills/` into a Codex subdirectory with a sync step,
+or publishing through a marketplace that hosts the plugin as a subdirectory of its own
+repository — which is what superpowers does. Neither is warranted for v1, and the skills
+directory works today.
+
+The structural conflict is worth recording: Claude Code wants the plugin at the repository
+root and accepts `source: "./"`; Codex's marketplace requires it in a subdirectory with
+real files. One repository cannot satisfy both without duplication.
+
+---
+
+## 18. Implementation status
 
 | Deliverable | State |
 |---|---|
