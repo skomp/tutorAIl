@@ -438,12 +438,41 @@ def escapes(root: Path, relative: str) -> bool:
 
     No filesystem call, because this runs during discovery, which must not
     touch anything under a bundle path. `os.path.normpath` collapses the
-    '..' segments textually, which is what the check needs.
+    '..' segments textually, which is what the check needs. Symlinks are
+    deliberately not resolved, for the same reason.
+
+    `root` is an anchor with no parent. A bundle path may descend into it,
+    and may leave a directory and return inside it, but it may not step out
+    of it - not even when the filesystem would clamp the step, which is why
+    the answer cannot depend on where the root is. The parameter stays
+    because it names what the path is measured against, and because
+    `validate_bundle` check 7 and the discovery guard below both read
+    better for passing it.
+
+    Earlier versions compared strings: `normpath(join(root, relative))`
+    against `str(root)`, and against `str(root) + os.sep`. That is the
+    right question only for a root with at least one component and no
+    trailing separator, and it failed in BOTH directions for the rest:
+
+      * `Path(".")` - `normpath("./bundle")` is `"bundle"`, which shares no
+        prefix with `"."`, so every contained path read as an escape.
+        Issue #14, worked around on the validator's side by anchoring the
+        root with `os.path.abspath` in `validate_bundle.catalog_root()`.
+      * `Path("/")` - `str(root) + os.sep` is `"//"`, and no normalised
+        path starts with that, so again every contained path read as an
+        escape. Issue #16.
+      * `Path("..")` - the dangerous direction. `normpath("../../outside")`
+        does start with `"../"`, so a path that really does leave read as
+        contained.
+
+    `normpath` leaves every surviving '..' at the front of the path, with
+    nothing left in front of it to cancel it. So one '..' component in the
+    normalised form is exactly the escape, for every root, with no string
+    prefix left to get wrong.
     """
     if os.path.isabs(relative) or relative.startswith("~"):
         return True
-    combined = os.path.normpath(os.path.join(str(root), relative))
-    return combined != str(root) and not combined.startswith(str(root) + os.sep)
+    return os.pardir in os.path.normpath(relative).split(os.sep)
 
 
 # --------------------------------------------------------------------------

@@ -1094,6 +1094,150 @@ def test_malformed_entries_are_skipped_not_fatal() -> None:
 
 
 # --------------------------------------------------------------------------
+# The containment predicate itself
+# --------------------------------------------------------------------------
+
+# The roots escapes() has to answer for. The predicate is a string test with
+# no filesystem behind it, so a root is only ever a spelling, and every
+# defect found in it so far was one spelling the string comparison did not
+# fit. Each root here is a spelling, not a place: nothing below creates,
+# opens or stats any of them.
+#
+# On the trailing separator: Path() removes one, so Path('/a/b/') IS
+# Path('/a/b') and cannot exercise the case. Path('/') and Path('//') are
+# the only roots that reach escapes() with a trailing separator still on
+# them, and the assertion below records that fact so the next reader does
+# not add Path('/a/b/') believing it covers anything new.
+CONTAINMENT_ROOTS = (
+    ("the filesystem root", Path("/")),  # issue #16
+    ("the current directory", Path(".")),  # issue #14
+    ("an ordinary absolute path", Path("/srv/catalogues/demo")),
+    ("a root that keeps its trailing separator", Path("//")),
+    ("a relative path with a directory component", Path("bundles/demo")),
+    ("a root that starts above itself", Path("..")),
+)
+
+# Paths that stay inside the root, whatever the root is.
+CONTAINMENT_INSIDE = (
+    "bundle",  # the bare form issues #14 and #16 both rejected
+    "./bundle",
+    "nested/deeper",  # a directory component, so normpath has work to do
+    "nested/../bundle",  # leaves and returns inside the root
+)
+
+# Paths that really do leave the root. This direction is the oracle: a fix
+# that answered False for everything would satisfy the direction above and
+# fail every assertion here.
+CONTAINMENT_OUTSIDE = (
+    "../outside",
+    "a/../../outside",  # the same escape, only visible after normpath
+    "/etc/passwd",  # absolute
+    "~/outside",  # the home directory, which is somebody else's absolute
+)
+
+
+def test_containment_is_decided_the_same_way_for_every_root() -> None:
+    """Issues #14 and #16: escapes() must not depend on how a root is spelled.
+
+    Both defects were the same mistake - deciding containment by comparing
+    `str(root)` and `str(root) + os.sep` against the joined path, which is
+    the right question only for a root with at least one component and no
+    trailing separator. The roots below are the ones that are not that.
+    """
+    print("\nescapes(): one answer per path, whatever the root is:")
+    record(
+        str(Path("/a/b/")) == "/a/b" and str(Path("//")) == "//",
+        "Path() removes a trailing separator except on the root itself, so "
+        "Path('//') is what carries that case",
+        f"Path('/a/b/') = {str(Path('/a/b/'))!r}, Path('//') = {str(Path('//'))!r}",
+    )
+    for label, root in CONTAINMENT_ROOTS:
+        wrong = [p for p in CONTAINMENT_INSIDE if cat.escapes(root, p)]
+        record(
+            not wrong,
+            f"{label} ({str(root)!r}): a contained path is not an escape",
+            f"reported as escaping: {wrong}",
+        )
+        missed = [p for p in CONTAINMENT_OUTSIDE if not cat.escapes(root, p)]
+        record(
+            not missed,
+            f"{label} ({str(root)!r}): a path that leaves IS an escape",
+            f"reported as contained: {missed}",
+        )
+
+
+def test_the_validator_root_and_escapes_agree() -> None:
+    """`validate_bundle.catalog_root()` and `escapes()` must not disagree.
+
+    Issue #14 was fixed on the validator's side, by anchoring the root with
+    `os.path.abspath`. Issue #16 is fixed inside `escapes()`. Both now
+    normalise, so this checks that they did not end up double-anchoring or
+    parting company at an edge: for one catalogue file named five ways, and
+    for the unanchored `target.parent` the validator used to pass, every
+    bundle path must get one verdict.
+    """
+    print("\nthe validator's root and the runtime's predicate agree:")
+    paths = CONTAINMENT_INSIDE + CONTAINMENT_OUTSIDE
+    expected = {
+        "bundle": False,
+        "./bundle": False,
+        "nested/deeper": False,
+        "nested/../bundle": False,
+        "../outside": True,
+        "a/../../outside": True,
+        "/etc/passwd": True,
+        "~/outside": True,
+    }
+    previous = Path.cwd()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        home = Path(tmpdir).resolve() / "home"
+        (home / "nested" / "deeper").mkdir(parents=True)
+        spellings = [
+            ("a bare filename", home, "catalog.yaml"),
+            ("'./' before the filename", home, "./catalog.yaml"),
+            (
+                "a relative path with a directory component",
+                home,
+                f"../{home.name}/catalog.yaml",
+            ),
+            ("an absolute path", home, str(home / "catalog.yaml")),
+            (
+                "a relative path typed from another directory",
+                home.parent,
+                f"{home.name}/catalog.yaml",
+            ),
+            # The spelling that makes the two roots differ the most: from the
+            # filesystem root, target.parent is Path('.') and catalog_root()
+            # is Path('/'). Those are the two roots of issues #14 and #16.
+            ("a bare filename typed from '/'", Path("/"), "catalog.yaml"),
+        ]
+        for label, cwd, spelling in spellings:
+            try:
+                os.chdir(cwd)
+                anchored = vb.catalog_root(Path(spelling))
+                plain = Path(spelling).parent
+            finally:
+                os.chdir(previous)
+            disagreed = [
+                f"{p!r}: catalog_root={cat.escapes(anchored, p)} "
+                f"parent={cat.escapes(plain, p)} expected={expected[p]}"
+                for p in paths
+                if not (
+                    cat.escapes(anchored, p)
+                    == cat.escapes(plain, p)
+                    == expected[p]
+                )
+            ]
+            record(
+                not disagreed,
+                f"{label}: catalog_root() and target.parent give the same "
+                f"verdict for every bundle path",
+                f"root {str(anchored)!r} vs {str(plain)!r}: "
+                + "; ".join(disagreed),
+            )
+
+
+# --------------------------------------------------------------------------
 # The catalogue of catalogues itself
 # --------------------------------------------------------------------------
 
@@ -2798,6 +2942,8 @@ def main() -> int:
         test_discovery_never_opens_a_bundle,
         test_remote_catalogue_cannot_reach_outside_itself,
         test_malformed_entries_are_skipped_not_fatal,
+        test_containment_is_decided_the_same_way_for_every_root,
+        test_the_validator_root_and_escapes_agree,
         test_configuration_errors,
         test_offline,
         test_validator_catalog_mode,
