@@ -1174,9 +1174,9 @@ caches a *bundle* that a learner has not chosen.
    authored against the current format breaks. The motivating case would be a lesson that
    warns about one thing and is best re-offered on a different observable symptom — warning
    about stale reads, re-offering on a flaky suite.
-8. **What happens when a `required_for` gate blocks a lesson and the learner refuses the
-   lesson anyway.** The runner says the lesson cannot be completed and stops there. That
-   is honest and it is also a dead end, and no course has reached it yet.
+8. ~~**What happens when a `required_for` gate blocks a lesson and the learner refuses the
+   lesson anyway.**~~ **Settled 2026-09-12: the tutor teaches the repair inline.** See
+   "A `required_for` gate is on the failure" below.
 9. **An anticipated failure that persists after its lesson was taken** falls back to
    ordinary coaching, which is the loop guard. Whether a course should be able to say
    "this failure means the lesson did not land" is not decided, and answering it wrongly
@@ -1187,7 +1187,37 @@ caches a *bundle* that a learner has not chosen.
 
 ---
 
-## 15a. One instance per workspace
+## 15a. A `required_for` gate is on the failure, not on the lesson
+
+**Decided 2026-09-12.** A gate blocks a lesson while an anticipated **failure stands**. It
+does not block it until a particular lesson has been taken. The two readings produce
+opposite behaviour and the first is correct.
+
+So when a learner has declined the optional lesson and meets the gate, the tutor **addresses
+the failure inline** — ordinary coaching inside the current lesson, no transition, no fresh
+offer. When the failure clears, the gate opens.
+
+**Why.** The alternative is a dead end whose only exit is taking a lesson the learner has
+already refused twice, which contradicts the rule that a course must be completable by a
+learner who declines every offer. Teaching the repair inline costs the learner depth — the
+optional lesson remains the better route and stays available — but never costs them
+progress.
+
+It also keeps `required_for` a real dependency rather than an advisory one. The author's
+claim is "this failure genuinely blocks that lesson", and that claim is honoured. What is
+not honoured is the stronger claim "only my lesson may fix it", which no author should be
+making.
+
+**A gate on an optional lesson is a quality problem.** An author who writes `required_for`
+on an optional lesson has declared something load-bearing and then made it skippable. The
+runner copes, but the course would usually be better with that material on the main path.
+This is not a validator error — the format permits it and the runner handles it — so it
+belongs in a quality checker that scores a bundle rather than in a check that rejects one.
+Recorded as a first scoring signal in `tutorail-authoring`.
+
+---
+
+## 15c. One instance per workspace
 
 **Decided 2026-09-12.** A workspace holds exactly one tutorial instance, at `tutorial/`.
 This is a deliberate constraint, not an unexamined default.
