@@ -102,6 +102,7 @@ CHECKS: dict[int, str] = {
     20: "'optional: true' frontmatter agrees with the optional_lessons list",
     21: "[instance] STATE.md's '## Optional lessons' record is well-formed and "
     "agrees with active_lesson",
+    22: "supplies entries are well-formed, and every 'from' exists",
 }
 
 BUNDLE_ONLY = {12, 13}
@@ -2242,6 +2243,260 @@ def check_generated_resume(
     report.ran(17, f"active_lesson is {kind}")
 
 
+# Supplies (check 22).
+#
+# `supplies:` is a bundle's way to hand the learner's workspace files it
+# never assigns as a task: the runner places them and reports them. It is
+# additive to bundle_format 1, declared either at the top of tutorial.yaml
+# (placed after materialization) or in a lesson's frontmatter (placed when
+# that lesson opens). `from` is always relative to the BUNDLE root, in both
+# scopes - one rule, no scope-dependent resolution.
+SUPPLIES_KEYS = ("from", "to", "describe")
+
+
+def _supplies_sites(
+    root: Path, manifest: Any, lessons: list[Lesson]
+) -> list[tuple[str, list]]:
+    """Every place a `supplies:` key was found, as (where, raw list).
+
+    `where` is "tutorial.yaml" for the manifest, or a lesson's `rel`. The
+    list is the raw YAML value - callers decide what to do with an entry
+    that is not a mapping. Shared by collect_supplies (which keeps only the
+    mappings, for A2 and Part B) and check_supplies (which also has to
+    report the ones that are not).
+
+    `root` is accepted for interface symmetry with collect_supplies, whose
+    exact signature A2 and Part B depend on; a lesson's own `path` is
+    already absolute, so it is not needed to read lesson text.
+    """
+    del root
+    sites: list[tuple[str, list]] = []
+    if isinstance(manifest, dict):
+        entries = as_list(manifest.get("supplies"))
+        if entries:
+            sites.append(("tutorial.yaml", entries))
+    for lesson in lessons:
+        text = read_text(lesson.path)
+        if text is None:
+            continue
+        fm_text, _ = split_frontmatter(text)
+        if fm_text is None:
+            continue
+        try:
+            fm = load_yaml(fm_text, lesson.rel + " frontmatter")
+        except YamlError:
+            continue
+        if not isinstance(fm, dict):
+            continue
+        entries = as_list(fm.get("supplies"))
+        if entries:
+            sites.append((lesson.rel, entries))
+    return sites
+
+
+def collect_supplies(
+    root: Path, manifest: Any, lessons: list[Lesson]
+) -> list[tuple[str, dict]]:
+    """Every declared supplies entry, as (where, entry).
+
+    `where` is "tutorial.yaml" for a manifest-scope entry, or the lesson's
+    `rel` for a lesson-scope one. Only mapping entries are returned; a
+    non-mapping entry is reported by check_supplies, not by this function.
+    """
+    out: list[tuple[str, dict]] = []
+    for where, entries in _supplies_sites(root, manifest, lessons):
+        out.extend((where, e) for e in entries if isinstance(e, dict))
+    return out
+
+
+def supplies_covers(entries: list[dict], bundle_rel: str) -> bool:
+    """True when some entry's 'from' names `bundle_rel` or a directory
+    holding it, matched on path boundaries rather than by substring: a
+    `from` of 'model' does not cover 'model2/x.bin'."""
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        from_ = entry.get("from")
+        if not isinstance(from_, str):
+            continue
+        stripped = from_.rstrip("/")
+        if not stripped:
+            continue
+        if stripped == bundle_rel or bundle_rel.startswith(stripped + "/"):
+            return True
+    return False
+
+
+def _supplies_to_error(to: Any) -> str | None:
+    """Validate a supplies entry's 'to' as a PATH ONLY - never resolved.
+
+    The learner's workspace does not exist at validation time, so calling
+    resolve_exact() against it would be meaningless. This reuses
+    resolve_exact's component rule (no '', '.', '..') without touching the
+    filesystem.
+    """
+    if not isinstance(to, str) or to == "":
+        return "a supplies entry's 'to' must be a non-empty path"
+    if to == ".":
+        return None  # '.' is the workspace root itself.
+    if "\\" in to:
+        return (
+            f"the 'to' path {to!r} uses a backslash; use '/' in bundle paths"
+        )
+    if to.startswith("/"):
+        return f"the 'to' path {to!r} must be relative to the workspace, not absolute"
+    parts = to.split("/")
+    for part in parts:
+        if part in ("", ".", ".."):
+            return f"path component {part!r} is not allowed"
+    if parts[0] == "tutorial":
+        return (
+            f"the 'to' path {to!r} begins with 'tutorial/'; 'tutorial/' is the "
+            f"instance, not the learner's workspace, so a supplies entry must "
+            f"not target it"
+        )
+    return None
+
+
+def check_supplies(
+    root: Path,
+    manifest: Any,
+    lessons: list[Lesson],
+    listed_rels: set[str],
+    report: Report,
+) -> None:
+    """Check 22 - both modes.
+
+    Proves that declared supplies entries are well-formed and that every
+    declared 'from' exists in the bundle. It says nothing about whether the
+    supplied files are the RIGHT files, and nothing about whether a lesson
+    still tells the learner to copy them by hand - that judgement belongs to
+    the course-quality audit, not this validator.
+    """
+    raw_sites = _supplies_sites(root, manifest, lessons)
+
+    if not raw_sites:
+        report.na(22, "no bundle declares supplies")
+        return
+
+    checked = 0
+    for where, raw_entries in raw_sites:
+        for entry in raw_entries:
+            checked += 1
+            if not isinstance(entry, dict):
+                report.add(
+                    22,
+                    where,
+                    f"a supplies entry is not a mapping of 'from', 'to' and "
+                    f"'describe', it is {type(entry).__name__}: {entry!r}",
+                )
+                continue
+
+            extra = sorted(set(entry) - set(SUPPLIES_KEYS))
+            for key in extra:
+                report.add(
+                    22,
+                    where,
+                    f"a supplies entry carries an unknown key {key!r}; only "
+                    f"'from', 'to' and 'describe' are recognised",
+                )
+
+            missing = [k for k in SUPPLIES_KEYS if k not in entry]
+            for key in missing:
+                report.add(
+                    22,
+                    where,
+                    f"a supplies entry is missing required key {key!r}",
+                )
+
+            if "describe" in entry and not _is_text(entry.get("describe")):
+                report.add(
+                    22,
+                    where,
+                    "a supplies entry's 'describe' must be a non-empty "
+                    "string naming what these files are, in the author's "
+                    "words - it is the sentence the runner says to the "
+                    "learner",
+                )
+
+            if "from" in entry:
+                from_ = entry.get("from")
+                if not isinstance(from_, str) or from_ == "":
+                    report.add(
+                        22,
+                        where,
+                        "a supplies entry's 'from' must be a non-empty path",
+                    )
+                elif from_.split("/", 1)[0] == GENERATED_DIR:
+                    report.add(
+                        22,
+                        where,
+                        f"the 'from' entry {from_!r} points inside "
+                        f"'{GENERATED_DIR}/', which exists only in an "
+                        f"instance and is never part of what a bundle ships",
+                    )
+                else:
+                    has_trailing_slash = from_.endswith("/")
+                    bare = from_.rstrip("/")
+                    if not bare:
+                        report.add(
+                            22,
+                            where,
+                            f"the 'from' entry {from_!r} does not resolve: "
+                            f"path component '' is not allowed",
+                        )
+                    else:
+                        resolved, reason = resolve_exact(root, bare)
+                        if resolved is None:
+                            report.add(
+                                22,
+                                where,
+                                f"the 'from' entry {from_!r} does not "
+                                f"resolve: {reason}",
+                            )
+                        else:
+                            is_dir = resolved.is_dir()
+                            if has_trailing_slash and not is_dir:
+                                report.add(
+                                    22,
+                                    where,
+                                    f"the 'from' entry {from_!r} names a "
+                                    f"file, but a trailing '/' means a "
+                                    f"directory; remove the '/', or declare "
+                                    f"the entry as the directory it "
+                                    f"actually is",
+                                )
+                            elif not has_trailing_slash and is_dir:
+                                report.add(
+                                    22,
+                                    where,
+                                    f"the 'from' entry {from_!r} names a "
+                                    f"directory; a directory's 'from' must "
+                                    f"end in '/'",
+                                )
+
+            if "to" in entry:
+                to_error = _supplies_to_error(entry.get("to"))
+                if to_error is not None:
+                    report.add(22, where, to_error)
+
+            if where != "tutorial.yaml" and where not in listed_rels:
+                report.add(
+                    22,
+                    where,
+                    f"{where} declares supplies, but this lesson is not "
+                    f"listed in tutorial.yaml's 'lessons' or "
+                    f"'optional_lessons', so it is not listed and is "
+                    f"invisible to the runner",
+                )
+
+    report.ran(
+        22,
+        f"{checked} supplies entries across {len(raw_sites)} declaration "
+        f"site(s)",
+    )
+
+
 # --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
@@ -2345,6 +2600,18 @@ def validate(target: Path, mode: str) -> Report:
     )
     check_material_reachable(all_lessons, report)
     check_manifest_lists_no_generated(manifest_dict, report)
+    # A lesson-scope supplies entry is legible only if its lesson is
+    # reachable at all - through 'lessons' or 'optional_lessons', the same
+    # two lists check 4 accepts. A generated lesson is reachable by neither
+    # list by design (check 16), so supplies is checked against the
+    # authored lessons only, not `all_lessons`.
+    listed_raw = as_list(manifest_dict.get("lessons"))
+    listed_rels = (
+        {entry for entry in listed_raw if isinstance(entry, str)}
+        if listed_raw is not None
+        else set()
+    ) | optional_keys
+    check_supplies(target, manifest_dict, lessons, listed_rels, report)
     if mode == "bundle":
         check_no_generated_dir(target, report)
         check_state_template(target, manifest_dict, report)

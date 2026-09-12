@@ -1364,6 +1364,134 @@ def m_design_md_not_utf8(root: Path) -> None:
     (root / "DESIGN.md").write_bytes(b"# Design\n\n## Keys {#key-ordering}\n\n\xff\xfe\x00bad\n")
 
 
+# -- check 22: supplies entries
+#
+# The baseline "automaton" declares no `supplies` key, so each mutator here
+# installs one and then breaks exactly one thing - that is what makes the
+# reported message attributable to a single cause.
+
+
+def m_supplies_from_missing(root: Path) -> None:
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: supplies/workspace/
+    to: .
+    describe: the workspace this course assumes
+""")
+
+
+def m_supplies_from_is_a_file_declared_as_a_directory(root: Path) -> None:
+    (root / "supplies").mkdir()
+    (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: supplies/Cargo.toml/
+    to: Cargo.toml
+    describe: the manifest this course assumes
+""")
+
+
+def m_supplies_to_escapes_the_workspace(root: Path) -> None:
+    (root / "supplies").mkdir()
+    (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: supplies/Cargo.toml
+    to: ../Cargo.toml
+    describe: the manifest this course assumes
+""")
+
+
+def m_supplies_to_is_inside_the_instance(root: Path) -> None:
+    (root / "supplies").mkdir()
+    (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: supplies/Cargo.toml
+    to: tutorial/Cargo.toml
+    describe: the manifest this course assumes
+""")
+
+
+def m_supplies_describe_is_empty(root: Path) -> None:
+    (root / "supplies").mkdir()
+    (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: supplies/Cargo.toml
+    to: Cargo.toml
+    describe: ""
+""")
+
+
+def m_supplies_unknown_entry_key(root: Path) -> None:
+    (root / "supplies").mkdir()
+    (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: supplies/Cargo.toml
+    to: Cargo.toml
+    description: the manifest this course assumes
+""")
+
+
+def m_supplies_in_an_unlisted_lesson(root: Path) -> None:
+    (root / "supplies").mkdir()
+    (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    (root / "lessons" / "99-orphan.md").write_text(
+        "---\n"
+        "id: 99-orphan\n"
+        "title: Orphan\n"
+        "supplies:\n"
+        "  - from: supplies/Cargo.toml\n"
+        "    to: Cargo.toml\n"
+        "    describe: the manifest this course assumes\n"
+        "---\n\n## Purpose\n\nNothing.\n",
+        encoding="utf-8",
+    )
+
+
+def m_supplies_from_under_generated(root: Path) -> None:
+    """A supplies entry must not reach into lessons.generated/: that
+    directory exists only in an instance, so a bundle-authored 'from'
+    pointing into it can never be shipped."""
+    gen_dir = root / "lessons.generated"
+    gen_dir.mkdir()
+    (gen_dir / "extra.md").write_text("draft\n", encoding="utf-8")
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: lessons.generated/extra.md
+    to: extra.md
+    describe: a draft file
+""")
+
+
+def m_supplies_well_formed(root: Path) -> None:
+    """The POSITIVE control: a valid entry in each scope reports nothing.
+
+    Without this, every one of the mutators above is equally consistent with
+    a check that always fires.
+    """
+    (root / "supplies").mkdir()
+    (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    (root / "supplies" / "seed.txt").write_text("hello\n", encoding="utf-8")
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: supplies/Cargo.toml
+    to: Cargo.toml
+    describe: the manifest this course assumes
+""")
+    edit(
+        root / "lessons" / "00-foundations.md",
+        "id: 00-foundations",
+        "id: 00-foundations\n"
+        "supplies:\n"
+        "  - from: supplies/seed.txt\n"
+        "    to: seed.txt\n"
+        "    describe: a starter file this lesson hands over",
+    )
+
+
 # --------------------------------------------------------------------------
 # The case table
 # --------------------------------------------------------------------------
@@ -1753,6 +1881,28 @@ CASES: list[Case] = [
     # ---- the indeterminate path: check 1 cannot run, nothing else complains
     Case("exit 3: DESIGN.md is unreadable, so check 1 cannot run", 1,
          "automaton", "bundle", m_design_md_not_utf8, kind="indeterminate"),
+    # ---- check 22
+    Case("22: a supplies 'from' does not exist in the bundle", 22, "automaton",
+         "bundle", m_supplies_from_missing, "'supplies/workspace/' does not resolve"),
+    Case("22: a file is declared with a trailing slash", 22, "automaton", "bundle",
+         m_supplies_from_is_a_file_declared_as_a_directory,
+         "trailing '/' means a directory"),
+    Case("22: a supplies 'to' escapes the workspace", 22, "automaton", "bundle",
+         m_supplies_to_escapes_the_workspace, "path component '..' is not allowed"),
+    Case("22: a supplies 'to' points inside the instance", 22, "automaton", "bundle",
+         m_supplies_to_is_inside_the_instance, "'tutorial/' is the instance"),
+    Case("22: describe is empty", 22, "automaton", "bundle",
+         m_supplies_describe_is_empty, "'describe' must be a non-empty"),
+    Case("22: an entry carries an unknown key", 22, "automaton", "bundle",
+         m_supplies_unknown_entry_key, "unknown key 'description'"),
+    Case("22: a lesson that is not listed declares supplies", 22, "automaton",
+         "bundle", m_supplies_in_an_unlisted_lesson, "is not listed"),
+    Case("22: a 'from' reaches into lessons.generated/", 22, "automaton", "bundle",
+         m_supplies_from_under_generated, "points inside 'lessons.generated/'"),
+    # ---- check 22, positive direction: without this, every case above is
+    # equally consistent with a check that always fires.
+    Case("22: a well-formed entry in each scope is NOT reported", 22, "automaton",
+         "bundle", m_supplies_well_formed, kind="silent"),
 ]
 
 
@@ -2466,6 +2616,76 @@ def test_names_file() -> None:
         )
 
 
+def test_supplies_helpers() -> None:
+    """collect_supplies and supplies_covers, exercised directly.
+
+    check 22 does not call either function itself, and A2 consumes both by
+    name, so this is the only place in this suite that proves them right.
+    """
+    print("\ncollect_supplies and supplies_covers, exercised directly:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("automaton", Path(tmpdir))
+        edit(
+            root / "lessons" / "00-foundations.md",
+            "id: 00-foundations",
+            "id: 00-foundations\n"
+            "supplies:\n"
+            "  - from: lessons/00-foundations.md\n"
+            "    to: notes.md\n"
+            "    describe: a starter note\n"
+            "  - not a mapping\n",
+        )
+        report = vb.Report(mode="bundle", target=root)
+        lessons, _ = vb.discover_lessons(root, report)
+        manifest = {
+            "supplies": [
+                {"from": "supplies/Cargo.toml", "to": "Cargo.toml", "describe": "x"},
+                "not a mapping either",
+            ]
+        }
+
+        pairs = vb.collect_supplies(root, manifest, lessons)
+        wheres = sorted(where for where, _ in pairs)
+        record(
+            wheres == ["lessons/00-foundations.md", "tutorial.yaml"],
+            "collect_supplies finds one manifest-scope and one lesson-scope entry",
+            f"got {wheres}",
+        )
+        record(
+            all(isinstance(entry, dict) for _, entry in pairs),
+            "collect_supplies drops the non-mapping entry in both scopes",
+            f"got {[entry for _, entry in pairs]}",
+        )
+
+        entries = [entry for _, entry in pairs]
+        record(
+            vb.supplies_covers(entries, "supplies/Cargo.toml"),
+            "supplies_covers matches an exact 'from'",
+        )
+        record(
+            not vb.supplies_covers(entries, "supplies/Cargo2.toml"),
+            "supplies_covers does not match an unrelated path "
+            "(negative control)",
+        )
+
+        dir_entries = [
+            {"from": "lessons/13-load-gltf-model/model/", "to": "x", "describe": "x"}
+        ]
+        record(
+            vb.supplies_covers(
+                dir_entries, "lessons/13-load-gltf-model/model/Duck.glb"
+            ),
+            "supplies_covers matches a file under a declared directory",
+        )
+        record(
+            not vb.supplies_covers(
+                dir_entries, "lessons/13-load-gltf-model/model2/x.bin"
+            ),
+            "supplies_covers does not treat a directory name as a string "
+            "prefix (negative control - 'model' must not cover 'model2/x')",
+        )
+
+
 def test_check_coverage() -> None:
     print("\nmeta: every check has a fixture that makes it fire:")
     for number, description in sorted(vb.CHECKS.items()):
@@ -2498,6 +2718,7 @@ def main() -> int:
     test_cli()
     test_yaml_reader()
     test_names_file()
+    test_supplies_helpers()
     test_check_coverage()
 
     if _notes:
