@@ -2,8 +2,8 @@
 
 **Status:** normative for the runner. Load this before the first task of a teaching
 session, when validating, when a lesson's completion conditions look met, when deciding
-whether to offer or re-offer an optional lesson, or when you are unsure whether an edit is
-yours to make.
+whether to offer or re-offer an optional lesson, when a course finishes or the learner asks
+what comes after it, or when you are unsure whether an edit is yours to make.
 
 This document assumes an active instance already exists at `tutorial/` in the learner's
 workspace. Materialization is in `state-lifecycle.md`. Finding a tutorial in the first
@@ -20,8 +20,9 @@ Load, every turn:
 
 - the instance `tutorial.yaml` — the manifest, including `lessons`, `validators`,
   `learner_owned`, `tutor_owned`, `ownership_policy`, the teaching switches,
-  `optional_lessons` and `failure_modes` where the bundle declares them (section 8), and
-  `supplies` where it declares that (section 10);
+  `optional_lessons` and `failure_modes` where the bundle declares them (section 8),
+  `supplies` where it declares that (section 10), and `assumes` where it declares that
+  (section 11);
 - `tutorial/STATE.md` — where the learner is;
 - the single lesson file named by `STATE.md`'s `active_lesson` — which is normally an
   entry in `lessons`, and may be a key in `optional_lessons` (section 8) or a file under
@@ -355,7 +356,9 @@ Then, in order:
 If `active_lesson` is the last entry in `lessons` and no incomplete generated lesson
 claims it, the course is finished. Set `status` to `complete`, say what the learner built
 and which concepts they demonstrated, and stop. Do not invent a further lesson — writing
-one here would be exactly the improvisation section 7.2 refuses.
+one here would be exactly the improvisation section 7.2 refuses. Then offer what could
+come next, per section 12; that offer is never a further lesson and never implies the
+learner has to take one.
 
 ---
 
@@ -913,6 +916,19 @@ the cheaper mistake than writing a new one.
   kinds; report the one that happened.
 - **Offering a cached entry as current.** When a catalogue was served from its last
   successful copy, say so and say how old it is, every time you present an entry from it.
+- **Asking whether another course was completed**, or looking for a licence, a previous
+  instance or a completion record to decide whether a learner may start. No such check
+  exists in this runner. Sections 11.1 and 11.5.
+- **Teaching an assumed concept unsolicited.** The `assumes` review is a list to read, and
+  a question about one of its entries gets an answer rather than a course. Section 11.2.
+- **Showing the `assumes` review twice.** One stamp, one showing, for the life of the
+  instance. Section 11.4.
+- **Presenting an inferred relative as an author recommendation**, or merging the two
+  lists a follow-up query returns. Section 12.3.
+- **Failing a completed course over a missing follow-up.** An unresolved recommendation is
+  a pointer to a course that exists somewhere, not a dependency. Section 12.4.
+- **Copying a finished course's workspace into a follow-up.** Relationship metadata says
+  nothing about source code. Section 12.5.
 
 ---
 
@@ -1041,3 +1057,278 @@ know which of the two you are about to do, the two rules do not conflict at all:
 
 Section 9 names the failure of handing the work over. This section names the failure of
 leaving it undone. Neither permits you to create a file the bundle does not carry.
+
+---
+
+## 11. Assumed concepts, before the first task
+
+> **Named bundles are recommendations. Concepts are the educational contract. Neither one
+> gates access to a tutorial or requires proof that another bundle was completed.**
+
+A course MAY declare `assumes`: the concepts it uses without teaching them from first
+principles, each with a `level` and a summary written for a learner to assess themselves
+against (`catalogue-format.md` section 12). The runner shows that list once and then gets
+out of the way. It is a courtesy, not a check, and there is nothing here for the learner
+to pass.
+
+### 11.1 When the review is due
+
+Exactly one condition: **the instance's `tutorial.yaml` declares a non-empty `assumes`,
+and `STATE.md` carries no `assumes_reviewed` stamp.** When it holds, present the review at
+the first moment in the session you are about to state a task — after materialization and
+after any `supplies` placement (section 10), before section 2.2 chooses one.
+
+One condition, and no second one. Do not look at how far the learner has come, do not look
+for a previous instance, and do not consult anything outside this instance. A stamp that is
+absent means the list has not been shown; a stamp that is present means it has, and the
+review never happens again in that instance.
+
+Two consequences, both intended:
+
+- An instance materialized **before** `assumes_reviewed` existed has no stamp, so it sees
+  the review once, mid-course, and is stamped. That is correct rather than a defect: the
+  learner is being told what the course assumes, which is useful at any point and is never
+  a gate. It happens once and never again.
+- A course with no `assumes`, or an empty one, has no review and never gets a stamp. Do
+  not write one to record that there was nothing to show.
+
+### 11.2 What the review looks like
+
+Compact. One line per concept: the concept id and the author's summary, unedited.
+
+Group the lines **by level, most demanding first** — `advanced`, then `working`, then
+`conceptual`, then `awareness` — and keep the manifest's own order inside each group. The
+demanding group is the one a learner who is not ready will recognise themselves in, and it
+is the one they would otherwise skim past. A course declaring a single level has one group
+and no ordering question.
+
+Frame it so that no sentence could be mistaken for a requirement. Something with the shape
+of:
+
+> This course assumes you already bring these. It is a list to read, not a test, and
+> nothing here asks you to prove anything. You can start now, ask me about any of them, or
+> ask which courses teach them.
+
+Then stop. **Do not teach any of it.** Explaining a concept while presenting the list is
+the same failure as lecturing while offering an optional lesson (section 8.2): it takes
+the decision away and then asks for it.
+
+Do not add a level the manifest does not declare, do not rank the concepts by how hard you
+think they are, and do not comment on whether this learner seems ready.
+
+### 11.3 The three answers, and the way back
+
+**Continue.** Record the stamp (section 11.4), then state the first task. This is the
+common case and it costs one turn.
+
+**Ask about one concept.** Answer it from the concept, in a few sentences, the way you
+would answer any conceptual question mid-lesson (section 2.2: a conceptual question is not
+a task). Then return. Answering is not the start of a prerequisite course, and one question
+does not become a lesson.
+
+**Ask which courses cover them.** This is discovery metadata, so run the script rather than
+opening catalogues yourself:
+
+| The learner asked | Run |
+|---|---|
+| about the whole `assumes` list | `scripts/catalogs.py prepare <tutorial_id>` |
+| about one named concept, or a phrase | `scripts/catalogs.py covers <concept>` |
+
+`prepare` answers the whole list in one run and states plainly which assumed concepts
+nothing available covers — a gap said out loud is worth more than a short list that looks
+complete. Present what comes back per `catalogue-format.md` sections 12.2 to 12.4: every
+result carries its own reason, author recommendations stay separated from inferred matches,
+and the reasons are passed on rather than summarised into "best match".
+
+One caution that the output makes necessary. A course can appear in a `covers` answer
+because **another** author names it as a way in, without covering the queried concept at
+all — and it may even `assume` that concept itself. The reason line says which route it
+came by; read that line rather than the section heading it sits under. Pass it on as
+written, never turn it into "this course teaches that", and when the only reason a course
+is listed is somebody else's pointer, say so and check with the learner before offering it
+as the answer to their question.
+
+**Returning costs nothing, because nothing moved.** A digression before the first task
+writes no state: `active_lesson` still names the course's first lesson, `status` is
+unchanged, no lesson file has been opened and no task has been stated. So the way back is
+not recorded anywhere and does not need to be — unlike an optional-lesson detour, which
+moves `active_lesson` and therefore needs `resume_at` (section 8.6). Say which course and
+which lesson you are returning to, and state its first task.
+
+The learner may take more than one digression, in any order, and the review is not
+re-shown between them. It is shown once at the top and answered whenever they are ready.
+
+If the learner decides they would rather take a preparatory course first, that is the
+"learner named a different subject" branch in `SKILL.md` step 2, not something this section
+decides. `tutorial/` is singular: state what is active and where it stands, and let them
+choose between continuing it, starting the other course in a different workspace, or
+replacing this instance. Never replace it on your own judgement, and never present the
+preparatory course as something they now have to do.
+
+### 11.4 Recording the acknowledgement
+
+One optional frontmatter field, `assumes_reviewed`, holding the date. The mechanics are in
+`state-lifecycle.md` section 10.
+
+What it means is the whole of it: **the list was shown, and the learner chose to continue.**
+It asserts no mastery, it records no completion, and it marks no other bundle as done.
+
+Nothing else in `STATE.md` changes. In particular:
+
+- **Nothing goes in *Concepts demonstrated*.** The learner demonstrated nothing by
+  continuing, and section 5 of `state-lifecycle.md` is explicit that concepts are recorded
+  only when the learner has used them.
+- **Nothing goes in *Decisions made in discussion*.** That section holds choices later
+  lessons depend on, and no lesson depends on this one.
+- **Nothing is recorded about a digression.** A concept question that was answered and a
+  catalogue query that was run are not progress.
+
+### 11.5 Failure modes to refuse
+
+- **Asking whether another course was completed.** There is no such question in this
+  runner, and no field that could hold the answer.
+- **Inspecting a licence, a completion record, a previous instance or a previous workspace**
+  to decide whether this learner may start. Not a single one of those is consulted.
+- **Inferring that the learner lacks a concept because no completion is recorded.** A
+  learner who has never used this runner has demonstrated nothing to it and may still know
+  the subject well.
+- **Starting to teach a prerequisite unsolicited.** A concept question gets an answer. A
+  course starts only when the learner asks for it.
+- **Showing the review a second time.** Once stamped, it is done. Re-showing it turns a
+  courtesy into nagging and reads as doubt about the answer already given.
+- **Treating an assumed concept as a task, an objective or a completion condition.** It
+  belongs to none of those. The lesson's own completion conditions are unaffected by
+  `assumes`.
+- **Withholding the first task until the learner engages with the list.** Continuing
+  immediately is a complete answer.
+
+---
+
+## 12. Follow-ups — at completion, and whenever they are asked for
+
+> **Named bundles are recommendations. Concepts are the educational contract. Neither one
+> gates access to a tutorial or requires proof that another bundle was completed.**
+
+### 12.1 When
+
+- **At course completion**, once the last lesson in `lessons` is finished and `status`
+  becomes `complete` (section 6, and `state-lifecycle.md` section 5, *Reaching the end*).
+  Say what the learner built, then offer what could come next.
+- **Whenever the learner asks**, at any point in the course. "What comes after this?" is a
+  conceptual question: answer it and leave the task where it was. Asking is not a decision
+  to stop, and nothing about the current course changes because it was asked.
+
+### 12.2 What to offer, and in what order
+
+Run `scripts/catalogs.py follow-ups <tutorial_id>`, with the id from the instance's
+`STATE.md`. It already does all of the ordering, the reverse lookup, the merging and the
+provenance, across every configured catalogue. Do not rebuild any of that by opening
+catalogue files yourself.
+
+What it returns, in this order:
+
+1. the finished course's own `recommended_follow_ups`, **in author order** — the order in
+   the manifest is the display order, and it is the author's judgement about what comes
+   next, not an alphabetical accident;
+2. every available course naming the finished one under `recommended_previous_bundles`,
+   found through the reverse index. This is the case the whole design exists for: a third
+   party attaches a sequel to somebody else's course without that author knowing, agreeing
+   or changing a file;
+3. courses that merely `assume` a concept the finished one `covers`, marked as inferred.
+
+A course reached by more than one of those routes appears **once**, keeping **every**
+reason it was found. Show the `because` text an author wrote, attributed to the author who
+wrote it.
+
+### 12.3 The curated list, and the separate "find more"
+
+One run of the script prints both sections — the author-curated one and the related one it
+found by matching metadata. **Presenting them both at once is the failure this rule
+exists to stop.**
+
+Show the author-curated list. Then offer, as a separate action the learner can take or
+ignore, something with the shape of *"I can also look for courses that match the concepts
+this one taught — those are not recommendations by anyone."* Show the related section only
+if they take it, and keep the script's own tags on every line.
+
+Do not merge the two into one ranked list, and do not paraphrase an inference into "the
+author suggests". An author recommendation is a sentence a human wrote; everything else is
+this runner noticing a pattern (`catalogue-format.md` section 12.4).
+
+One case the output makes explicit: a course in the **author-curated** section may also
+carry an inferred reason line among its reasons. Keep the course where the script put it
+and keep that line with its tag. Dropping it to tidy the entry loses provenance, which is
+the one thing this whole feature refuses to lose.
+
+### 12.4 Nothing here can fail a finished course
+
+Check what the script said, not only whether it exited non-zero. The cases differ and so do
+the sentences the learner is owed:
+
+| What happened | What it means | What to say |
+|---|---|---|
+| an `unresolved:` line | the author recommended a course no configured catalogue carries | name it, say it is not on this machine, say it is a pointer and not a requirement |
+| `(no bundle matched)` | nothing follows this course yet | say so plainly. A finished course with nothing after it is finished, not broken |
+| `error: no catalogue supplies '<id>'` | the finished course's own id is in no configured catalogue now | say which id and that the catalogue carrying it is gone or was removed; do not go looking inside bundles for it |
+| a cached or failed catalogue | the list may be short | say which catalogue, which failure, and how stale — `catalogue-format.md` section 7 |
+| an unusable query | only `covers` can produce this, from an empty query | ask what concept they meant |
+
+**A forward-declared course that is not installed never fails course completion**, and
+neither does an empty answer, a stale catalogue or a missing id. The course is complete
+because its lessons are complete. What comes next is a suggestion, and a suggestion that
+cannot be resolved is still only a suggestion.
+
+Offering follow-ups writes nothing to `STATE.md`. There is no state here to keep — nothing
+was offered *to* the learner that they must answer, nothing expires, and re-asking next
+session produces the same answer from the same catalogues.
+
+### 12.5 Starting one is starting any other course
+
+A recommended follow-up is started exactly the way any course is started, and by the same
+route: the learner chooses it, `scripts/catalogs.py resolve <id>` gives the bundle
+directory, and `state-lifecycle.md` section 3 materializes it.
+
+- **No completion proof.** Nothing checks that the previous course was finished, including
+  when it visibly was.
+- **No earlier instance**, no earlier licence, no earlier installation, and no purchase.
+  None of those exists in this runner and none is invented here.
+- **`assumes` is displayed and the learner decides** — section 11, unchanged, with no
+  special case for having arrived from a recommendation.
+- **`tutorial/` is still singular.** A follow-up started in the same workspace means the
+  finished instance is replaced, and that is the learner's decision to make, not yours.
+  Offer the choice; never overwrite an instance on your own judgement.
+
+**Where the new course's code starts from is the workspace and template contract's
+business, and is never inferred from relationship metadata.** `workspace_kind` says what
+the course needs of a workspace, and `supplies` says what the bundle hands it. A
+`recommended_previous_bundles` entry says *this is a good course to take earlier* and says
+nothing whatever about files.
+
+So: do not copy the finished course's workspace into the new one, do not treat the code the
+learner just wrote as the new course's baseline, and do not point the new instance at that
+repository because the metadata connects the two. When the new course's `workspace_kind` is
+`existing-or-new-repository`, ask which workspace the learner wants — the answer may well be
+the repository they just finished in, and it is theirs to give. Recommendation metadata must
+never overwrite or mutate an existing project.
+
+### 12.6 Failure modes to refuse
+
+- **Auto-starting a follow-up.** Materializing, resolving into place, or "getting things
+  ready" because the learner sounded interested. They choose, then it starts.
+- **Installing, fetching or purchasing anything** named by a recommendation. An unavailable
+  course is reported as unavailable and nothing else happens.
+- **Implying the learner must continue.** A finished course is a finished course. "You
+  should now do X" is not what a recommendation says, whatever the `because` text sounds
+  like.
+- **Failing or qualifying a completed course** because a recommended follow-up is missing,
+  a catalogue was stale, or the list came back empty. Section 12.4.
+- **Mixing inferred matches into the author-curated list**, or presenting either as the
+  other. Section 12.3.
+- **Collapsing the answer to one course.** Several courses may follow this one; all of them
+  are offered, in the order the script returns them.
+- **Dropping the reason a course was suggested.** A suggestion the learner cannot check is
+  a suggestion they cannot decline for a good reason.
+- **Copying the finished workspace into a follow-up**, or treating `recommended_previous_bundles`
+  as a statement about source code. Section 12.5.
+- **Asking whether the earlier course was completed** before starting a follow-up. Section
+  11.5, and it is the same refusal.

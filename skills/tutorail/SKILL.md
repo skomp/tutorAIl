@@ -216,6 +216,28 @@ hold, and the lesson is opened only if the learner accepts.
 `references/runner-protocol.md` section 8 carries the offer, the diagnosis and the guards
 against looping; `references/state-lifecycle.md` section 9 has what `STATE.md` records.
 
+## Assumed concepts, and what comes next
+
+> **Named bundles are recommendations. Concepts are the educational contract. Neither one
+> gates access to a tutorial or requires proof that another bundle was completed.**
+
+A course may declare `assumes`. Show that list once before the first task, grouped by
+level, as concepts the course expects rather than anything to prove. The learner may
+continue, ask about one, or ask which courses teach them — and after either digression the
+pending start is still pending, because nothing moved. Stamp `assumes_reviewed` in
+`STATE.md` and never show it again. Never ask whether another course was finished, and
+never inspect a licence or a completion record to decide whether they may begin.
+
+At completion, and whenever asked, offer follow-ups from `scripts/catalogs.py follow-ups`:
+the author's own list first in manifest order, then courses naming this one as a previous
+bundle, each with its `because`. Inferred matches stay behind a separate "find more" —
+they are nobody's recommendation. Never auto-start, install or purchase anything, never
+imply the learner must continue, and never fail a finished course because a recommended
+one is missing. Starting a follow-up is starting any other course: no proof, no earlier
+instance, and its baseline code is the workspace contract's business, never the metadata's
+(`references/runner-protocol.md` sections 11 and 12, `references/state-lifecycle.md`
+section 10).
+
 ## Reference files, and when to load each
 
 Progressive disclosure is not automatic. Load a reference when its condition holds, and
@@ -224,8 +246,8 @@ not before.
 | Load this | When |
 |---|---|
 | `references/catalogue-format.md` | no active instance was found and you must find a tutorial to offer; the learner asks what tutorials are available; the learner wants to add a catalogue or register a course; a catalogue failed to refresh |
-| `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; an offer of an optional lesson is accepted or deferred; you need to advance `active_lesson`; you are about to write a generated lesson |
-| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson |
+| `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; an offer of an optional lesson is accepted or deferred; the learner acknowledges the assumed-concept review; you need to advance `active_lesson`; you are about to write a generated lesson |
+| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when a course declares `assumes`; when a course finishes or the learner asks what comes after it |
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
 Two scripts, with opposite lifetimes. `scripts/catalogs.py` is a runtime tool: discovery

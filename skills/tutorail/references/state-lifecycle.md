@@ -2,8 +2,9 @@
 
 **Status:** normative for the runner. Load this when materializing a new instance, the
 first time in a session you are about to change `STATE.md`, when a task completes, when a
-lesson completes, when an offer of an optional lesson is accepted or deferred, or when you
-need to advance `active_lesson`.
+lesson completes, when an offer of an optional lesson is accepted or deferred, when the
+learner acknowledges the assumed-concept review, or when you need to advance
+`active_lesson`.
 
 `STATE.md` is the only place a learner's progress is recorded. Nothing in the bundle
 records progress; nothing outside `STATE.md` in the instance records it either. If you
@@ -45,6 +46,9 @@ status: in-progress
 updated: 2026-09-11
 ---
 
+<!-- and, once a course that declares `assumes` has had its review acknowledged:
+     assumes_reviewed: 2026-09-11        -->
+
 ## Last completed task
 
 ## Concepts demonstrated
@@ -69,6 +73,7 @@ updated: 2026-09-11
 | `resume_at` | the lesson to make active when a detour finishes | present **exactly** while `active_lesson` names a generated lesson or an optional lesson; see sections 8.3 and 9.3 |
 | `status` | `not-started`, `in-progress`, `complete` | set by the runner |
 | `updated` | date of the last change | update whenever you change the file |
+| `assumes_reviewed` | the date the assumed-concept review was shown and the learner chose to continue | present **only** after that happened, and only in a course that declares a non-empty `assumes`; see section 10 |
 
 **`active_lesson` is a path, never a description.** "Chapter 1, lesson 10" would force a
 fresh session to read `COURSE.md` to resolve it, which defeats cold resume. A path is
@@ -150,7 +155,7 @@ Steps, in order:
    contents, recursively; `to` is relative to the **workspace** root and never inside
    `tutorial/`.
 
-   **Read each `from` from the bundle source, not from the instance, and finish this step
+   **Take each `from` from the bundle source, not from the instance, and finish this step
    before you release the source.** That is why step 8 is *inside* materialization rather
    than a step after it. Step 2 copies only `tutorial.yaml`, `COURSE.md`, `DESIGN.md` and
    `lessons/`, so a manifest-scope `from` such as `supplies/Cargo.toml` exists in the
@@ -187,7 +192,12 @@ Steps, in order:
    rewrites a file that is already there, whatever the policy would otherwise allow. The
    exemption is create-only and covers declared paths only. A course written before the key
    existed gets one other, narrower exemption, and `runner-protocol.md` section 10.1 is
-   where it is stated. Then start teaching.
+   where it is stated.
+9. **Show the assumed-concept review, if there is one.** When the manifest declares a
+   non-empty `assumes`, this is the moment: after placement, before the first task.
+   `runner-protocol.md` section 11 has what it looks like and what the three answers are;
+   section 10 of this document has the stamp it leaves. A course that declares no
+   `assumes` skips this step entirely and leaves no stamp. Then start teaching.
 
 ### Workspace kinds
 
@@ -265,6 +275,10 @@ entry and set `status` to `complete`. Do not point `active_lesson` at a lesson t
 not exist, and do not invent an extra lesson. Say what the learner built and which
 concepts they demonstrated.
 
+Then offer what could come next (`runner-protocol.md` section 12). That offer writes
+nothing here — section 10.4 — and a course with nothing after it, or with a recommended
+course that is not on this machine, is still complete.
+
 ---
 
 ## 6. Accepted warnings
@@ -334,6 +348,8 @@ started lets the tutor assume it exists.
 - `tutorial_id` does not match the manifest's `id`;
 - `STATE.template.md` is present in the instance;
 - the manifest names a lesson file that does not exist.
+
+Section 10.5 adds two more, for the assumed-concept stamp.
 
 These are structural defects, not stale progress. Guessing at the intent will lose the
 learner's place. Say what is wrong and let the learner decide.
@@ -710,3 +726,111 @@ every learner, it does not change while a course is taken, and it is read at one
 when the detour completes and you state the first task on landing. The same holds for
 `offer_because`, `anticipates` and `required_for`. `STATE.md` records what happened to this
 learner; the manifest records what the course offers.
+
+---
+
+## 10. The assumed-concept acknowledgement
+
+A course MAY declare `assumes` — the concepts it uses without teaching them from first
+principles. The runner shows that list once, before the first task, and the learner
+answers. Whether to show it, what the list looks like, and what the three answers are is
+judgement, and it is in `runner-protocol.md` section 11. This section is the mechanics.
+
+> **Named bundles are recommendations. Concepts are the educational contract. Neither one
+> gates access to a tutorial or requires proof that another bundle was completed.**
+
+### 10.1 One optional frontmatter field
+
+```markdown
+---
+tutorial_id: streaming-query-engine
+active_lesson: lessons/00-a-query-that-runs-forever.md
+status: in-progress
+updated: 2026-09-12
+assumes_reviewed: 2026-09-12
+---
+```
+
+| Field | Meaning | Constraint |
+|---|---|---|
+| `assumes_reviewed` | the date the assumed-concept list was shown and the learner chose to continue | a date. Present only after that happened; absent otherwise |
+
+Its **absence** is the whole of "not yet acknowledged", and its **presence** is the whole
+of "acknowledged". There is no third value, nothing to expire, and nothing to update
+afterwards — unlike `resume_at`, which is set and later removed, this field is written
+once and then stays.
+
+Two rules hold it to one meaning:
+
+- **A course that declares no `assumes`, or an empty one, never gets the field.** Do not
+  write it to record that there was nothing to show. An absent field on such a course is
+  read the same way by everything: there is no review due, because there is no list.
+- **`STATE.template.md` never carries it.** A template describes a learner who has not
+  started, so no review can have been shown. A bundle shipping a stamped template would
+  suppress the review for every learner who ever takes the course. Materialization is
+  where the field can first appear, and only once the learner has answered.
+- **Never remove it, and never rewrite it.** Re-showing a review the learner already
+  answered is the behaviour the field exists to prevent.
+
+### 10.2 What it asserts, and what it does not
+
+It asserts exactly one thing: **the list was shown, and the learner chose to continue.**
+
+It does **not** assert that the learner knows any of the concepts. It records no mastery,
+no completion of any other course, no entitlement, and no claim about anything outside
+this instance. Continuing acknowledges the wish to proceed and nothing more, and section 1
+of this document applies unchanged — progress is recorded only when it is demonstrated,
+and nothing was demonstrated here.
+
+This is why the field is a stamp rather than a body entry, and why nothing else in
+`STATE.md` moves when it is written:
+
+| Tempting | Why not |
+|---|---|
+| appending the assumed concepts to *Concepts demonstrated* | the learner demonstrated nothing. That section holds concepts they used, never concepts they were shown |
+| recording "chose to continue" under *Decisions made in discussion* | that section holds choices later lessons depend on, and no lesson depends on this one. It would also have to be matched as prose to answer a yes-or-no question, which is what the frontmatter field avoids |
+| a new body section for one fact | a whole heading, present in every instance of every course that declares `assumes`, to hold one date. Section 9.2 makes the same argument about writing `not-offered` lines |
+| a `prerequisites_met` or `assumes_confirmed` field | both name a claim nobody made. The learner confirmed nothing about themselves |
+
+### 10.3 Writing it
+
+In the turn the learner chooses to continue:
+
+1. set `assumes_reviewed` to today;
+2. set `updated` to today;
+3. state the first task.
+
+Nothing else changes. `active_lesson` does not move, `status` follows materialization as
+it always has, and no body section is touched.
+
+A digression before the answer — a question about one concept, or a query for courses
+covering some of them — writes **nothing at all**. That is deliberate, and it is what makes
+the way back free: `active_lesson` still names the course's first lesson, so the pending
+start is already recorded and needs no `resume_at`. Compare section 9.3, where accepting an
+optional lesson *does* move `active_lesson` and therefore *must* record the way back.
+
+### 10.4 Offering follow-ups records nothing
+
+When a course finishes, or whenever the learner asks what could come next, the runner
+offers follow-ups (`runner-protocol.md` section 12). **None of that touches `STATE.md`.**
+
+There is no state to keep. Nothing was offered that the learner must answer, so nothing can
+be outstanding; nothing expires; and asking again next session produces the same answer from
+the same catalogues. This is the same reasoning section 3 gives for supplied files whose
+targets already exist: where re-running the step is idempotent and the answer is derivable,
+recording it creates a second thing to keep true.
+
+In particular, a course that is `complete` stays exactly that. A follow-up the learner
+declines, ignores, or never hears about changes nothing about the course they finished.
+
+### 10.5 Inconsistencies to report rather than repair
+
+Add these to section 7's list:
+
+- `assumes_reviewed` is present while the instance's `tutorial.yaml` declares no `assumes`,
+  or declares an empty one. Something wrote a stamp for a review that cannot have happened;
+- `assumes_reviewed` holds something that is not a date.
+
+Both are structural, both mean a record says something nobody can act on, and neither is
+repaired by guessing. Say what is wrong and let the learner decide. Do not silently delete
+the stamp: deleting it re-shows a review the learner may well have answered.
