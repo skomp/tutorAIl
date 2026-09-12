@@ -122,9 +122,10 @@ CHECKS: dict[int, str] = {
     24: "the recommendation lists are well-formed, and no entry recommends "
         "this bundle",
     25: "every covers concept is recognisable somewhere in COURSE.md",
+    26: "[bundle] STATE.template.md does not carry assumes_reviewed",
 }
 
-BUNDLE_ONLY = {12, 13}
+BUNDLE_ONLY = {12, 13, 26}
 INSTANCE_ONLY = {11, 14, 15, 17, 21}
 
 # Checks that can only ever WARN, never produce a finding.
@@ -329,6 +330,10 @@ PROGRESS_MARKERS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 
+# The one frontmatter field a TEMPLATE may never carry (check 26). The runner
+# writes it into an INSTANCE's STATE.md, where it is normal and expected.
+ASSUMES_REVIEWED = "assumes_reviewed"
+
 STATE_SECTIONS = (
     "Last completed task",
     "Concepts demonstrated",
@@ -481,7 +486,16 @@ LIMITATIONS = """What a pass does and does not mean
       that is also a concept id, or that two concepts share, makes one
       search result ambiguous; it does not make the bundle wrong. Aliases
       overlapping ACROSS bundles by different authors are expressly allowed
-      and are not reported at all."""
+      and are not reported at all.
+    check 26 is BUNDLE MODE ONLY and is about STATE.template.md alone. In an
+      INSTANCE, `assumes_reviewed` in STATE.md is normal and expected - it is
+      what the runner writes once the learner has seen the review - and
+      nothing here reports it. Nothing here checks its VALUE either, in
+      either mode: whether the date is a date, and whether a stamp exists on
+      a course that declares no `assumes`, are the runner's to report at
+      materialization (state-lifecycle.md section 10.5). Check 26 asks one
+      question - does the template carry the field - because that is the one
+      failure no runner and no learner can see."""
 
 
 @dataclass(frozen=True)
@@ -1914,17 +1928,21 @@ def check_optional_state(
 
 def check_state_template(
     root: Path, manifest: Any, report: Report
-) -> None:
-    """Check 12 - bundle mode."""
+) -> dict | None:
+    """Check 12 - bundle mode.
+
+    Returns the parsed STATE.template.md frontmatter, or None when it could
+    not be read, so check 26 does not have to parse the file a second time.
+    """
     path = root / "STATE.template.md"
     if "STATE.template.md" not in list_dir(root):
         report.blocked(12, "STATE.template.md is missing (see check 7)")
-        return
+        return None
     text = read_text(path)
     if text is None:
         report.add(12, "STATE.template.md", "the file could not be read as UTF-8 text")
         report.blocked(12, "STATE.template.md could not be read")
-        return
+        return None
     fm_text, body = split_frontmatter(text)
     if fm_text is None:
         report.add(
@@ -1934,17 +1952,17 @@ def check_state_template(
             "active_lesson, status and updated.",
         )
         report.ran(12)
-        return
+        return None
     try:
         fm = load_yaml(fm_text, "STATE.template.md frontmatter")
     except YamlError as exc:
         report.add(12, "STATE.template.md", f"the frontmatter does not parse: {exc}")
         report.ran(12)
-        return
+        return None
     if not isinstance(fm, dict):
         report.add(12, "STATE.template.md", "the frontmatter is not a mapping")
         report.ran(12)
-        return
+        return None
 
     manifest_id = manifest.get("id") if isinstance(manifest, dict) else None
     listed = as_list(manifest.get("lessons")) if isinstance(manifest, dict) else None
@@ -1981,6 +1999,61 @@ def check_state_template(
                 f"the required section heading '## {section}' is missing.",
             )
     report.ran(12)
+    return fm
+
+
+def check_template_assumes_reviewed(fm: dict | None, report: Report) -> None:
+    """Check 26 - bundle mode.
+
+    `assumes_reviewed` is the runner's record that ONE learner saw the review
+    of the concepts this course assumes and chose to continue
+    (state-lifecycle.md section 10). Its presence is the whole of "already
+    answered": the runner presents the review only while the field is absent
+    (runner-protocol.md section 11.1), and never removes or rewrites it.
+
+    A template describes a learner who has not started, so no review can have
+    been shown to anyone. A bundle that ships the stamp in its template hands
+    every instance it ever produces an answer nobody gave, and the review is
+    suppressed for every learner of that course, forever - each one starts
+    without ever being told what the course assumes they already know.
+
+    That is why this is a FINDING rather than a warning. Nothing else can
+    report it: the bundle is otherwise well-formed, the runner does exactly
+    what the stamp tells it, and the learner cannot miss a review they were
+    never shown. It is invisible from every vantage point except this one,
+    and it is one line to fix.
+
+    The rule is unconditional (section 10.1). A course that declares no
+    `assumes` never gets the stamp either, so there is no shape of template
+    in which the field is correct, and this check never consults the
+    manifest.
+
+    It is BUNDLE-ONLY, and deliberately so. In an INSTANCE the field is
+    normal and expected - it is precisely what the runner writes - so this
+    check is never called in instance mode and cannot reject a course a
+    learner has already reviewed.
+    """
+    if fm is None:
+        report.blocked(
+            26, "STATE.template.md's frontmatter could not be read (see check 12)"
+        )
+        return
+    if ASSUMES_REVIEWED in fm:
+        report.add(
+            26,
+            "STATE.template.md",
+            f"the frontmatter carries {ASSUMES_REVIEWED!r} "
+            f"({fm[ASSUMES_REVIEWED]!r}). A template describes a learner who "
+            f"has not started, so no assumed-concept review can have been "
+            f"shown. The runner reads the field's presence as 'the review was "
+            f"shown and the learner chose to continue', so shipping it here "
+            f"suppresses that review for EVERY learner of this course: none of "
+            f"them is ever told what the course assumes they already know, and "
+            f"nothing reports it. Remove the field. Materialization is where it "
+            f"can first appear, and only once a learner has answered. See "
+            f"state-lifecycle.md section 10.1.",
+        )
+    report.ran(26)
 
 
 def check_instance_state(
@@ -3520,7 +3593,8 @@ def validate(target: Path, mode: str) -> Report:
     check_course_coverage(target, manifest_dict, report)
     if mode == "bundle":
         check_no_generated_dir(target, report)
-        check_state_template(target, manifest_dict, report)
+        template_fm = check_state_template(target, manifest_dict, report)
+        check_template_assumes_reviewed(template_fm, report)
     else:
         check_generated_lessons(
             target, manifest_dict, generated, generated_exact, generated_near, report

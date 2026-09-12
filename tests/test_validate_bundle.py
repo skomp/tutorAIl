@@ -2154,6 +2154,82 @@ def m_course_names_a_concept_in_the_singular(root: Path) -> None:
     edit(root / "COURSE.md", "- partition offsets\n", "- partition offset\n")
 
 
+# -- check 26: assumes_reviewed in a template
+#
+# The two directions of this check are opposites, and getting the second one
+# wrong is far more expensive than getting the first one wrong. In a BUNDLE
+# the stamp suppresses the assumed-concept review for every learner the course
+# ever has. In an INSTANCE the very same field is what the runner writes when
+# a learner has seen that review and continued, so a check that fired there
+# would refuse to materialize every course a learner has already reviewed.
+
+
+def _stamp_template(root: Path, when: str = "2026-09-12") -> None:
+    edit(
+        root / "STATE.template.md",
+        "updated: null\n",
+        f"updated: null\n{vb.ASSUMES_REVIEWED}: {when}\n",
+    )
+    assert vb.ASSUMES_REVIEWED in (root / "STATE.template.md").read_text(), (
+        "the template does not carry the stamp, so this fixture proves nothing"
+    )
+
+
+def m_template_carries_assumes_reviewed(root: Path) -> None:
+    """A bundle ships a stamped template, on a course that DOES declare
+    `assumes` - so there is a real review, and it is now suppressed."""
+    assert "\nassumes:\n" in (root / "tutorial.yaml").read_text(), (
+        "this baseline declares no 'assumes', so it cannot show the review "
+        "this fixture is about being suppressed"
+    )
+    _stamp_template(root)
+
+
+def m_template_carries_assumes_reviewed_without_assumes(root: Path) -> None:
+    """The rule is UNCONDITIONAL (state-lifecycle.md section 10.1).
+
+    A course declaring no `assumes` never gets the stamp either, so check 26
+    must not consult the manifest before rejecting it. Without this case the
+    check could be implemented as "reject only when `assumes` is non-empty"
+    and every existing test would still pass.
+    """
+    assert "\nassumes:\n" not in (root / "tutorial.yaml").read_text(), (
+        "this baseline declares 'assumes', so it cannot show the rule holding "
+        "in its absence"
+    )
+    _stamp_template(root)
+
+
+def m_template_carries_an_empty_assumes_reviewed(root: Path) -> None:
+    """Presence is the whole of the rule, so a valueless stamp is rejected
+    too. The runner reads 'the field is there', never its value."""
+    edit(
+        root / "STATE.template.md",
+        "updated: null\n",
+        f"updated: null\n{vb.ASSUMES_REVIEWED}:\n",
+    )
+
+
+def m_instance_carries_assumes_reviewed(root: Path) -> None:
+    """The REGRESSION GUARD, and the reason check 26 is bundle-only.
+
+    This is a well-formed instance of a course that declares `assumes`, in
+    exactly the state the runner leaves it in after the learner has seen the
+    review and chosen to continue. It must validate at exit 0. If it does
+    not, every live course stops resuming.
+    """
+    state = root / "STATE.md"
+    assert state.exists(), "run_case should have materialized this baseline"
+    edit(
+        state,
+        "updated: 2026-09-11\n",
+        f"updated: 2026-09-11\n{vb.ASSUMES_REVIEWED}: 2026-09-12\n",
+    )
+    assert vb.ASSUMES_REVIEWED in state.read_text(), (
+        "STATE.md does not carry the stamp, so this fixture proves nothing"
+    )
+
+
 
 # --------------------------------------------------------------------------
 # The case table
@@ -2751,6 +2827,25 @@ CASES: list[Case] = [
     Case("25: COURSE.md naming a concept in the singular is enough", 25,
          "broker", "bundle", m_course_names_a_concept_in_the_singular,
          kind="silent"),
+    # ---- check 26: a stamped STATE.template.md
+    Case("26: the template ships an assumes_reviewed stamp", 26, "engine",
+         "bundle", m_template_carries_assumes_reviewed,
+         "suppresses that review for EVERY learner of this course",
+         where="STATE.template.md"),
+    Case("26: a template is rejected even on a course with no assumes", 26,
+         "automaton", "bundle", m_template_carries_assumes_reviewed_without_assumes,
+         "the frontmatter carries 'assumes_reviewed'",
+         where="STATE.template.md"),
+    Case("26: a stamp with no value is a stamp", 26, "engine", "bundle",
+         m_template_carries_an_empty_assumes_reviewed,
+         "the frontmatter carries 'assumes_reviewed'",
+         where="STATE.template.md"),
+    # ---- check 26, the direction that must NEVER fire. An instance carrying
+    # the stamp is what the runner writes, and since the runner validates an
+    # instance at materialization and refuses to start a course on a finding,
+    # a false positive here would block every course a learner has reviewed.
+    Case("26: an INSTANCE carrying assumes_reviewed is silent", 26, "engine",
+         "instance", m_instance_carries_assumes_reviewed, kind="silent"),
 ]
 
 
@@ -4189,6 +4284,123 @@ def test_run_case_checks_where() -> None:
         )
 
 
+def test_assumes_reviewed_is_bundle_only() -> None:
+    """Check 26's two directions, side by side, on the same stamp.
+
+    The pair matters more than either half. A stamped INSTANCE is proved to
+    pass immediately after the identical stamp is proved to fail in a bundle,
+    so neither result can be the instrument failing to see anything: the
+    check is demonstrably able to report this exact field, and it stays
+    silent on the instance anyway.
+
+    The instance direction is the expensive one. Since a5e8b5a the runner
+    validates an instance at materialization and refuses to start a course on
+    a finding, so a check 26 that fired here would block every course whose
+    learner has already seen the assumed-concept review.
+    """
+    print("\ncheck 26: a stamped template fails, a stamped instance does not:")
+    # `engine` declares `assumes`, `automaton` does not. The rule is
+    # unconditional in both directions, so both are exercised.
+    for name in ("engine", "automaton"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh(name, Path(tmpdir))
+            _stamp_template(root)
+            report = vb.validate(root, "bundle")
+            hits = [f for f in report.findings if f.check == 26]
+            record(
+                len(hits) == 1
+                and hits[0].where == "STATE.template.md"
+                and report.exit_code() == 1,
+                f"{name} as a BUNDLE: a stamped STATE.template.md is rejected",
+                f"findings = {[str(f) for f in report.findings]}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh(name, Path(tmpdir))
+            to_instance(root)
+            m_instance_carries_assumes_reviewed(root)
+            report = vb.validate(root, "instance")
+            record(
+                report.exit_code() == 0 and not report.findings,
+                f"{name} as an INSTANCE: STATE.md may carry the stamp",
+                f"exit {report.exit_code()}, findings = "
+                f"{[str(f) for f in report.findings]}, blocked = "
+                f"{report.blocked_checks}",
+            )
+            record(
+                26 not in report.status,
+                f"{name} as an INSTANCE: check 26 is never even reached",
+                f"status for 26 was {report.status.get(26)!r}; the check must "
+                f"not run in instance mode at all",
+            )
+            stamped = (root / "STATE.md").read_text()
+            record(
+                f"{vb.ASSUMES_REVIEWED}: 2026-09-12" in stamped,
+                f"{name} as an INSTANCE: the stamp really was in the file",
+                "the mutation did nothing, so the pass above proves nothing",
+            )
+
+    record(
+        26 in vb.BUNDLE_ONLY,
+        "check 26 is declared BUNDLE_ONLY, so it is not listed in an "
+        "instance-mode report",
+        f"BUNDLE_ONLY = {vb.BUNDLE_ONLY}",
+    )
+
+
+def test_no_real_bundle_ships_a_stamped_template() -> None:
+    """Check 26 rejects nothing that exists today.
+
+    Every bundle in reach is listed, and a bundle that is NOT here is
+    reported as skipped rather than counted as clean. The needle is asserted
+    non-empty and is proved to match a planted copy of one of the real
+    templates, so a silent pass cannot come from a search that could not
+    find anything.
+    """
+    print("\ncheck 26 rejects none of the real bundles:")
+    needle = vb.ASSUMES_REVIEWED
+    record(bool(needle), "the search term is non-empty", f"needle = {needle!r}")
+
+    bundles = [
+        REPO / "skills/tutorail/examples/rust-cli-basics",
+        Path.home() / "src/github.com/skomp/tutorail-bundles/rust-automaton-db",
+        Path.home() / "src/github.com/skomp/tutorail-bundles/webgl-typescript-scene",
+        FIXTURES / "durable-event-broker",
+        FIXTURES / "streaming-query-engine",
+        FIXTURES / "event-stream-recipes",
+    ]
+    for path in bundles:
+        if not path.is_dir():
+            note(f"  SKIPPED: {path} is not present, so it was not checked")
+            print(f"  skip {path} (not present)")
+            continue
+        report = vb.validate(path, "bundle")
+        hits = [f for f in report.findings if f.check == 26]
+        record(
+            not hits and report.status.get(26, ("missing", ""))[0] == vb.RAN,
+            f"{path.name}: check 26 ran and reported nothing",
+            f"status = {report.status.get(26)!r}, findings = "
+            f"{[str(f) for f in hits]}",
+        )
+
+    # The positive control for the sweep above: plant the stamp in a copy of
+    # a real template and confirm the same run reports it.
+    present = [p for p in bundles if p.is_dir()]
+    if present:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / "planted"
+            shutil.copytree(present[0], root)
+            _stamp_template(root)
+            report = vb.validate(root, "bundle")
+            record(
+                any(f.check == 26 for f in report.findings),
+                f"the same sweep DOES report a stamp planted in "
+                f"{present[0].name}",
+                "the sweep cannot report a positive, so its clean results "
+                "prove nothing",
+            )
+
+
 def test_check_coverage() -> None:
     """Every check must be demonstrated REPORTING, not merely passing.
 
@@ -4249,6 +4461,8 @@ def main() -> int:
     test_catalog_path_spelling_never_changes_the_verdict()
     test_run_case_checks_where()
     test_alias_normalisation_matches_the_runtime()
+    test_assumes_reviewed_is_bundle_only()
+    test_no_real_bundle_ships_a_stamped_template()
     test_check_coverage()
 
     if _notes:
