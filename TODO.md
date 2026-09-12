@@ -79,3 +79,67 @@ finding from such a run is worthless.
 
 None. The harness drives the runner, which works today. It does not need the bundle
 toolkit (sub-project A).
+
+---
+
+## Multiple catalogues, with remote sources (runner change) — deferred 2026-09-12
+
+Let a learner configure many catalogues. Let a catalogue come from a Git repository.
+Replace the current design, which reads exactly two files: the catalogue shipped with
+the plugin, and one user file.
+
+### Configuration
+
+Add a catalogue of catalogues at `~/.config/tutorail/catalogs.yaml`:
+
+```yaml
+catalogs:
+  - id: builtin
+    source: { type: bundled }
+  - id: mine
+    source: { type: file, path: ~/tutorials/catalog.yaml }
+  - id: skomp
+    source:
+      type: git
+      url: git@github.com:skomp/tutorail-bundles.git
+      ref: main
+      path: catalog.yaml        # the repository root, or any subfolder
+```
+
+### A bundles repository carries its own catalogue
+
+Put a `catalog.yaml` in the root of a bundles repository. List that repository's bundles
+with relative paths. A learner then adds the whole repository with one entry, and the
+bundles arrive with it.
+
+Apply this to `skomp/tutorail-bundles`. The maintenance skills must generate it.
+
+### Authentication
+
+Use the Git credentials the user already has, such as an SSH key or the `gh` command.
+Do not manage tokens. Do not store secrets. A private repository installs the same way
+as a public one.
+
+This follows the rule that the runner borrows access the user already granted.
+
+### Refresh — decided 2026-09-12
+
+Refresh every catalogue when a discovery request starts. Do not refresh on every turn.
+A resume reads no catalogue, so a learner who continues a course pays nothing.
+
+Handle a failed refresh as follows:
+
+1. Do not fail discovery because one catalogue failed. Serve the catalogues that
+   answered. Name the catalogue that did not.
+2. Use the last successful copy of a catalogue that fails. Tell the learner the results
+   are cached, and name the catalogue.
+3. Report the kind of failure. "The host is unreachable", "you have no access to this
+   repository" and "this repository has no catalogue file" are three different problems
+   with three different repairs. Do not report them as one message.
+4. Never present stale results as current.
+
+### Effects on other work
+
+- The runner protocol and `catalogue-format.md` both change.
+- The validator gains a mode that checks a catalogue file.
+- The `create-bundle` skill must offer to write a repository-level `catalog.yaml`.
