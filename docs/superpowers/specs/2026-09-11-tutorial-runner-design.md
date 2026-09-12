@@ -1147,11 +1147,15 @@ caches a *bundle* that a learner has not chosen.
 
 ## 15. Open decisions
 
-1. **`automaton-db` has zero commits.** Adding `tutorial/` and committing would create the
-   repository's first commit, necessarily including `main.rs`, `Cargo.toml` and both
-   `TUTORIAL*.md` files. Left uncommitted; the owner decides.
-2. **Fate of `TUTORIAL.md` / `TUTORIAL.updated.md`** now that the bundle exists — keep as
-   historical source, or remove. Not decided.
+1. ~~**`automaton-db` has zero commits.**~~ **Settled 2026-09-12.** Committed as one
+   initial commit and pushed to its private remote: the Rust source, the tutorial instance,
+   and the legacy playbook, with `target/` excluded. `src/lib.rs` is confirmed absent on the
+   remote, so the pending refactor is still the learner's to do.
+2. ~~**Fate of `TUTORIAL.md` / `TUTORIAL.updated.md`.**~~ **Settled 2026-09-12.** Moved to
+   `docs/legacy/` in `automaton-db`, each opening with a header stating that it is
+   superseded, that its resume marker is stale, that lesson numbering changed during
+   migration, and that `STATE.md` and the source win. Kept for history rather than deleted,
+   and out of the repository root where they were its most prominent documents.
 3. ~~**Bundle update after a learner has started.**~~ **Settled 2026-09-12: detect and
    report, never apply.** See "Bundle revisions" below.
 4. ~~**Multiple concurrent tutorials in one workspace.**~~ **Settled 2026-09-12: one
