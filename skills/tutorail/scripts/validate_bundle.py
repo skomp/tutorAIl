@@ -385,7 +385,22 @@ LIMITATIONS = """What a pass does and does not mean
       is the ordinary case for an anticipated failure.
     check 21 validates the SHAPE of STATE.md's `## Optional lessons` record,
       not its truth. It cannot tell whether the learner was really offered
-      anything, really deferred it, or really finished it."""
+      anything, really deferred it, or really finished it.
+
+  Supplies (`supplies:`):
+    an ABSENT key and a PRESENT-but-empty one (`supplies:` with nothing
+      under it, or `supplies: []`) are both silent and both report "n/a" -
+      a freshly scaffolded bundle, or a bundle mid-edit by the authoring
+      toolkit, may carry an empty declaration before its first real entry.
+      Check 22 cannot tell an author who meant to declare nothing from one
+      who wrote an empty key by accident, and it does not try: an empty key
+      is silent, a malformed one (a bare scalar, or a mapping instead of a
+      list) is loud and is always a finding.
+    check 22 proves the entries are well-formed and every declared 'from'
+      exists. It says nothing about whether the supplied files are the
+      RIGHT files, and nothing about whether a lesson still tells the
+      learner to copy them by hand - that judgement is the course-quality
+      audit's, not this validator's."""
 
 
 @dataclass(frozen=True)
@@ -2384,6 +2399,17 @@ def check_supplies(
     still tells the learner to copy them by hand - that judgement belongs to
     the course-quality audit, not this validator.
 
+    A site's raw `supplies` value falls into three buckets, matching the
+    precedent check 18 already sets for `optional_lessons`: nothing under
+    the key (`None`) or an explicitly empty list is treated as "nothing
+    declared here" and is silent, exactly like the key being absent
+    altogether - a freshly scaffolded bundle, or the authoring toolkit
+    rewriting `supplies: []` into block form on its first real entry, must
+    not fail validation for carrying one. A value that is present and is
+    NEITHER a list nor empty - a bare scalar, or the missing-'- ' mapping
+    typo - is a finding: only a key that is absent or empty EVERYWHERE
+    reports `n/a`.
+
     `lessons` is expected to include generated lessons (an instance's
     lessons.generated/ overlay): a generated lesson's supplies entries get
     every well-formedness check a listed lesson's do, and only the
@@ -2392,24 +2418,33 @@ def check_supplies(
     """
     sites = _supplies_sites(root, manifest, lessons)
 
-    if not sites:
+    malformed_sites: list[tuple[str, Any]] = []
+    live_sites: list[tuple[str, list]] = []
+    for where, raw in sites:
+        if raw is None:
+            continue  # 'supplies:' with nothing under it - nothing declared
+        if isinstance(raw, list):
+            if raw:
+                live_sites.append((where, raw))
+            # else: 'supplies: []' - present, valid, nothing declared
+            continue
+        malformed_sites.append((where, raw))
+
+    if not malformed_sites and not live_sites:
         report.na(22, "no bundle declares supplies")
         return
 
     checked = 0
-    malformed_sites = 0
-    for where, raw in sites:
-        if not isinstance(raw, list):
-            malformed_sites += 1
-            report.add(
-                22,
-                where,
-                f"'supplies' must be a list of entries, not "
-                f"{type(raw).__name__}. Each entry needs its own '- ' list "
-                f"marker; a single mapping directly under 'supplies:' is "
-                f"the common typo.",
-            )
-            continue
+    for where, raw in malformed_sites:
+        report.add(
+            22,
+            where,
+            f"'supplies' must be a list of entries, not "
+            f"{type(raw).__name__}. Each entry needs its own '- ' list "
+            f"marker; a single mapping directly under 'supplies:' is "
+            f"the common typo.",
+        )
+    for where, raw in live_sites:
         for entry in raw:
             checked += 1
             if not isinstance(entry, dict):
@@ -2524,12 +2559,13 @@ def check_supplies(
                     f"invisible to the runner",
                 )
 
+    total_sites = len(live_sites) + len(malformed_sites)
     entry_word = "entry" if checked == 1 else "entries"
-    site_word = "site" if len(sites) == 1 else "sites"
-    detail = f"{checked} supplies {entry_word} across {len(sites)} declaration {site_word}"
+    site_word = "site" if total_sites == 1 else "sites"
+    detail = f"{checked} supplies {entry_word} across {total_sites} declaration {site_word}"
     if malformed_sites:
-        site_or_sites = "site" if malformed_sites == 1 else "sites"
-        detail += f" ({malformed_sites} malformed {site_or_sites})"
+        malformed_word = "site" if len(malformed_sites) == 1 else "sites"
+        detail += f" ({len(malformed_sites)} malformed {malformed_word})"
     report.ran(22, detail)
 
 

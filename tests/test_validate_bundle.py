@@ -2908,10 +2908,11 @@ def test_supplies_status_text() -> None:
         )
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # The third repro from fix round 1's Critical finding: 'supplies: []'
-        # is PRESENT (so not n/a) and is already a well-formed, empty list
-        # (so it is not a malformed-key finding either) - it just has
-        # nothing to check.
+        # CORRECTION to fix round 1: 'supplies: []' declares NOTHING, not a
+        # malformed key. The authoring toolkit accepts an empty
+        # 'supplies: []' on a freshly scaffolded bundle and rewrites it in
+        # block form on the first real entry, so check 22 must not fail a
+        # bundle for carrying one - it is silent, exactly like an absent key.
         root = fresh("automaton", Path(tmpdir))
         append(root / "tutorial.yaml", "\nsupplies: []\n")
         report = vb.validate(root, "bundle")
@@ -2921,9 +2922,25 @@ def test_supplies_status_text() -> None:
             "; ".join(str(f) for f in report.findings),
         )
         record(
-            report.status.get(22)
-            == (vb.RAN, "0 supplies entries across 1 declaration site"),
-            "'supplies: []' is present, so check 22 is 'ran' with 0 entries, not n/a",
+            report.status.get(22) == (vb.NOT_APPLICABLE, "no bundle declares supplies"),
+            "'supplies: []' declares nothing, so check 22 is n/a - same as absent",
+            f"got {report.status.get(22)}",
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # The other empty shape: 'supplies:' with nothing under it at all,
+        # which the restricted YAML reader returns as None. Same rule.
+        root = fresh("automaton", Path(tmpdir))
+        append(root / "tutorial.yaml", "\nsupplies:\n")
+        report = vb.validate(root, "bundle")
+        record(
+            report.exit_code() == 0 and not report.findings,
+            "'supplies:' with nothing under it is well-formed, not a finding",
+            "; ".join(str(f) for f in report.findings),
+        )
+        record(
+            report.status.get(22) == (vb.NOT_APPLICABLE, "no bundle declares supplies"),
+            "'supplies:' with no value declares nothing, so check 22 is n/a",
             f"got {report.status.get(22)}",
         )
 
