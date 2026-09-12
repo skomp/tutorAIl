@@ -1154,8 +1154,8 @@ caches a *bundle* that a learner has not chosen.
    historical source, or remove. Not decided.
 3. ~~**Bundle update after a learner has started.**~~ **Settled 2026-09-12: detect and
    report, never apply.** See "Bundle revisions" below.
-4. **Multiple concurrent tutorials in one workspace.** Not supported; `tutorial/` is
-   singular. Deferred.
+4. ~~**Multiple concurrent tutorials in one workspace.**~~ **Settled 2026-09-12: one
+   workspace, one course.** See "One instance per workspace" below.
 5. ~~**Remote repositories.**~~ **Settled 2026-09-12.** All four repositories exist as
    private GitHub repositories and are pushed, except `automaton-db`, whose remote exists
    but is deliberately empty (see decision 1). A `git` catalogue therefore has no real remote to point at
@@ -1181,7 +1181,37 @@ caches a *bundle* that a learner has not chosen.
 
 ---
 
-## 15a. Bundle revisions reaching a live instance
+## 15a. One instance per workspace
+
+**Decided 2026-09-12.** A workspace holds exactly one tutorial instance, at `tutorial/`.
+This is a deliberate constraint, not an unexamined default.
+
+**Why.** A course owns the shape of its workspace. It declares `workspace_kind`, which
+globs are `learner_owned`, which are `tutor_owned`, what `ownership_policy` applies, and
+which validators may run. Two courses in one workspace would disagree on all five, and every
+disagreement lands on the same files:
+
+- one course says `src/**` is learner-owned and must never be edited; the other allows
+  editing on request
+- one runs `cargo test`; the other runs `npm run typecheck` in the same directory
+- `tutor_owned` paths collide, because both want `tutorial/STATE.md`
+
+There is no reading of those conflicts that is obviously right, and resolving them would put
+policy in the runner that properly belongs to a bundle.
+
+**The cost of the constraint is close to zero.** A learner who wants a second course makes a
+second directory. Nothing prevents taking two courses at once; they simply do not share a
+workspace. For a course with `workspace_kind: none` — one that builds no software — a
+directory is all it ever needed.
+
+**What this rules out**, stated so it is not rediscovered: a short side course taken inside
+the same repository as a long one, sharing its code. If that case ever becomes real, the
+change is `tutorial/` becoming `tutorials/<id>/` with one marked active, and the hard part
+is not the paths but deciding which instance "continue the tutorial" means.
+
+---
+
+## 15b. Bundle revisions reaching a live instance
 
 **Decided 2026-09-12.** A runner detects that the bundle an instance came from has changed,
 reports it, and stops. It never reconciles on its own.
