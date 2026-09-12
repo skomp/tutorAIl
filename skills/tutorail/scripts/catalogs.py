@@ -1176,10 +1176,10 @@ ASSUMES_LEVELS = ("awareness", "conceptual", "working", "advanced")
 #
 # The rank is meaningful within one query type. A concept query ranks
 # 1 exact concept id, 2 exact per-concept alias, 3 normalised text,
-# 4 an author's recommended previous bundle, 5 broad subject; that is the
-# design's ladder, and tier 6, semantic, is never produced. A relationship
-# query ranks the author's own list first, the reverse-declared list second
-# and the inferred relatives third.
+# 4 a recommended previous bundle THAT COVERS THE CONCEPT, 5 broad subject;
+# that is the design's ladder, and tier 6, semantic, is never produced. A
+# relationship query ranks the author's own list first, the reverse-declared
+# list second and the inferred relatives third.
 #
 # `recommendation` is load-bearing and not cosmetic: it is what keeps a broad
 # subject match from being shown as something an author recommended.
@@ -1188,10 +1188,18 @@ PROVENANCE_KINDS: dict[str, tuple[int, bool, str]] = {
     "exact-concept": (1, False, "the query is a concept id the bundle covers"),
     "concept-alias": (2, False, "the query is an alias of a concept it covers"),
     "concept-text": (3, False, "the query's words appear in a covered concept"),
+    # Rank 4 is a JOIN of two independent declarations: this bundle's own
+    # `covers`, and another author's `recommended_previous_bundles`. Neither
+    # author wrote the conjunction, and the author who wrote the
+    # recommendation recommended a course ORDER, not a teacher of this
+    # concept - so inside a concept query this route is an inference and is
+    # flagged as one. The same author's sentence IS an author recommendation
+    # in `prepare` and `follow-ups`, where it answers the question it was
+    # written to answer; see "author-previous" and "declared-previous".
     "recommended-previous": (
         4,
-        True,
-        "an author recommends this bundle before a bundle that assumes the concept",
+        False,
+        "it covers the concept, and a bundle assuming it recommends it first",
     ),
     "broad-subject": (5, False, "the query matches a subject or a bundle alias"),
     # "what could I take after X"
@@ -1676,7 +1684,9 @@ class RelationshipIndex:
         THE `covers` LOOP READS `covers` AND NOTHING ELSE. A bundle that only
         assumes the concept is not teaching it, and tier 4 below is the one
         route by which an assuming bundle contributes - and even then it
-        contributes the bundle its AUTHOR recommends, never itself.
+        contributes the bundle its AUTHOR recommends, never itself, and only
+        when that recommended bundle COVERS the concept. Every bundle in the
+        answer, by every tier, declares the concept in its own `covers`.
         """
         slug = normalise(query)
         tokens = tokenise(query)
@@ -1702,9 +1712,26 @@ class RelationshipIndex:
                 )
                 found = True
 
-        # Tier 4. An author who says "take that bundle first" is telling us
-        # where a concept they ASSUME can be learnt. The assuming bundle is
-        # not returned; the bundle its author points at is.
+        # Tier 4. An author who says "take that bundle first" can point at
+        # where a concept they ASSUME is taught. The assuming bundle is never
+        # returned; the bundle its author points at is - AND ONLY IF THAT
+        # BUNDLE ITSELF COVERS THE CONCEPT.
+        #
+        # That last qualifier is the whole tier. The design ranks "explicit
+        # recommended previous bundle THAT COVERS THE CONCEPT" at 4, and
+        # without the qualifier this route answers "who teaches C" with a
+        # course that merely NEEDS C - the first failure section 12.8 of
+        # catalogue-format.md refuses, and the one it names by name.
+        #
+        # The test is `concept.id in target.covers`, the concept id and
+        # nothing looser, because a concept id is the identity that crosses
+        # authors. `prepare_for` below asks the same question the same way,
+        # so the two commands cannot disagree about who covers what.
+        #
+        # The tier still earns its place: the query may reach the ASSUMING
+        # bundle's wording - its summary, its aliases - when the covering
+        # bundle describes the same concept in other words, and then tier 4
+        # is the only route that finds the course that teaches it.
         for identifier in self.order:
             bundle = self.bundles[identifier]
             for concept in bundle.assumes.values():
@@ -1714,13 +1741,16 @@ class RelationshipIndex:
                     target = self.bundles.get(rec.bundle)
                     if target is None or target.id == identifier:
                         continue
+                    if concept.id not in target.covers:
+                        continue
                     collector.add(
                         target,
                         Provenance(
                             kind="recommended-previous",
                             detail=(
-                                f"Recommended by {identifier} as a previous "
-                                f"bundle; {identifier} assumes {concept.id}"
+                                f"Covers {concept.id}, and {identifier} - "
+                                f"which assumes {concept.id} - names it as a "
+                                f"previous bundle"
                             ),
                             concept=concept.id,
                             bundle=identifier,

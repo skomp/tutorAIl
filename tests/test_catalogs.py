@@ -1740,9 +1740,18 @@ def test_provenance_is_kept_when_a_bundle_arrives_by_several_routes() -> None:
             repr(match["why"]),
         )
         record(
-            match["author_recommended"] is True,
-            "the bundle is author-recommended, because one route really is",
+            match["author_recommended"] is False,
+            "and no route in a CONCEPT query is an author recommendation: "
+            "both authors recommended a course ORDER, neither claimed this "
+            "bundle teaches retained-event-logs",
             repr(match["author_recommended"]),
+        )
+        record(
+            all(w["author_recommendation"] is False for w in match["why"]),
+            "so every line is tagged as an inference while every author's own "
+            "`because` still travels with it - the tag is narrowed, and no "
+            "provenance is dropped",
+            repr(match["why"]),
         )
         concept_routes = [
             w for w in match["why"] if w["kind"] == "exact-concept"
@@ -1751,8 +1760,8 @@ def test_provenance_is_kept_when_a_bundle_arrives_by_several_routes() -> None:
             concept_routes and all(
                 w["author_recommendation"] is False for w in concept_routes
             ),
-            "but the concept route is still marked as NOT a recommendation, "
-            "so the two claims never merge into one",
+            "and the concept route is marked as NOT a recommendation, so the "
+            "two claims never merge into one",
             repr(concept_routes),
         )
 
@@ -1976,17 +1985,116 @@ def test_prepare_searches_covers_against_assumes() -> None:
         )
 
 
+def test_tier_4_never_answers_covers_with_a_bundle_that_only_assumes() -> None:
+    """Regression. Tier 4 returned a bundle that only ASSUMED the concept.
+
+    `go-programming` is assumed at level `working` by durable-event-broker and
+    by streaming-query-engine, and is covered by nothing in this catalogue.
+    Tier 4 read `assumes` to find who NEEDS the concept, then returned the
+    predecessor that author recommends without ever checking whether that
+    predecessor TEACHES it - so `covers go-programming` answered
+    durable-event-broker, tagged `[author recommendation]`, although that
+    bundle covers only group-commit, partition-offsets, retained-event-logs
+    and topic-partitions and assumes working Go.
+
+    A learner stuck on Go was sent to a course that requires working Go: the
+    first entry on catalogue-format.md section 12.8's refusal list.
+    """
+    print("\nregression: `covers` never answers with a bundle that only assumes:")
+    with temp_env() as env:
+        relationship_env(env)
+        code, payload = env.run_json("covers", "go-programming")
+        ids = matched_ids(payload)
+        record(
+            ids == [],
+            "a concept every bundle only ASSUMES has no answer at all",
+            f"exit {code}, {ids}",
+        )
+        record(
+            "durable-event-broker" not in ids,
+            "and in particular not the predecessor an author recommends, "
+            "which assumes go-programming and never covers it",
+            f"{ids}",
+        )
+        record(
+            code == 3,
+            "the command reports 'nothing matched' rather than success",
+            repr(code),
+        )
+        _, prep = env.run_json("prepare", "streaming-query-engine")
+        record(
+            any(
+                "no available bundle covers go-programming" in note
+                for note in prep["notes"]
+            ),
+            "and the sibling `prepare` command agrees about the same fact "
+            "instead of contradicting it",
+            repr(prep["notes"]),
+        )
+        # POSITIVE CONTROLS, in the same test. The cheap wrong repair here is
+        # to switch tier 4 off; both of these fail if it is off.
+        code, payload = env.run_json("covers", "group-commit")
+        ids = matched_ids(payload)
+        record(
+            code == 0 and ids == ["durable-event-broker"],
+            "control: the same query shape still returns the bundle for a "
+            "concept that bundle genuinely covers",
+            f"exit {code}, {ids}",
+        )
+        code, payload = env.run_json("covers", "retained-event-logs")
+        match = find_match(payload, "durable-event-broker")
+        kinds = why_kinds(match)
+        record(
+            code == 0 and "recommended-previous" in kinds,
+            "control: tier 4 was narrowed, not disabled - it still fires "
+            "where the recommended predecessor really does cover the concept",
+            repr(kinds),
+        )
+        _, prep = env.run_json("prepare", "streaming-query-engine")
+        previous = find_match(prep, "durable-event-broker")
+        record(
+            previous["author_recommended"] is True
+            and any(w["kind"] == "author-previous" for w in previous["why"]),
+            "control: the author's sentence is STILL an author recommendation "
+            "in `prepare`, where it answers the question it was written for",
+            repr(previous["why"]),
+        )
+
+
 def test_a_recommended_previous_bundle_answers_a_concept_query() -> None:
-    print("\ntier 4 - an author points at where a concept is taught:")
+    print("\ntier 4 - a recommended bundle that COVERS the concept:")
+    # The design ranks at 4 an "explicit recommended previous bundle THAT
+    # COVERS THE CONCEPT". Both halves are exercised here: `thin-broker` is
+    # recommended AND covers group-commit, `hollow-broker` is recommended by
+    # the same author and does NOT.
+    #
+    # The query is deliberately wording that appears ONLY in the assuming
+    # bundle's summary, so no other tier can reach thin-broker. That is what
+    # makes this tier worth having: the course that teaches a concept and the
+    # course that assumes it often describe it in different words, and tier 4
+    # is the bridge between the two vocabularies.
     doc = """catalog_version: 1
 tutorials:
   - id: thin-broker
     title: The thin broker course
-    description: A course whose metadata names no concepts at all.
+    description: A course that teaches the commit path.
     subjects: [messaging]
     level: beginner
     workspace_kind: new-repository
+    covers:
+      group-commit:
+        summary: One fsync is shared by many writes, which is what makes a log fast.
     source: { type: local, path: thin }
+  - id: hollow-broker
+    title: The hollow broker course
+    description: A course the same author recommends, teaching something else.
+    subjects: [messaging]
+    level: beginner
+    workspace_kind: new-repository
+    covers:
+      message-framing:
+        summary: Where one message ends and the next one begins.
+    source: { type: local, path: hollow }
   - id: engine
     title: The engine course
     description: A course that assumes a concept and says where to learn it.
@@ -1996,40 +2104,62 @@ tutorials:
     assumes:
       group-commit:
         level: working
-        summary: Many writes share one fsync, and you can reason about it.
+        summary: Many writes share one fsync, and you can reason about the durability window.
     recommended_previous_bundles:
       - bundle: thin-broker
         because: It builds the commit path this course measures.
+      - bundle: hollow-broker
+        because: It is a gentler introduction to the broker itself.
     source: { type: local, path: engine }
 """
     with temp_env() as env:
         path = env.write_catalog("tier4.yaml", doc)
         env.write_config(file_config(("tier4", path)))
-        code, payload = env.run_json("covers", "group-commit")
+        code, payload = env.run_json("covers", "durability window")
         ids = matched_ids(payload)
         record(
             ids == ["thin-broker"],
-            "the bundle the author recommends is returned, and the bundle "
-            "that merely assumes the concept is not",
+            "the recommended bundle that COVERS the concept is returned, and "
+            "the bundle that merely assumes it is not",
             f"exit {code}, {ids}",
+        )
+        record(
+            "hollow-broker" not in ids,
+            "and neither is the bundle the same author recommends in the same "
+            "list that does NOT cover the concept",
+            f"{ids}",
         )
         match = find_match(payload, "thin-broker")
         record(
-            why_kinds(match) == ["recommended-previous"]
-            and match["author_recommended"] is True,
-            "and it is honestly labelled: this one IS an author "
-            "recommendation, because an author wrote it",
+            why_kinds(match) == ["recommended-previous"],
+            "tier 4 is the ONLY route that reached it, so this tier really is "
+            "doing work no other tier does",
             repr(match["why"]),
         )
         record(
-            match["why"][0]["detail"].startswith("Recommended by engine"),
-            "the explanation names the author who recommended it",
-            repr(match["why"][0]["detail"]),
+            "group-commit" in match["covers"],
+            "and the bundle returned declares the concept in its own `covers`",
+            repr(sorted(match["covers"])),
         )
         record(
             match["why"][0]["rank"] == 4,
             "it ranks below every direct concept match",
             repr(match["why"][0]["rank"]),
+        )
+        record(
+            match["why"][0]["author_recommendation"] is False
+            and match["author_recommended"] is False,
+            "and it is honestly labelled: engine's author recommended a course "
+            "ORDER, never that thin-broker teaches group-commit, so inside a "
+            "concept query this route is an inference",
+            repr(match["why"][0]),
+        )
+        record(
+            "engine" in match["why"][0]["detail"]
+            and match["why"][0]["because"].startswith("It builds the commit path"),
+            "the explanation still names the author who recommended it and "
+            "carries that author's own reason, so nothing is lost",
+            repr(match["why"][0]),
         )
 
 
@@ -2373,6 +2503,7 @@ def main() -> int:
         test_follow_ups_put_the_authors_own_list_first,
         test_an_unavailable_recommendation_is_reported_not_fatal,
         test_prepare_searches_covers_against_assumes,
+        test_tier_4_never_answers_covers_with_a_bundle_that_only_assumes,
         test_a_recommended_previous_bundle_answers_a_concept_query,
         test_the_query_needle_is_guarded,
         test_question_words_are_a_second_pass_and_are_announced,

@@ -528,7 +528,7 @@ entries yourself.
 | 1 | the query is a concept id in `covers` | `Exact concept match: partition-offsets` |
 | 2 | the query is one of that concept's `aliases` | `Alias match: stream-offsets (an alias of partition-offsets)` |
 | 3 | the query's words appear in the concept's id, aliases or summary | `Text match on the summary of retained-event-logs: "logical offsets"` |
-| 4 | an author names this bundle as the way into a concept **they** assume | `Recommended by streaming-query-engine as a previous bundle` |
+| 4 | the bundle **covers** the concept, **and** an author who *assumes* it names this bundle as a previous bundle | `Covers retained-event-logs, and streaming-query-engine - which assumes retained-event-logs - names it as a previous bundle` |
 | 5 | the query matches a `subject` or a bundle-level alias | `Related subject: event-streaming` |
 
 Ranks 1 and 2 are exact comparisons on normalised text, so "Partition Offsets",
@@ -536,6 +536,25 @@ Ranks 1 and 2 are exact comparisons on normalised text, so "Partition Offsets",
 **No semantic-search service is used or required**, and there is no scoring function to
 tune. A question asked as a whole sentence is tried as written first; only if that finds
 nothing is it retried with the question words removed, and the report says so when it was.
+
+**Both halves of rank 4 are required, and the first half is the important one.** A bundle
+reaches rank 4 only when its own `covers` declares the concept. The recommendation decides
+nothing on its own: an author who writes `recommended_previous_bundles` is recommending a
+course **order**, and has said nothing at all about what that earlier course teaches. Drop
+the `covers` half and this rank answers "who teaches X" with a course that merely *needs*
+X — section 12.1 broken by the one tier that is allowed to read `assumes`.
+
+So what is rank 4 for? The course that *teaches* a concept and the course that *assumes*
+it often describe it in different words. Rank 4 is the bridge: the query can match the
+assuming author's wording, and still return the course that covers the concept. Every
+bundle in a `covers` answer, at every rank, declares the concept in its own `covers`.
+
+Rank 4 is tagged `[not an author recommendation]`, unlike the author routes in
+`follow-ups` and `prepare`. It is a **join** of two separate declarations — this bundle's
+`covers` and another author's `recommended_previous_bundles` — and neither author wrote
+the conjunction. The author's own `because` is still printed and still attributed, because
+provenance is never dropped; what is not claimed is that this author recommended this
+bundle *as a place to learn the concept*. Section 12.4.
 
 Pass these reasons on to the learner. "Best match" is not a reason; "it covers
 `partition-offsets`, which is the phrase you used" is.
@@ -562,6 +581,14 @@ report prints the two in separate sections and tags every single line
 `[author recommendation]` or `[not an author recommendation]`. Keep that separation when
 you present them; do not merge them into one ranked list, and do not paraphrase an
 inference into "the author suggests".
+
+**The tag answers the question that was asked, not "did a human type this".** The same
+sentence in `recommended_previous_bundles` is an author recommendation in `prepare`, where
+the learner asked what to take before a course and the author answered exactly that — and
+is **not** one at rank 4 of a `covers` query, where the learner asked who teaches a
+concept and the author never spoke about teaching. In a `covers` answer, no route is an
+author recommendation: what a bundle teaches is its own `covers`, which is the runner
+reading metadata. Section 12.2.
 
 ### 12.5 After a course: `follow-ups`, and the reverse index
 
@@ -618,6 +645,10 @@ reported as a `metadata problem` line. Pass those on to whoever can fix the entr
 
 - **Answering "who teaches X" from `assumes`.** It sends the learner to the course that
   begins where they are stuck. Section 12.1.
+- **Returning a recommended previous bundle that does not `cover` the concept.** Rank 4
+  reads `assumes` to find who *needs* a concept; returning that author's recommended
+  predecessor without checking its `covers` is the failure above by a longer route.
+  Section 12.2.
 - **Collapsing a concept query to the one bundle somebody recommended.** Section 12.3.
 - **Presenting a shared subject, or a shared concept id, as something the author
   recommended.** Section 12.4.
