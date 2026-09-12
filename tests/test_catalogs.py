@@ -44,6 +44,7 @@ import tempfile
 import traceback
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import Any
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
@@ -235,6 +236,19 @@ def catalog_doc(*entries: tuple[str, str]) -> str:
             f"      path: {path}",
         ]
     return "\n".join(lines) + "\n"
+
+
+def with_optional_count(document: str, value: str) -> str:
+    """Put `optional_lesson_count: <value>` into every entry of a catalogue.
+
+    Written as a replace on a line every entry carries, so the value lands
+    inside the entry mapping at the right indentation whatever
+    `catalog_doc` grows later.
+    """
+    return document.replace(
+        "    level: beginner\n",
+        f"    level: beginner\n    optional_lesson_count: {value}\n",
+    )
 
 
 def file_config(*pairs: tuple[str, Path]) -> str:
@@ -1266,6 +1280,36 @@ CATALOG_CASES: list[tuple[str, int, str, str, bool]] = [
         False,
     ),
     (
+        "3: optional_lesson_count is a word, not a number",
+        3,
+        with_optional_count(catalog_doc(("a", "bundle")), "several"),
+        "must be a whole number that is zero or more",
+        False,
+    ),
+    (
+        "3: optional_lesson_count is negative",
+        3,
+        with_optional_count(catalog_doc(("a", "bundle")), "-1"),
+        "it is -1",
+        False,
+    ),
+    (
+        "3: optional_lesson_count is a YAML boolean",
+        3,
+        # `true` is an int in Python, so a bare isinstance check would take
+        # this as a count of one. The message must name the boolean.
+        with_optional_count(catalog_doc(("a", "bundle")), "true"),
+        "it is True",
+        False,
+    ),
+    (
+        "3: optional_lesson_count is a decimal",
+        3,
+        with_optional_count(catalog_doc(("a", "bundle")), "2.5"),
+        "it is 2.5",
+        False,
+    ),
+    (
         "4: two entries share an id",
         4,
         catalog_doc(("a", "bundle"), ("a", "bundle")),
@@ -1389,6 +1433,26 @@ def test_validator_catalog_mode() -> None:
             repr(report.status.get(7)),
         )
 
+        # optional_lesson_count: the four rejections above mean nothing
+        # unless a well-formed count passes. Zero is legal and means the same
+        # as omitting the field, so a generator that writes it is not fought.
+        for value, label in (
+            ("6", "a count of six passes"),
+            ("0", "a count of zero passes - it says the same as omitting it"),
+            ("1", "a count of one passes"),
+        ):
+            target.write_text(
+                with_optional_count(catalog_doc(("a", "bundle")), value),
+                encoding="utf-8",
+            )
+            report = vb.validate_catalog(target, portable=False)
+            record(
+                report.exit_code() == 0,
+                f"optional_lesson_count: {label}",
+                "; ".join(str(f) for f in report.findings),
+            )
+        target.write_text(catalog_doc(("a", "bundle")), encoding="utf-8")
+
     shipped = REPO / "skills" / "tutorail" / "catalog" / "builtin.yaml"
     report = vb.validate_catalog(shipped, portable=False)
     record(
@@ -1472,6 +1536,7 @@ def test_cli() -> None:
 # each has a fixture that would fail loudly if it were got wrong.
 
 RELATIONSHIP_CATALOG = HERE / "fixtures" / "catalog-relationships" / "catalog.yaml"
+OPTIONAL_CATALOG = HERE / "fixtures" / "catalog-optional-lessons" / "catalog.yaml"
 
 
 def relationship_env(env: "Env") -> None:
@@ -2379,6 +2444,250 @@ def test_entries_without_the_new_fields_still_work() -> None:
         )
 
 
+def entry_block(text: str, identifier: str) -> str:
+    """The lines of one entry in a `discover` listing.
+
+    A listing is one block per entry, each starting at a line whose first
+    non-blank token is the id. Slicing to the block is what lets a test
+    assert that a line is ABSENT from one entry while present in another; a
+    substring search over the whole listing cannot tell those apart.
+    """
+    lines = text.splitlines()
+    starts = [
+        index
+        for index, line in enumerate(lines)
+        if line.startswith(f"  {identifier}  [")
+    ]
+    if not starts:
+        return ""
+    start = starts[0]
+    for index in range(start + 1, len(lines)):
+        if lines[index].startswith("  ") and not lines[index].startswith("    "):
+            return "\n".join(lines[start:index])
+    return "\n".join(lines[start:])
+
+
+def test_optional_lesson_count_is_carried_by_the_entry() -> None:
+    """`scope` counts the main path; this is what says there is more.
+
+    Three entries with the SAME `scope`, differing only in what they say
+    about optional lessons. Without the field the first two are
+    indistinguishable at discovery time, and a runner may not open a bundle
+    to tell them apart.
+    """
+    print("\noptional lessons are visible in the entry, not in the bundle:")
+    with temp_env() as env:
+        env.write_config(file_config(("opt", OPTIONAL_CATALOG)))
+        code, payload = env.run_json("discover")
+        offered = [e["id"] for e in payload["tutorials"]]
+        record(
+            code == 0
+            and offered == ["with-optional", "without-optional", "broken-optional"],
+            "every entry is offered, including the one whose count is "
+            "unusable - a typo in optional metadata never removes a course",
+            f"exit {code}, {offered}",
+        )
+        by_id = {e["id"]: e for e in payload["tutorials"]}
+
+        record(
+            by_id["with-optional"]["optional_lesson_count"] == 6
+            and by_id["with-optional"]["metadata_notes"] == [],
+            "an entry that carries the field reports the count, with no note",
+            repr(by_id["with-optional"].get("optional_lesson_count")),
+        )
+        record(
+            by_id["without-optional"]["optional_lesson_count"] is None
+            and by_id["without-optional"]["metadata_notes"] == [],
+            "an entry that omits it reports null - 'this catalogue does not "
+            "say', which is not the same claim as zero",
+            repr(by_id["without-optional"].get("optional_lesson_count")),
+        )
+        record(
+            by_id["broken-optional"]["optional_lesson_count"] is None,
+            "an unusable value is normalised to null rather than handed on, "
+            "so no consumer can read 'several' as a count",
+            repr(by_id["broken-optional"].get("optional_lesson_count")),
+        )
+        notes = " ".join(by_id["broken-optional"]["metadata_notes"])
+        record(
+            "optional_lesson_count" in notes and "several" in notes,
+            "and the note names the field and the value that was refused",
+            notes or "(no note)",
+        )
+        record(
+            "still offered" in notes,
+            "the note says the course is still offered, so the runner does "
+            "not report it as broken",
+            notes or "(no note)",
+        )
+
+        # The same three facts in the text a runner actually reads.
+        code, text = env.run("discover")
+        with_block = entry_block(text, "with-optional")
+        without_block = entry_block(text, "without-optional")
+        broken_block = entry_block(text, "broken-optional")
+        record(
+            bool(with_block) and bool(without_block) and bool(broken_block),
+            "the listing carries a block for each of the three entries",
+            f"{len(with_block)}, {len(without_block)}, {len(broken_block)}",
+        )
+        record(
+            "6 optional lessons beside the main path" in with_block,
+            "the count is rendered as a sentence a learner can act on",
+            with_block,
+        )
+        record(
+            "optional:" not in without_block
+            and "metadata problem" not in without_block,
+            "and the entry that says nothing renders nothing - the line is "
+            "not printed with a zero or an 'unknown'",
+            without_block,
+        )
+        record(
+            with_block.index("scope:") < with_block.index("optional:")
+            < with_block.index("workspace_kind:"),
+            "it sits directly after `scope`, which it qualifies, and does "
+            "not push in among the fields a choice is made on",
+            with_block,
+        )
+        record(
+            "metadata problem" in broken_block
+            and "optional_lesson_count" in broken_block,
+            "the unusable value is a note on the entry, not a lost course",
+            broken_block,
+        )
+        record(
+            "title:" in broken_block and "scope:" in broken_block,
+            "which still shows every sound field it has",
+            broken_block,
+        )
+
+        # Nothing above may have opened a bundle. The fixture's bundle
+        # directories do not exist, so a reader that counted lessons itself
+        # could not have produced any of these answers.
+        for entry in payload["tutorials"]:
+            record(
+                not (OPTIONAL_CATALOG.parent / entry["id"]).exists(),
+                f"{entry['id']}: its bundle is not on disk, so the count can "
+                f"only have come from the catalogue entry",
+                str(OPTIONAL_CATALOG.parent / entry["id"]),
+            )
+
+
+def test_the_tolerant_reader_accepts_only_a_whole_count() -> None:
+    """The reader, on its own, against the values an entry can carry.
+
+    Every rejected value must come back as `(None, one note)` - dropped, and
+    said out loud. Every accepted value must come back as the number with no
+    note. Both halves are here because a reader that rejected everything
+    would pass a table of rejections alone.
+    """
+    print("\nthe tolerant reader, value by value:")
+    accepted: list[tuple[Any, int]] = [(0, 0), (1, 1), (6, 6), (140, 140)]
+    for value, expected in accepted:
+        count, notes = cat.read_optional_lesson_count(
+            {"optional_lesson_count": value}, "an-entry"
+        )
+        record(
+            count == expected and type(count) is int and notes == [],
+            f"{value!r} is read as the count {expected}",
+            f"count={count!r} notes={notes}",
+        )
+    rejected: list[tuple[Any, str]] = [
+        ("6", "a count written as a string is not a count"),
+        ("several", "a word is not a count"),
+        (-1, "a negative count"),
+        (2.5, "a fraction of a lesson"),
+        (True, "a YAML boolean, which is an int in Python"),
+        (False, "the other boolean, which would otherwise read as zero"),
+        ([6], "a list"),
+        ({"count": 6}, "a mapping"),
+        (None, "an explicit null, which says nothing usable"),
+    ]
+    for value, label in rejected:
+        count, notes = cat.read_optional_lesson_count(
+            {"optional_lesson_count": value}, "an-entry"
+        )
+        record(
+            count is None and len(notes) == 1 and "an-entry" in notes[0],
+            f"{label} is dropped with one note naming the entry  ({value!r})",
+            f"count={count!r} notes={notes}",
+        )
+    count, notes = cat.read_optional_lesson_count({"id": "an-entry"}, "an-entry")
+    record(
+        count is None and notes == [],
+        "an entry that does not carry the field is silent, not a note - "
+        "omitting it is the normal way to write a course with none",
+        f"count={count!r} notes={notes}",
+    )
+
+
+def test_an_optional_lesson_count_of_zero_says_nothing_extra() -> None:
+    print("\na count of zero reads as the course scope already did:")
+    with temp_env() as env:
+        doc = with_optional_count(catalog_doc(("plain", "bundles/plain")), "0")
+        path = env.write_catalog("zero.yaml", doc)
+        env.write_config(file_config(("zero", path)))
+        code, payload = env.run_json("discover")
+        record(
+            code == 0 and payload["tutorials"][0]["optional_lesson_count"] == 0,
+            "zero is a legal value and is read as zero, not refused",
+            f"exit {code}, {payload['tutorials'][0].get('optional_lesson_count')}",
+        )
+        record(
+            payload["tutorials"][0]["metadata_notes"] == [],
+            "and carries no note, because nothing is wrong with it",
+            repr(payload["tutorials"][0]["metadata_notes"]),
+        )
+        code, text = env.run("discover")
+        record(
+            "optional:" not in entry_block(text, "plain"),
+            "it renders no optional line - 0 optional lessons is the course "
+            "`scope` already described",
+            entry_block(text, "plain"),
+        )
+
+
+def test_a_bad_optional_lesson_count_is_refused_by_the_validator() -> None:
+    """The other half of "the reader is tolerant; the validator is strict".
+
+    The reader kept `broken-optional` discoverable above. The validator must
+    reject the very same file, or the split is only half implemented and an
+    author is never told.
+    """
+    print("\nthe validator rejects the value the reader tolerated:")
+    report = vb.validate_catalog(OPTIONAL_CATALOG, portable=False)
+    hits = [
+        f
+        for f in report.findings
+        if f.check == 3 and "optional_lesson_count" in f.message
+    ]
+    record(
+        len(hits) == 1 and "broken-optional" in hits[0].where,
+        "exactly the broken entry is reported, by name, under check 3",
+        "; ".join(str(f) for f in report.findings) or "(no findings)",
+    )
+    if hits:
+        _fired_catalog_checks.add(3)
+    record(
+        report.exit_code() != 0,
+        "and the catalogue does not pass, because an author asked to be told",
+        f"exit_code {report.exit_code()}",
+    )
+    sound = [
+        f
+        for f in report.findings
+        if f.check == 3 and "optional_lesson_count" in f.message
+        and ("with-optional" in f.where or "without-optional" in f.where)
+    ]
+    record(
+        not sound,
+        "the two sound entries are not reported - a check that flagged all "
+        "three would pass this test while meaning nothing",
+        "; ".join(str(f) for f in sound),
+    )
+
+
 def test_a_cached_catalogue_is_said_so_before_nothing_matched() -> None:
     print("\nhonesty when a catalogue is missing from a concept query:")
     with temp_env() as env:
@@ -2510,6 +2819,10 @@ def main() -> int:
         test_concept_discovery_needs_no_service_and_no_bundle,
         test_relationship_metadata_never_removes_a_tutorial,
         test_entries_without_the_new_fields_still_work,
+        test_optional_lesson_count_is_carried_by_the_entry,
+        test_the_tolerant_reader_accepts_only_a_whole_count,
+        test_an_optional_lesson_count_of_zero_says_nothing_extra,
+        test_a_bad_optional_lesson_count_is_refused_by_the_validator,
         test_a_cached_catalogue_is_said_so_before_nothing_matched,
     ):
         try:

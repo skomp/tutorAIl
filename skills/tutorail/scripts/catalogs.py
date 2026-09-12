@@ -120,6 +120,12 @@ ENTRY_REQUIRED_FIELDS = (
     "source",
 )
 
+# Optional, and a COUNT rather than a list. It is deliberately not called
+# `optional_lessons`: that name is already taken in a bundle's tutorial.yaml,
+# where it is a mapping of lesson path to offer metadata. One name for two
+# shapes in two files is the confusion this project keeps paying for.
+OPTIONAL_LESSON_COUNT = "optional_lesson_count"
+
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 # --------------------------------------------------------------------------
@@ -360,6 +366,14 @@ class MergedEntry:
 
     def as_dict(self) -> dict:
         out = dict(self.entry)
+        # Normalised, not passed through. A malformed optional_lesson_count
+        # becomes null with a note beside it, so a consumer of --json can
+        # never read an unusable value as a count. The key is always present
+        # for the same reason: null says "this entry does not say", which is
+        # a different fact from zero.
+        count, notes = read_optional_lesson_count(self.entry, self.id)
+        out[OPTIONAL_LESSON_COUNT] = count
+        out["metadata_notes"] = notes
         out["catalog"] = self.catalog_id
         out["freshness"] = self.freshness
         out["resolved_path"] = self.resolved_path
@@ -832,6 +846,47 @@ def resolve_bundle_path(root: Path, path: str) -> str:
     if candidate.is_absolute():
         return os.path.normpath(str(candidate))
     return os.path.normpath(str(root / candidate))
+
+
+def read_optional_lesson_count(
+    entry: dict, where: str
+) -> tuple[int | None, list[str]]:
+    """How many optional lessons the entry says the course carries.
+
+    `scope` counts the main path only, so a course with eight main lessons
+    and six optional ones reads exactly like a course with eight lessons and
+    nothing else. This field is the difference, and it has to live in the
+    ENTRY: section 1 forbids opening a bundle to count anything before the
+    learner has chosen, and a remote catalogue's bundles may not be on this
+    machine at all.
+
+    Returns `(count, notes)`. The count is None when the entry does not say,
+    and ALSO None - with a note - when it says something unusable. That is
+    the tolerant half of the split in "The reader is tolerant; the validator
+    is strict": optional metadata is optional, so a mistake in it drops the
+    field and keeps the course discoverable. `validate_bundle.py --catalog`
+    rejects the same value, because an author is asking to be told.
+
+    `bool` is rejected even though it is an `int` in Python: `true` in YAML
+    is an author writing something other than a count, and `1 optional
+    lesson` is a worse answer than a note saying the field is unusable.
+    """
+    if OPTIONAL_LESSON_COUNT not in entry:
+        return None, []
+    value = entry[OPTIONAL_LESSON_COUNT]
+    reason: str | None = None
+    if isinstance(value, bool) or not isinstance(value, int):
+        reason = f"is {value!r}, which is not a whole number"
+    elif value < 0:
+        reason = f"is {value!r}, and a count cannot be negative"
+    if reason is not None:
+        return None, [
+            f"{where}: {OPTIONAL_LESSON_COUNT!r} {reason}. The course is "
+            f"still offered, without it. Say that its optional lessons are "
+            f"unknown rather than that it has none, and report the entry to "
+            f"whoever can fix it"
+        ]
+    return int(value), []
 
 
 # --------------------------------------------------------------------------
@@ -2122,6 +2177,12 @@ def render_entries(
             if key in entry and entry[key] not in (None, "", []):
                 text = " ".join(_join(entry[key]).split())
                 print(f"      {label + ':':<16}{text}", file=stream)
+            if key == "scope":
+                # Immediately after `scope`, because it qualifies `scope` and
+                # nothing else: `scope` counts the main path, and this counts
+                # what is beside it. It is not a sixth field to choose on, so
+                # it does not push in among title, level and workspace_kind.
+                render_optional_lesson_count(entry, item.id, stream)
         render_entry_relationships(entry, stream)
         for catalog_id, origin in item.shadowed:
             print(
@@ -2141,6 +2202,26 @@ def render_entries(
                 file=stream,
             )
         print("", file=stream)
+
+
+def render_optional_lesson_count(entry: dict, where: str, stream) -> None:
+    """The one line that says a course carries more than its main path.
+
+    Silent when the entry does not carry the field, because silence there
+    means "this catalogue does not say", not "this course has none". Silent
+    at zero too: a course with no optional lessons is exactly the course
+    `scope` already described.
+    """
+    count, notes = read_optional_lesson_count(entry, where)
+    if count:
+        print(
+            f"      {'optional:':<16}{count} optional lesson"
+            f"{'' if count == 1 else 's'} beside the main path, offered "
+            f"rather than sequenced (`scope` counts the main path only)",
+            file=stream,
+        )
+    for text in notes:
+        print(f"      {'':<16}metadata problem: {text}", file=stream)
 
 
 def render_entry_relationships(entry: dict, stream) -> None:

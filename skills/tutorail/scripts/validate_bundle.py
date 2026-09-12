@@ -641,6 +641,17 @@ def _is_text_list(value: Any) -> bool:
     )
 
 
+def _is_count(value: Any) -> bool:
+    """A non-negative whole number, and not a bool.
+
+    `isinstance(True, int)` is True in Python, so a bare `isinstance` check
+    would accept `optional_lesson_count: true` and hand the runner a count of
+    1. YAML also reads `true`, `yes` and `on` as booleans, which makes this
+    an easy value to write by accident rather than a contrived one.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
 # -- lesson discovery -------------------------------------------------------
 
 
@@ -3642,6 +3653,12 @@ CATALOG_REQUIRED_FIELDS = (
 )
 CATALOG_LIST_FIELDS = ("subjects", "aliases", "style")
 CATALOG_TEXT_FIELDS = ("title", "description", "level", "scope", "workspace_kind")
+# Optional, and a whole number. `scope` counts the main path only, so this is
+# the entry's only way to say that a course carries lessons beside it. The
+# runner may not count them: discovery reads metadata and never opens a
+# bundle. Named for the count it holds, and NOT `optional_lessons`, which is
+# a mapping of lesson path to offer metadata in a bundle's tutorial.yaml.
+CATALOG_COUNT_FIELDS = ("optional_lesson_count",)
 CATALOG_ENTRY_SOURCE_TYPES = ("local", "git", "archive")
 CATALOG_ENTRY_SOURCE_IMPLEMENTED = ("local",)
 KNOWN_CATALOG_VERSIONS = (1,)
@@ -3650,7 +3667,10 @@ CATALOG_LIMITATIONS = """What a pass does and does not mean
   Green means "a runner can read this catalogue and act on every entry". It
   says nothing about whether the metadata is TRUE: a description that
   misrepresents the course, subjects that do not match what the bundle
-  teaches, or a `scope` that under-states the work all pass.
+  teaches, a `scope` that under-states the work, or an
+  `optional_lesson_count` that disagrees with the bundle's own
+  `optional_lessons` all pass. The count is checked for shape only; nothing
+  here opens a bundle to recount it.
 
   Check 6 opens each bundle's directory, which discovery deliberately never
   does. That is why this is an authoring-time tool: it is allowed to look,
@@ -3823,6 +3843,16 @@ def validate_catalog(target: Path, portable: bool) -> Report:
                     where,
                     f"{name!r} must be a non-empty list of strings; it is "
                     f"{item[name]!r}",
+                )
+        for name in CATALOG_COUNT_FIELDS:
+            if name in item and not _is_count(item[name]):
+                report.add(
+                    3,
+                    where,
+                    f"{name!r} must be a whole number that is zero or more; "
+                    f"it is {item[name]!r}. It counts the lessons the bundle "
+                    f"lists under 'optional_lessons', which 'scope' does not "
+                    f"count. Omit the field when the course has none",
                 )
         kind = item.get("workspace_kind")
         if _is_text(kind) and kind not in WORKSPACE_KINDS:

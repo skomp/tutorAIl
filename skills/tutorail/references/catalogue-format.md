@@ -162,7 +162,8 @@ tutorials:
 | `aliases` | SHOULD | Terms a learner might say instead of a subject. |
 | `level` | MUST | `beginner`, `intermediate`, `intermediate-to-advanced`, and so on. |
 | `style` | SHOULD | `project-driven`, `exercise-based`, `interactive`, `long-form`. |
-| `scope` | SHOULD | Honest size. "23 lessons; months of work" is a service to the learner. |
+| `scope` | SHOULD | Honest size, on the **main path**. "23 lessons; months of work" is a service to the learner. |
+| `optional_lesson_count` | MAY | How many lessons the course carries **beside** the main path, which `scope` does not count. A whole number, zero or more. Omit it when the course has none. Section 5.2. |
 | `workspace_kind` | MUST | What the course needs of a workspace. Surfaced at choice time. |
 | `covers` | SHOULD | The concepts the course **teaches**, each with a `summary` and optional `aliases`. Section 12. |
 | `assumes` | SHOULD | The concepts the course **expects you to bring**, each with a `level` and a `summary`. Never a gate. Section 12. |
@@ -208,6 +209,48 @@ A `git` or `archive` **bundle** source is still unimplemented, and the script sk
 entry with that reason. Say so; do not substitute a clone command and do not quietly drop
 it. The repair is to add that repository as a **catalogue**, which is what the whole of
 section 3 is for.
+
+### 5.2 `optional_lesson_count`, and why the entry has to carry it
+
+`scope` counts the **main path**. A course with eight main lessons and six optional ones
+therefore reads exactly like a course with eight lessons and nothing beside them, and the
+two are not the same course.
+
+```yaml
+scope: "8 lessons; a few days"
+optional_lesson_count: 6
+```
+
+> **A runner may not count them. Section 1 holds: discovery opens no bundle, and a remote
+> catalogue's bundles may not be on this machine at all.** The fact lives in the entry or
+> the learner never learns it.
+
+| | |
+|---|---|
+| **Shape** | a whole number, zero or more |
+| **Absent** | this catalogue does not say. It is **not** a claim that the course has none. |
+| **`0`** | legal, and says the same thing as omitting the field. Prefer omitting it. |
+| **Author** | derived from the length of the bundle's `optional_lessons` map, exactly as `scope` is derived from the length of its `lessons` list. |
+
+**The name is deliberate.** A bundle's `tutorial.yaml` already has a key called
+`optional_lessons`, and there it is a **mapping of lesson path to offer metadata**. One
+name for two shapes in two files is a confusion this project has paid for before, so the
+catalogue field is named for what it holds: a count.
+
+**A count, not a sentence.** `scope` is already the free-text size field, and section 9.2
+builds the time-commitment facet out of the distinct `scope` values it finds. A second
+sentence would compete with it, could not be validated beyond "is a string", and could not
+be generated from the bundle. A number can be checked, compared and derived.
+
+**The count is not proof.** `validate_bundle.py --catalog` checks its shape and nothing
+else; no tool opens the bundle to recount. A count that disagrees with the bundle's
+`optional_lessons` is wrong metadata of the same kind as a `scope` that under-states the
+work, and the bundle is authoritative once the learner has chosen.
+
+**`catalog_version` stays `1`.** The field is additive and optional, so every catalogue
+written before it — including the one in the bundles repository — is still valid with no
+edit. A reader that has never heard of the field ignores it, exactly as `supplies` is
+additive to `bundle_format: 1`.
 
 ---
 
@@ -357,7 +400,11 @@ For each candidate, show:
 - `title`
 - `description`
 - `level`
-- `scope`
+- `scope` — **and, beside it, `optional_lesson_count` when the entry carries one above
+  zero**. It qualifies `scope` and is shown with it rather than as a field of its own: a
+  learner comparing two courses of "8 lessons" needs to know that one of them has six more
+  on offer. Say nothing at all when the entry omits it — an entry that does not say is not
+  an entry that says none.
 - `workspace_kind` — in plain terms, because it is the field with a consequence: a course
   that needs a fresh repository is a different commitment from one that uses the current
   project
@@ -410,7 +457,9 @@ successful fetch did not carry.
 5. show the entry you wrote.
 
 `scope` is not in a bundle's `tutorial.yaml`. Derive it from the length of the manifest's
-`lessons` list, and say that you did.
+`lessons` list, and say that you did. Derive `optional_lesson_count` the same way, from the
+number of keys in the manifest's `optional_lessons` map, and leave the field out when that
+map is absent or empty.
 
 A catalogue file can be checked before it is used: `validate_bundle.py --catalog <path>`,
 and `--portable` as well for a `catalog.yaml` that ships inside a bundles repository,
@@ -422,6 +471,11 @@ where every bundle must travel with the catalogue.
 
 - **Peeking into a bundle to improve a recommendation.** It breaks the provider boundary
   and is the change that makes a remote catalogue impossible.
+- **Counting a course's optional lessons yourself.** Opening `tutorial.yaml` to read its
+  `optional_lessons` map is the same breach by a smaller door, and it is the reason
+  `optional_lesson_count` is a catalogue field. Section 5.2.
+- **Reading a missing `optional_lesson_count` as "this course has none".** The entry did
+  not say. Say that, or say nothing.
 - **Auto-starting a single match.** The learner chooses.
 - **Presenting a choice as prose.** Candidates are options to pick from, not paragraphs
   to be read and then typed back. Section 9.1.
@@ -668,14 +722,14 @@ reported as a `metadata problem` line. Pass those on to whoever can fix the entr
 ## The reader is tolerant; the validator is strict
 
 Relationship metadata (`covers`, `assumes`, `recommended_follow_ups`,
-`recommended_previous_bundles`) is optional. **A typo in optional metadata must never remove
-a working course from the catalogue.**
+`recommended_previous_bundles`) is optional, and so is `optional_lesson_count`. **A typo in
+optional metadata must never remove a working course from the catalogue.**
 
 So the two sides of this feature deliberately disagree about malformed input:
 
-| | Behaviour on malformed relationship metadata |
+| | Behaviour on malformed optional metadata |
 |---|---|
-| **the catalogue reader**, at discovery time | drops the offending concept or recommendation, records a note, and **keeps the tutorial discoverable** |
+| **the catalogue reader**, at discovery time | drops the offending concept, recommendation or count, records a note, and **keeps the tutorial discoverable** |
 | **`validate_bundle.py`**, at authoring time | rejects it, because an author is asking to be told |
 
 A learner searching for a course must not lose it because its author mistyped one alias.
@@ -683,7 +737,14 @@ An author running the validator wants every one of those mistakes named.
 
 The notes are not silent: each dropped item records why, and the tutorial still appears with
 its sound metadata intact. Proven by `test_relationship_metadata_never_removes_a_tutorial`,
-which fires all five note kinds and asserts a sound concept beside them still matches.
+which fires all five note kinds and asserts a sound concept beside them still matches, and
+by `test_optional_lesson_count_is_carried_by_the_entry`, whose third entry carries a count
+that is not a number and is still offered with every sound field it has.
+
+**A dropped count is dropped, not defaulted.** `discover --json` reports
+`optional_lesson_count: null` and puts the reason in that entry's `metadata_notes`, so no
+consumer can read an unusable value as a number and none can mistake it for zero. The
+rendered listing prints the same reason as a `metadata problem` line under the entry.
 
 Two consequences worth stating, because both look like bugs otherwise:
 

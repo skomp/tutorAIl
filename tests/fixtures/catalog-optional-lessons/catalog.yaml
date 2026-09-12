@@ -1,0 +1,64 @@
+# Three entries, one for each way a catalogue can speak about optional
+# lessons. The whole point of the field is that these three courses are
+# distinguishable at DISCOVERY time, where nothing may open a bundle.
+#
+#   with-optional     carries optional_lesson_count: 6. Its `scope` says
+#                     eight lessons, so without the field it would read
+#                     exactly like the entry below it.
+#   without-optional  does not carry the field. The same eight-lesson
+#                     `scope`, and nothing beside the main path.
+#   broken-optional   carries a value that is not a count. The reader drops
+#                     the field, records a note, and STILL OFFERS THE COURSE;
+#                     validate_bundle.py --catalog rejects the same value.
+#
+# The bundle directories are deliberately NOT here, exactly as in
+# catalog-relationships. Discovery loads metadata only, and a fixture whose
+# bundles are absent is what proves it: a runner that counted lessons by
+# opening a bundle could not read this file at all.
+
+catalog_version: 1
+tutorials:
+  - id: with-optional
+    title: Eight Lessons And Six More Beside Them
+    description: >
+      A course whose main path is eight lessons, with six further lessons the
+      tutor offers rather than sequences.
+    subjects: [testing, optional-lessons]
+    level: beginner
+    style: [project-driven]
+    scope: "8 lessons; a few days"
+    optional_lesson_count: 6
+    workspace_kind: new-repository
+    source:
+      type: local
+      path: with-optional
+
+  - id: without-optional
+    title: Eight Lessons And Nothing Else
+    description: >
+      A course whose main path is eight lessons, and which carries nothing
+      beside it. Its entry says nothing, which is how a course with none is
+      written.
+    subjects: [testing]
+    level: beginner
+    style: [project-driven]
+    scope: "8 lessons; a few days"
+    workspace_kind: new-repository
+    source:
+      type: local
+      path: without-optional
+
+  - id: broken-optional
+    title: A Course Whose Optional Count Is Unusable
+    description: >
+      A working course whose author mistyped one optional field. It must stay
+      discoverable: a typo in optional metadata never removes a course.
+    subjects: [testing]
+    level: beginner
+    style: [project-driven]
+    scope: "8 lessons; a few days"
+    optional_lesson_count: several
+    workspace_kind: new-repository
+    source:
+      type: local
+      path: broken-optional
