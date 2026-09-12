@@ -79,8 +79,16 @@ enforces it (§9, check 5).
 
 ## 4. `tutorial.yaml`
 
-Deliberately shallow — at most one level of nesting — because the author is more likely
-to err than the parser is.
+Shallow by default, because the author is more likely to err than the parser is. Most
+fields are a scalar or a flat list.
+
+**Corrected 2026-09-12.** This section said "at most one level of nesting". That was true
+when it was written and stopped being true when `optional_lessons` landed, which is a map
+of lesson path to a map of fields, reaching a list at the third level; `failure_modes`,
+`covers` and `assumes` are maps of maps too. `bundle-format.md` section 2 carries the rule
+that replaced it: a field nests when the shape it describes really is nested, and nesting
+deeper than that is a sign the field wants to be a list of mappings instead. Anyone who
+read the old sentence and shaped a manifest field around it should re-read that section.
 
 ```yaml
 bundle_format: 1
