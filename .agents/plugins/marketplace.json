@@ -10,10 +10,6 @@
         "source": "local",
         "path": "./"
       },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "NONE"
-      },
       "category": "Developer Tools"
     }
   ]
