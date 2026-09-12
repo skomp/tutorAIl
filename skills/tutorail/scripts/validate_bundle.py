@@ -2256,25 +2256,33 @@ SUPPLIES_KEYS = ("from", "to", "describe")
 
 def _supplies_sites(
     root: Path, manifest: Any, lessons: list[Lesson]
-) -> list[tuple[str, list]]:
-    """Every place a `supplies:` key was found, as (where, raw list).
+) -> list[tuple[str, Any]]:
+    """Every place a `supplies:` key is PRESENT, as (where, raw value).
 
     `where` is "tutorial.yaml" for the manifest, or a lesson's `rel`. The
-    list is the raw YAML value - callers decide what to do with an entry
-    that is not a mapping. Shared by collect_supplies (which keeps only the
-    mappings, for A2 and Part B) and check_supplies (which also has to
-    report the ones that are not).
+    raw value is exactly what the manifest or frontmatter holds under
+    `supplies` - a list when the author got the shape right, but possibly a
+    bare string, a mapping or anything else a typo produces. It is
+    deliberately NOT filtered to lists here: a key that is PRESENT but not a
+    list is a malformed declaration, and a caller that only ever saw
+    filtered-out sites would have no way to tell "nothing declared" from
+    "declared badly" - which is exactly the defect check_supplies used to
+    have (a `supplies:` typo silently validated as if there were no
+    `supplies:` key at all). Only the ABSENCE of the key at every site means
+    nothing was declared.
+
+    Shared by collect_supplies (which keeps only the well-formed lists and
+    mapping entries, for A2 and Part B) and check_supplies (which also has
+    to report a site that is present but is not a list at all).
 
     `root` is accepted for interface symmetry with collect_supplies, whose
     exact signature A2 and Part B depend on; a lesson's own `path` is
     already absolute, so it is not needed to read lesson text.
     """
     del root
-    sites: list[tuple[str, list]] = []
-    if isinstance(manifest, dict):
-        entries = as_list(manifest.get("supplies"))
-        if entries:
-            sites.append(("tutorial.yaml", entries))
+    sites: list[tuple[str, Any]] = []
+    if isinstance(manifest, dict) and "supplies" in manifest:
+        sites.append(("tutorial.yaml", manifest.get("supplies")))
     for lesson in lessons:
         text = read_text(lesson.path)
         if text is None:
@@ -2288,9 +2296,8 @@ def _supplies_sites(
             continue
         if not isinstance(fm, dict):
             continue
-        entries = as_list(fm.get("supplies"))
-        if entries:
-            sites.append((lesson.rel, entries))
+        if "supplies" in fm:
+            sites.append((lesson.rel, fm.get("supplies")))
     return sites
 
 
@@ -2300,12 +2307,16 @@ def collect_supplies(
     """Every declared supplies entry, as (where, entry).
 
     `where` is "tutorial.yaml" for a manifest-scope entry, or the lesson's
-    `rel` for a lesson-scope one. Only mapping entries are returned; a
-    non-mapping entry is reported by check_supplies, not by this function.
+    `rel` for a lesson-scope one. A site whose `supplies` value is not a
+    list at all is skipped entirely here, and a mapping entry is the only
+    kind returned; check_supplies is what reports either malformation - this
+    function silently keeps only what is already well-formed enough to use.
     """
     out: list[tuple[str, dict]] = []
-    for where, entries in _supplies_sites(root, manifest, lessons):
-        out.extend((where, e) for e in entries if isinstance(e, dict))
+    for where, raw in _supplies_sites(root, manifest, lessons):
+        if not isinstance(raw, list):
+            continue
+        out.extend((where, e) for e in raw if isinstance(e, dict))
     return out
 
 
@@ -2372,16 +2383,34 @@ def check_supplies(
     supplied files are the RIGHT files, and nothing about whether a lesson
     still tells the learner to copy them by hand - that judgement belongs to
     the course-quality audit, not this validator.
-    """
-    raw_sites = _supplies_sites(root, manifest, lessons)
 
-    if not raw_sites:
+    `lessons` is expected to include generated lessons (an instance's
+    lessons.generated/ overlay): a generated lesson's supplies entries get
+    every well-formedness check a listed lesson's do, and only the
+    listed-in-'lessons'-or-'optional_lessons' rule is skipped for them,
+    because a generated lesson is never listed there by design (check 16).
+    """
+    sites = _supplies_sites(root, manifest, lessons)
+
+    if not sites:
         report.na(22, "no bundle declares supplies")
         return
 
     checked = 0
-    for where, raw_entries in raw_sites:
-        for entry in raw_entries:
+    malformed_sites = 0
+    for where, raw in sites:
+        if not isinstance(raw, list):
+            malformed_sites += 1
+            report.add(
+                22,
+                where,
+                f"'supplies' must be a list of entries, not "
+                f"{type(raw).__name__}. Each entry needs its own '- ' list "
+                f"marker; a single mapping directly under 'supplies:' is "
+                f"the common typo.",
+            )
+            continue
+        for entry in raw:
             checked += 1
             if not isinstance(entry, dict):
                 report.add(
@@ -2480,7 +2509,12 @@ def check_supplies(
                 if to_error is not None:
                     report.add(22, where, to_error)
 
-            if where != "tutorial.yaml" and where not in listed_rels:
+            is_generated = where.startswith(GENERATED_DIR + "/")
+            if (
+                where != "tutorial.yaml"
+                and not is_generated
+                and where not in listed_rels
+            ):
                 report.add(
                     22,
                     where,
@@ -2490,11 +2524,13 @@ def check_supplies(
                     f"invisible to the runner",
                 )
 
-    report.ran(
-        22,
-        f"{checked} supplies entries across {len(raw_sites)} declaration "
-        f"site(s)",
-    )
+    entry_word = "entry" if checked == 1 else "entries"
+    site_word = "site" if len(sites) == 1 else "sites"
+    detail = f"{checked} supplies {entry_word} across {len(sites)} declaration {site_word}"
+    if malformed_sites:
+        site_or_sites = "site" if malformed_sites == 1 else "sites"
+        detail += f" ({malformed_sites} malformed {site_or_sites})"
+    report.ran(22, detail)
 
 
 # --------------------------------------------------------------------------
@@ -2602,16 +2638,17 @@ def validate(target: Path, mode: str) -> Report:
     check_manifest_lists_no_generated(manifest_dict, report)
     # A lesson-scope supplies entry is legible only if its lesson is
     # reachable at all - through 'lessons' or 'optional_lessons', the same
-    # two lists check 4 accepts. A generated lesson is reachable by neither
-    # list by design (check 16), so supplies is checked against the
-    # authored lessons only, not `all_lessons`.
+    # two lists check 4 accepts. check_supplies runs over all_lessons (so a
+    # generated lesson's own supplies entries get every well-formedness
+    # check too) and skips the listed-ness rule ITSELF for a generated
+    # lesson, since one is reachable by neither list by design (check 16).
     listed_raw = as_list(manifest_dict.get("lessons"))
     listed_rels = (
         {entry for entry in listed_raw if isinstance(entry, str)}
         if listed_raw is not None
         else set()
     ) | optional_keys
-    check_supplies(target, manifest_dict, lessons, listed_rels, report)
+    check_supplies(target, manifest_dict, all_lessons, listed_rels, report)
     if mode == "bundle":
         check_no_generated_dir(target, report)
         check_state_template(target, manifest_dict, report)

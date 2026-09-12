@@ -1425,13 +1425,17 @@ supplies:
 
 
 def m_supplies_unknown_entry_key(root: Path) -> None:
+    """A complete, otherwise-valid entry plus one extra key - breaking
+    exactly the one thing this case is meant to prove, not also 'describe
+    is missing' at the same time."""
     (root / "supplies").mkdir()
     (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
     append(root / "tutorial.yaml", """
 supplies:
   - from: supplies/Cargo.toml
     to: Cargo.toml
-    description: the manifest this course assumes
+    describe: the manifest this course assumes
+    description: a duplicate, misspelled label
 """)
 
 
@@ -1454,10 +1458,13 @@ def m_supplies_in_an_unlisted_lesson(root: Path) -> None:
 def m_supplies_from_under_generated(root: Path) -> None:
     """A supplies entry must not reach into lessons.generated/: that
     directory exists only in an instance, so a bundle-authored 'from'
-    pointing into it can never be shipped."""
-    gen_dir = root / "lessons.generated"
-    gen_dir.mkdir()
-    (gen_dir / "extra.md").write_text("draft\n", encoding="utf-8")
+    pointing into it can never be shipped.
+
+    The rule is textual - it fires without lessons.generated/ existing on
+    disk at all. Creating the directory for real would also trip check 13
+    (lessons.generated/ is absent in a bundle) as unrelated collateral,
+    breaking a second thing this fixture is not meant to prove.
+    """
     append(root / "tutorial.yaml", """
 supplies:
   - from: lessons.generated/extra.md
@@ -1489,6 +1496,141 @@ supplies:
         "  - from: supplies/seed.txt\n"
         "    to: seed.txt\n"
         "    describe: a starter file this lesson hands over",
+    )
+
+
+# -- check 22, fix round 1: a present-but-malformed 'supplies' key must be a
+# finding, not silently treated the same as an absent key.
+
+
+def m_supplies_key_is_not_a_list(root: Path) -> None:
+    """The likeliest real author error: a missing '- ', so 'supplies:'
+    holds one mapping directly instead of a list of one mapping. Before fix
+    round 1 this validated as though 'supplies' were absent - the runner
+    would then place nothing and every lesson that assumed these files
+    would fail, silently."""
+    (root / "supplies").mkdir()
+    (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    append(root / "tutorial.yaml", """
+supplies:
+  from: supplies/Cargo.toml
+  to: Cargo.toml
+  describe: the manifest this course assumes
+""")
+
+
+def m_supplies_key_is_a_bare_string(root: Path) -> None:
+    """A second shape of the same defect: 'supplies' is a scalar, not even
+    a mapping."""
+    append(root / "tutorial.yaml", """
+supplies: supplies/Cargo.toml
+""")
+
+
+# -- check 22, fix round 1: seven refusal branches with no fixture before
+
+
+def m_supplies_entry_is_not_a_mapping(root: Path) -> None:
+    """The list itself is well-formed; one of its entries is not."""
+    append(root / "tutorial.yaml", """
+supplies:
+  - just a string, not a mapping
+""")
+
+
+def m_supplies_from_is_empty(root: Path) -> None:
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: ""
+    to: Cargo.toml
+    describe: the manifest this course assumes
+""")
+
+
+def m_supplies_from_is_only_slashes(root: Path) -> None:
+    append(root / "tutorial.yaml", r"""
+supplies:
+  - from: "///"
+    to: Cargo.toml
+    describe: the manifest this course assumes
+""")
+
+
+def m_supplies_from_directory_without_trailing_slash(root: Path) -> None:
+    """The reverse of the trailing-slash mismatch already covered: a real
+    directory declared WITHOUT the '/' that marks it as one."""
+    (root / "supplies" / "assets").mkdir(parents=True)
+    (root / "supplies" / "assets" / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: supplies/assets
+    to: assets
+    describe: the icon set this course assumes
+""")
+
+
+def m_supplies_to_is_empty(root: Path) -> None:
+    (root / "supplies").mkdir()
+    (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: supplies/Cargo.toml
+    to: ""
+    describe: the manifest this course assumes
+""")
+
+
+def m_supplies_to_has_a_backslash(root: Path) -> None:
+    (root / "supplies").mkdir()
+    (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    append(root / "tutorial.yaml", r"""
+supplies:
+  - from: supplies/Cargo.toml
+    to: sub\file.txt
+    describe: the manifest this course assumes
+""")
+
+
+def m_supplies_to_is_absolute(root: Path) -> None:
+    (root / "supplies").mkdir()
+    (root / "supplies" / "Cargo.toml").write_text("[package]\n", encoding="utf-8")
+    append(root / "tutorial.yaml", """
+supplies:
+  - from: supplies/Cargo.toml
+    to: /etc/passwd
+    describe: the manifest this course assumes
+""")
+
+
+# -- check 22, fix round 1: it must also examine a GENERATED lesson's own
+# supplies entries (instance mode only - no bundle-mode fixture can reach
+# this scope), while skipping ONLY the listed-ness rule for one.
+
+
+def m_supplies_generated_lesson_from_missing(root: Path) -> None:
+    edit(
+        root / "lessons.generated" / "lifetimes-and-borrows.md",
+        "id: lifetimes-and-borrows",
+        "id: lifetimes-and-borrows\n"
+        "supplies:\n"
+        "  - from: lessons/does-not-exist.md\n"
+        "    to: borrow_example.rs\n"
+        "    describe: a worked borrowing example",
+    )
+
+
+def m_supplies_generated_lesson_well_formed(root: Path) -> None:
+    """The POSITIVE control for the listed-ness exemption: a generated
+    lesson is never in 'lessons' or 'optional_lessons' by design (check
+    16), so a well-formed entry here must not be reported as unlisted."""
+    edit(
+        root / "lessons.generated" / "03-reading-files-draft" / "LESSON.md",
+        "id: 03-reading-files-draft",
+        "id: 03-reading-files-draft\n"
+        "supplies:\n"
+        "  - from: lessons/00-hello-args.md\n"
+        "    to: hello-reference.md\n"
+        "    describe: a copy of the intro lesson kept for reference",
     )
 
 
@@ -1903,6 +2045,37 @@ CASES: list[Case] = [
     # equally consistent with a check that always fires.
     Case("22: a well-formed entry in each scope is NOT reported", 22, "automaton",
          "bundle", m_supplies_well_formed, kind="silent"),
+    # ---- check 22, fix round 1: a present-but-malformed key is a finding
+    Case("22: 'supplies' is a mapping, not a list (missing '- ')", 22, "automaton",
+         "bundle", m_supplies_key_is_not_a_list, "must be a list"),
+    Case("22: 'supplies' is a bare scalar", 22, "automaton", "bundle",
+         m_supplies_key_is_a_bare_string, "must be a list"),
+    # ---- check 22, fix round 1: the seven previously-unfired refusals
+    Case("22: a list entry is not a mapping at all", 22, "automaton", "bundle",
+         m_supplies_entry_is_not_a_mapping,
+         "is not a mapping of 'from', 'to' and 'describe'"),
+    Case("22: 'from' is an empty string", 22, "automaton", "bundle",
+         m_supplies_from_is_empty, "'from' must be a non-empty path"),
+    Case("22: 'from' is nothing but slashes", 22, "automaton", "bundle",
+         m_supplies_from_is_only_slashes,
+         "does not resolve: path component '' is not allowed"),
+    Case("22: a real directory is declared without a trailing slash", 22,
+         "automaton", "bundle", m_supplies_from_directory_without_trailing_slash,
+         "a directory's 'from' must end in '/'"),
+    Case("22: 'to' is an empty string", 22, "automaton", "bundle",
+         m_supplies_to_is_empty, "'to' must be a non-empty path"),
+    Case("22: 'to' contains a backslash", 22, "automaton", "bundle",
+         m_supplies_to_has_a_backslash, "uses a backslash"),
+    Case("22: 'to' is absolute", 22, "automaton", "bundle",
+         m_supplies_to_is_absolute, "must be relative to the workspace, not absolute"),
+    # ---- check 22, fix round 1: it must run over GENERATED lessons too
+    # (instance mode only), while exempting only the listed-ness rule
+    Case("22: a generated lesson's own 'from' does not resolve", 22, "generated",
+         "instance", m_supplies_generated_lesson_from_missing,
+         "'lessons/does-not-exist.md' does not resolve"),
+    Case("22: a generated lesson's well-formed entry is NOT reported as "
+         "unlisted", 22, "generated", "instance",
+         m_supplies_generated_lesson_well_formed, kind="silent"),
 ]
 
 
@@ -2686,6 +2859,62 @@ def test_supplies_helpers() -> None:
         )
 
 
+def test_supplies_status_text() -> None:
+    """check 22's status, not just its exit code - fix round 1.
+
+    A "silent" Case only proves "no finding, exit 0", which cannot tell
+    "both entries were seen and are clean" apart from "nothing was seen at
+    all". Reading the exact status tuple closes that gap. This also pins
+    the ABSENT-key n/a reason, so it cannot regress back to reporting n/a
+    for a PRESENT-but-malformed key (fix round 1's Critical finding).
+    """
+    print("\ncheck 22's status text, for an absent key and a well-formed one:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("automaton", Path(tmpdir))
+        report = vb.validate(root, "bundle")
+        record(
+            report.status.get(22) == (vb.NOT_APPLICABLE, "no bundle declares supplies"),
+            "no 'supplies' key anywhere: check 22 is n/a, with that reason",
+            f"got {report.status.get(22)}",
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("automaton", Path(tmpdir))
+        m_supplies_well_formed(root)
+        report = vb.validate(root, "bundle")
+        record(
+            report.exit_code() == 0,
+            "the well-formed fixture still validates clean",
+            "; ".join(str(f) for f in report.findings),
+        )
+        record(
+            report.status.get(22)
+            == (vb.RAN, "2 supplies entries across 2 declaration sites"),
+            "both the manifest-scope and lesson-scope entry were counted",
+            f"got {report.status.get(22)}",
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # The third repro from fix round 1's Critical finding: 'supplies: []'
+        # is PRESENT (so not n/a) and is already a well-formed, empty list
+        # (so it is not a malformed-key finding either) - it just has
+        # nothing to check.
+        root = fresh("automaton", Path(tmpdir))
+        append(root / "tutorial.yaml", "\nsupplies: []\n")
+        report = vb.validate(root, "bundle")
+        record(
+            report.exit_code() == 0 and not report.findings,
+            "an explicitly empty 'supplies: []' is well-formed, not a finding",
+            "; ".join(str(f) for f in report.findings),
+        )
+        record(
+            report.status.get(22)
+            == (vb.RAN, "0 supplies entries across 1 declaration site"),
+            "'supplies: []' is present, so check 22 is 'ran' with 0 entries, not n/a",
+            f"got {report.status.get(22)}",
+        )
+
+
 def test_check_coverage() -> None:
     print("\nmeta: every check has a fixture that makes it fire:")
     for number, description in sorted(vb.CHECKS.items()):
@@ -2719,6 +2948,7 @@ def main() -> int:
     test_yaml_reader()
     test_names_file()
     test_supplies_helpers()
+    test_supplies_status_text()
     test_check_coverage()
 
     if _notes:
