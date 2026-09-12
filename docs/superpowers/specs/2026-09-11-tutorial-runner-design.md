@@ -1217,7 +1217,7 @@ Recorded as a first scoring signal in `tutorail-authoring`.
 
 ---
 
-## 15c. One instance per workspace
+## 15b. One instance per workspace
 
 **Decided 2026-09-12.** A workspace holds exactly one tutorial instance, at `tutorial/`.
 This is a deliberate constraint, not an unexamined default.
@@ -1247,7 +1247,7 @@ is not the paths but deciding which instance "continue the tutorial" means.
 
 ---
 
-## 15b. Bundle revisions reaching a live instance
+## 15c. Bundle revisions reaching a live instance
 
 **Decided 2026-09-12.** A runner detects that the bundle an instance came from has changed,
 reports it, and stops. It never reconciles on its own.
