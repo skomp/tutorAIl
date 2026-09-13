@@ -1495,13 +1495,13 @@ real files. One repository cannot satisfy both without duplication.
 | `tutorail-bundles` repository | **done** — holds `rust-automaton-db` |
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
-| Validator (`scripts/validate_bundle.py`) | **done** — 21 bundle checks + 7 catalogue checks |
-| Validator test suite | **done** — 252 assertions; every check proven firing |
+| Validator (`skills/tutorail/scripts/validate_bundle.py`) | **done** — 26 bundle checks + 7 catalogue checks |
+| Validator test suite | **done** — 506 assertions; every check proven firing |
 | Optional lessons (`optional_lessons`, `failure_modes`) | **done** — 2026-09-12, §6; checks 18-21 |
-| Offer / defer / re-offer behaviour | **untested** — no harness exercises it; `TODO.md` |
-| Multi-catalogue support (`scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
-| Catalogue test suite (`tests/test_catalogs.py`) | **done** — 158 assertions; every failure kind proven firing |
-| Shared YAML reader (`scripts/yamlite.py`) | **done** |
+| Offer / defer / re-offer behaviour | **untested** — no harness exercises it; tutorAIl#22 |
+| Multi-catalogue support (`skills/tutorail/scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
+| Catalogue test suite (`tests/test_catalogs.py`) | **done** — 338 assertions; every failure kind proven firing |
+| Shared YAML reader (`skills/tutorail/scripts/yamlite.py`) | **done** |
 | `catalog.yaml` inside `tutorail-bundles` | **not done** — §15 item 6 |
 | `SKILL.md` (the runner control plane) | **done** |
 | `references/catalogue-format.md` | **done** |
