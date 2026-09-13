@@ -247,6 +247,15 @@ Not every tutorial builds software. If yours does not, use `none` and leave
 - `on-request` — the tutor may edit learner files when explicitly asked
 - `unrestricted` — the tutor may edit freely (rare; use only for courses where the learner is not writing the artifact)
 
+**A scaffold the tutor invents has no grant under the strict policy.** The exemption below
+is what lets the tutor create a file it was told to create, and it reaches **declared paths
+only** — a project layout the tutor works out for itself declares none, so
+`tutor-must-not-edit-learner-owned` forbids it however plainly the lesson asks. A course
+whose setup step cannot be shipped as files, because it depends on something the learner
+chooses, selects `on-request` and has the tutor ask before it builds anything. The cost is
+real and is stated where that value is defined: the relaxation holds for the whole course,
+not for the one lesson that needed it.
+
 **Ownership globs are relative to the learner's workspace, not to the bundle.** They
 describe the world *after* materialization, when the bundle has been copied into
 `<workspace>/tutorial/` and sits beside the learner's own files. So `tutorial/STATE.md`
@@ -598,6 +607,15 @@ the tutor being asked — without the exemption a course using it would have to 
 the learner for permission to unpack its own fixtures. `unrestricted` needs no exemption
 at all. Under every policy it is the create half that the declaration grants: **placement
 never rewrites a file that is already there**, whatever the policy would otherwise allow.
+
+**And what is not declared is not reached.** A tutor that generates a project layout, rather
+than placing files the bundle ships, is outside this exemption entirely — there is no
+`supplies` entry naming those paths, so nothing here applies to them and
+`tutor-must-not-edit-learner-owned` simply forbids the work. That is not an oversight to
+route around: the narrowness is the whole of the exemption's value, and widening it to cover
+paths nobody declared would make the declaration list the lever the policy exists to deny.
+A course that needs such a scaffold says so with `ownership_policy`, at the cost stated in
+section 2.
 
 The narrowness is the point, and it is worth one sentence of history. A generated course
 met this exact problem — a starter file under `src/**` that the tutor was forbidden to put
