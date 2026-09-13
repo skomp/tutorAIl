@@ -1,256 +1,366 @@
-# tutorAIl
+# TutorAIl
 
-Interactive tutorials that run inside a coding agent.
+**Structured, adaptive tutorials for coding agents.**
 
-The agent you already use — Claude Code or Codex — is the runtime. tutorAIl supplies the
-teaching protocol, a portable course format, and a progress lifecycle. There is no app,
-no server, and no model API key.
+Build real software yourself, with an agent that follows a deliberate curriculum, inspects
+what you actually wrote, and only moves on once the step is genuinely done.
 
-```
-"I want to learn Rust."
-        │
-        ▼
-  discover matching tutorials in your catalogue
-        │
-        ▼
-  you choose one
-        │
-        ▼
-  the course is materialized into your project as tutorial/
-        │
-        ▼
-  one lesson is loaded — not the course
-        │
-        ▼
-  one task at a time, you write the code
-```
+Ask a coding agent for help and it will optimise for finishing the task. TutorAIl gives it
+a different job: hand you one task at a time, read the code you wrote in your own project,
+teach when it fails, and refuse to write the exercise for you.
 
-## Why it exists
+| A written tutorial | A general coding agent | TutorAIl |
+|---|---|---|
+| Reliable, but the same route for everyone | Flexible, but inclined to solve the task | An authored curriculum, taught adaptively |
+| Static text you read | Drifts without a learning plan | Authored side trails, and detours it records |
+| Snippets, disconnected from your work | Produces the implementation quickly | You build the project; the tutor inspects it |
 
-A tutor that holds an entire course in context is expensive and forgetful. tutorAIl loads
-the manifest, your progress, and exactly one lesson. A 23-lesson course costs the same per
-turn as a 3-lesson one.
+The agent you already use — Claude Code or Codex — is the runtime. TutorAIl supplies the
+teaching protocol, a portable course format, a validator and a progress lifecycle. There is
+no app, no server, and no model API key.
 
-Progress lives in your repository, not in a chat log. Close the conversation, come back a
-month later in a fresh session, and the tutor resumes at the right task.
+**Start here: [Quick start](#quick-start).**
 
-## Install
+---
 
-**Claude Code**
+## Quick start
+
+**Prerequisites:** Claude Code or Codex, Python 3 and `git` (the two scripts need nothing
+else — no PyYAML), plus whatever toolchain the course you pick requires.
+
+### Install — Claude Code
 
 ```
 /plugin marketplace add skomp/tutorAIl
 /plugin install tutorail@tutorail
 ```
 
-**Codex**
+### Install — Codex
 
-```
-git clone git@github.com:skomp/tutorAIl.git ~/src/tutorAIl
-mkdir -p ~/.agents/skills
-ln -s ~/src/tutorAIl/skills/tutorail ~/.agents/skills/tutorail
-```
-
-`~/.agents/skills/` is Codex's documented user scope, and it follows symlinks.
-
-**The two hosts do not run the same copy, and that is worth knowing rather than
-discovering.** Claude Code installs a *published version* from the marketplace: it changes
-only when you run `claude plugin update`, and it never contains uncommitted work. Codex
-follows the symlink into the checkout, so it runs **whatever is currently checked out** —
-including edits you have not committed, and a half-finished change mid-save.
-
-That is the right arrangement while you are developing the runner, and the wrong one if you
-just want to use it. If you are not working on tutorAIl itself, point the symlink at a
-checkout you do not edit:
+Codex has no working plugin route (see [Installing on Codex](#installing-on-codex)). Use
+its documented user skills scope, which follows symlinks:
 
 ```
 git clone git@github.com:skomp/tutorAIl.git ~/.local/share/tutorail
+mkdir -p ~/.agents/skills
 ln -s ~/.local/share/tutorail/skills/tutorail ~/.agents/skills/tutorail
 ```
 
-and update it with `git -C ~/.local/share/tutorail pull`, which is the Codex equivalent of
-`claude plugin update`.
+Update it with `git -C ~/.local/share/tutorail pull`.
 
-Not `codex plugin add`. Codex refuses a marketplace entry whose source path is the
-marketplace root — it registers the marketplace and then enumerates nothing, with no
-error — and putting the plugin in a subdirectory whose `skills/` is a symlink installs a
-plugin with no skills in it, also without an error. Until that is resolved, the skills
-directory is the supported Codex install.
+### Start a course
 
-One skill body serves both hosts.
-
-## Use
-
-Start a tutorial:
+One course ships with the plugin: **Rust Fundamentals Through a Command-Line Tool**. It
+wants a new repository, so begin in an empty directory and say, in ordinary words:
 
 ```
 I want to learn Rust.
-Teach me distributed systems.
-Show me database tutorials.
 ```
 
-You are shown the matching courses and you pick one. If several match, you always get a
-choice — the runner never silently selects for you.
+The tutor lists the courses that match and waits for you to choose — it never picks for
+you, even when only one matches. When you choose, it copies the course into `tutorial/`
+inside your directory, validates the copy before teaching anything, prints the course
+banner, and gives you the first task.
 
-Resume one, from the directory holding the course:
+To reach the other five courses, register the bundles repository as a catalogue — one
+conversational request, covered under [Available courses](#available-courses).
+
+### Come back to it
+
+From the directory holding the course:
 
 ```
 Continue the tutorial.
 ```
 
-No selection, no catalogue. The runner finds `tutorial/`, reads your progress, and picks up
-at the pending task.
+No catalogue is read and no choice is offered. The runner finds `tutorial/`, reads your
+progress file, and resumes at the pending task — in a brand new conversation, weeks later.
 
-## How a course is laid out
+---
 
-A **bundle** is a course. It is written once and taken by many learners, so it holds no
-progress:
+## How a session works
+
+1. **You pick a course.** The tutor shows the matches and you choose one.
+2. **It is copied into your project** as `tutorial/`, alongside the code you are about to
+   write. Everything after this reads the copy, never the original.
+3. **You get exactly one actionable task.** A conceptual question gets an answer and does
+   not advance the task.
+4. **You implement it** in your own files. The tutor does not touch them.
+5. **The tutor inspects the result** — it reads your source and runs the checks the lesson
+   declares (`cargo test`, a file check, whatever the course configured). "It works" is not
+   evidence when the course asks for validated evidence.
+6. **It classifies the outcome** as failure, success, success with a warning it cares
+   about, or a warning you previously agreed to accept. On failure it explains the concept
+   and hands back one correction, and does not repair the work.
+7. **Progress is written down** once you have demonstrated it, and the loop repeats.
+
+Two properties fall out of this. Progress lives in your repository rather than in a chat
+log, so a fresh session resumes correctly. And the tutor holds one lesson at a time — not
+the course — so a 23-lesson course costs the same per turn as a 3-lesson one.
+
+---
+
+## A curated path with an adaptive teacher
+
+Three layers, and they are not equal. The author's curriculum is the dependable path; the
+rest exists to keep a learner on it.
+
+**1. The authored main path.** An ordered list of lessons in the course manifest. Everyone
+walks it, in order.
+
+**2. Authored optional lessons.** Lessons the author wrote but did not sequence. Each one
+names where it is offered and the risk to state when offering it, and some anticipate a
+named *failure mode* — a recognisable way the work goes wrong. The tutor warns you in a
+sentence, offers the lesson, and if you say "not now" it leaves it alone. Should the
+anticipated failure actually turn up later, it connects the failure to the thing you set
+aside and offers again. Declining every offer must still leave the course finishable; that
+is an invariant on authors.
+
+**3. Recorded detours, when the course does not reach where you are.** If you are blocked
+on a concept the course never teaches, or you ask for a detour outright, the tutor may
+write a lesson into `tutorial/lessons.generated/` with frontmatter recording why, and then
+send you back to the exact lesson you left. The manifest's lesson list is never edited: a
+detour is an overlay on one learner's copy.
+
+The bounds matter as much as the behaviour:
+
+- **A detour may not cover the active lesson's own learning objectives.** Asking for a
+  lesson on the thing the current exercise exists to make you work out is a request for the
+  answer with extra steps, and the tutor says so instead.
+- **A bundle that contradicts itself is reported, never drafted over.** A missing lesson
+  file, an undeclared validator, a dangling design anchor — those stop the course. Writing
+  a replacement would hide the defect from the only person who can fix it.
+- **A detour is not the cure for a hard exercise.** The tutor tests the blocking concept
+  against the course's own coverage list; a concept the course already taught gets
+  coaching, not a new lesson.
+
+TutorAIl is not a course generator. Adaptation supplements an authored curriculum and is
+bounded by its learning objectives.
+
+---
+
+## Available courses
+
+Six courses exist today. One ships with the plugin; the other five live in
+[`skomp/tutorail-bundles`](https://github.com/skomp/tutorail-bundles) and arrive when you
+register that repository as a catalogue.
+
+`Scope` is the course's own declared scope, derived from the length of its lesson list.
+There is no other duration estimate, and none is implied.
+
+| Course | What you build | Language | Level | Scope | Where |
+|---|---|---|---|---|---|
+| Rust Fundamentals Through a Command-Line Tool | A tool that counts the lines or words in a file — arguments, one subcommand, `Result`, a unit test. No crates. | Rust | beginner | 3 lessons; a few hours | [ships with the plugin](skills/tutorail/examples/rust-cli-basics) |
+| Build a Durable Event Broker in Go | A persistent, partitioned event broker from first principles, then batching, retention, observability and a deliberately limited follower. | Go | intermediate-to-advanced | 15 lessons; a few weeks | `tutorail-bundles` |
+| Make Music with Integer Arithmetic | A Bytebeat synthesiser that turns integer expressions into a valid WAV file. | TypeScript, JavaScript, Python, Go or Kotlin | beginner-to-intermediate | 4 lessons; a few days | `tutorail-bundles` |
+| Build a Fixed-Window Rate Limiter | A small in-memory rate limiter with an explicit contract and deterministic time. | your choice | intermediate | 3 lessons; a few hours | `tutorail-bundles` |
+| Learn Rust by Building AutomatonDB | An automaton-native, partitioned database with storage-engine and distributed-systems depth. | Rust | intermediate-to-advanced | 23 lessons; months of work | `tutorail-bundles` |
+| Learn WebGL 2 by Building a 3D Scene | An interactive, lit and textured 3D scene, from the rendering pipeline up to a loaded glTF model. | TypeScript | intermediate | 18 lessons; months of work | `tutorail-bundles` |
+
+### Registering the bundles repository
+
+Ask the tutor, in the agent you installed it into:
 
 ```
-rust-automaton-db/
-├── tutorial.yaml        manifest: id, subjects, ordered lessons, validators, ownership
-├── COURSE.md            goal, teaching philosophy, chapter map
+Add git@github.com:skomp/tutorail-bundles.git as a tutorial catalogue.
+```
+
+It follows the procedure in
+[`catalogue-format.md`](skills/tutorail/references/catalogue-format.md) section 10: read
+what is already configured, write the entry above the bundled catalogue, refresh, and show
+you what arrived. A catalogue may also be a plain file on disk, and a private repository
+needs no extra setup — fetching uses the Git credentials you already have. TutorAIl stores
+no tokens and never prompts for one.
+
+You can inspect the result yourself without fetching anything:
+
+```
+python3 skills/tutorail/scripts/catalogs.py status
+```
+
+`discover` refreshes and lists; `resolve`, `covers`, `follow-ups` and `prepare` answer
+"which course is this", "who teaches this concept", "what comes next" and "what should I
+know first". Catalogues refresh once when a discovery request starts — never per turn, and
+never during a resume. A catalogue that cannot be reached is served from its last
+successful copy and reported as cached, and the other catalogues still answer.
+
+---
+
+## How TutorAIl works
+
+Two artefacts, and one mechanical rule separating them.
+
+A **bundle** is a course. It is written once and taken by many learners, so it holds no
+progress. This is the shipped example, in full:
+
+```
+rust-cli-basics/
+├── tutorial.yaml        manifest: id, subjects, ordered lessons, optional lessons,
+│                        validators, ownership, supplied files
+├── COURSE.md            goal, teaching philosophy, chapter map, coverage list
 ├── DESIGN.md            durable subject decisions, anchored per section
 ├── STATE.template.md    the shape a fresh learner starts in
 └── lessons/
-    ├── 00-foundations.md
-    ├── 08-automaton-machinery/
-    │   ├── LESSON.md            a lesson that ships material
-    │   └── worked-example.md
-    └── interior-mutability.md   an optional lesson, offered rather than sequenced
+    ├── 00-hello-args.md
+    ├── 01-subcommands/          a lesson that ships material alongside it
+    │   ├── LESSON.md
+    │   ├── dispatch-example.md
+    │   └── usage.txt
+    ├── 02-errors-and-tests.md
+    ├── pure-core-and-edges.md   optional: offered, not sequenced
+    └── what-is-a-character.md   optional: offered, not sequenced
 ```
 
-A bundle may also declare `supplies` in `tutorial.yaml` or in a lesson — files it hands
-your workspace, such as a model or a dataset — which the tutor places and reports as setup
-rather than asking you to copy them yourself.
-
-## Lessons the tutor offers instead of teaching
-
-Most lessons sit on the main path and every learner walks them in order. A course can also
-carry **optional lessons**, which the tutor offers at a point the author names.
-
-The useful case is a mistake the author can see coming. The tutor warns you in a sentence,
-offers the lesson, and lets you say "not now" — and then leaves it alone. If the failure it
-anticipated actually turns up later, the tutor recognises it, tells you this is the thing
-you set aside and where, and offers the lesson again. Take it, and you come back to repair
-the work that caused the failure.
-
-Deferring is a real answer, not a delay. The tutor does not raise an offer a second time
-without new evidence, and it never offers a lesson you have already taken. A course must
-still be finishable by someone who declines every offer.
-
-`optional_lessons` and `failure_modes` in `tutorial.yaml` are how an author expresses it;
-`bundle-format.md` sections 2 and 12 carry the contract and a worked example.
-
-An **instance** is your copy, inside your own project, and it is the only place progress
-exists:
+An **instance** is your copy, inside your own project, and the only place progress exists:
 
 ```
 my-project/
 ├── src/                 yours; the tutor never edits it
 └── tutorial/
-    ├── tutorial.yaml
+    ├── tutorial.yaml    stamped with where it was materialised from
     ├── COURSE.md
     ├── DESIGN.md
     ├── STATE.md         ← your progress
-    └── lessons/
+    ├── lessons/
+    └── lessons.generated/   detours, if any were written
 ```
-
-The rule, which a script enforces:
 
 > A bundle contains `STATE.template.md` and never `STATE.md`.
 > An instance contains `STATE.md` and never `STATE.template.md`.
 
-## What the tutor will and will not do
+A script enforces that pair, and the runner runs it on the instance it has just created,
+before the first task — so a defect in a course is found by the runner rather than by a
+learner five lessons in.
 
-It reads your source, runs the course's configured checks (`cargo test`, a file check,
-whatever the bundle declares), explains concepts, and records progress once you have
-demonstrated it.
+**Ownership is declared, not assumed.** The manifest names tutor-owned and learner-owned
+paths and an `ownership_policy`. Under the default policy the tutor will not edit a
+learner-owned path — not when it would be faster, not when you are stuck, not for a
+trivial one-line fix. A compiler error is part of the course. The narrow exceptions are a
+policy that permits it and you explicitly asking, and placing files the bundle declares it
+`supplies` (a dataset, a starting config), which is setup rather than your work.
 
-It does **not** write your code. It will not edit learner-owned paths or finish an exercise
-for you, even when you are stuck — unless you explicitly ask, or the bundle's
-`ownership_policy` allows it. A compiler error is part of the course, not an accident to be
-cleaned up behind you.
+**What loads each turn** is the runner file, the manifest, your `STATE.md`, the one active
+lesson, and the design sections that lesson cites by anchor. Not `COURSE.md`, not a
+completed lesson, not the rest of the course. That budget is the reason the format exists.
 
-## Adding your own tutorials
+The normative detail is in the reference documents, which the tutor loads only when it
+needs them:
 
-Courses live outside this repository. `skomp/tutorail-bundles` holds a collection; each
-subfolder is one bundle.
+| Document | Covers |
+|---|---|
+| [`SKILL.md`](skills/tutorail/SKILL.md) | the control plane — orient, resume or discover, the teaching contract |
+| [`bundle-format.md`](skills/tutorail/references/bundle-format.md) | the normative bundle contract, for authors |
+| [`catalogue-format.md`](skills/tutorail/references/catalogue-format.md) | catalogues, precedence, failure handling, presenting a choice |
+| [`state-lifecycle.md`](skills/tutorail/references/state-lifecycle.md) | materialisation, what a completed task and lesson record |
+| [`runner-protocol.md`](skills/tutorail/references/runner-protocol.md) | the turn loop, validation outcomes, ownership, detours, offers |
+| [design specification](docs/superpowers/specs/2026-09-11-tutorial-runner-design.md) | the architecture, the measured host facts, and the designs that were rejected |
 
-You configure which catalogues to read in `~/.config/tutorail/catalogs.yaml`. A catalogue
-may be a local file, or a Git repository — including a private one.
+---
 
-```yaml
-catalogs:
-  - id: skomp
-    source:
-      type: git
-      url: git@github.com:skomp/tutorail-bundles.git
-      ref: main
-      path: catalog.yaml        # repository root, or any subfolder
-  - id: mine
-    source: { type: file, path: ~/tutorials/catalog.yaml }
-  - id: builtin
-    source: { type: bundled }
-```
+## Write a course
 
-**A bundles repository carries its own catalogue.** Put a `catalog.yaml` at its root listing
-its bundles by relative path, and adding the repository brings the bundles with it. Bundle
-paths resolve from the directory holding their catalogue file, with no exceptions.
+[`bundle-format.md`](skills/tutorail/references/bundle-format.md) is the normative
+contract. It is self-contained: hand it to a person, or paste it into another model, and it
+is enough on its own.
 
-**Private repositories need no extra setup.** Fetching uses the Git credentials you already
-have — an SSH key, or `gh`. tutorAIl stores no tokens and never asks for one.
+[`skills/tutorail/examples/rust-cli-basics/`](skills/tutorail/examples/rust-cli-basics) is
+a small worked example carrying both lesson forms and two optional lessons.
 
-Entries are read in the order you list them and **the first match for a tutorial id wins**,
-so put your own catalogues above `builtin` to override a shipped course. When an entry is
-shadowed, the runner says which catalogue supplied it and which were overridden.
-
-Catalogues refresh when a discovery request starts — never on every turn, and never during a
-resume. If one cannot be reached, the others are still served: the runner names the one that
-failed, falls back to its last successful copy, says the results are cached, and
-distinguishes an unreachable host from a repository you lack access to from a repository with
-no catalogue file, because those have three different repairs.
-
-```
-python3 skills/tutorail/scripts/catalogs.py discover   # refresh and list
-python3 skills/tutorail/scripts/catalogs.py status     # report without fetching
-```
-
-## Writing a bundle
-
-`skills/tutorail/references/bundle-format.md` is the normative contract. It is
-self-contained — hand it to a person or paste it into another model and it is enough on its
-own.
-
-`skills/tutorail/examples/rust-cli-basics/` is a small worked example in both lesson forms.
-
-Check your work before shipping it:
+Check your work before you ship it:
 
 ```
 python3 skills/tutorail/scripts/validate_bundle.py path/to/bundle
 python3 skills/tutorail/scripts/validate_bundle.py --instance path/to/project/tutorial
+python3 skills/tutorail/scripts/validate_bundle.py --catalog path/to/catalog.yaml
 ```
 
-The runner runs the same script. It validates the instance it has just materialized, before
-the first task, so that a defect in your bundle is found by the runner rather than by a
-learner several lessons in. It does not run on a teaching turn, and a learner never invokes
-it by hand. Your run and the runner's run are the same checks over the same files, which is
-the point: a bundle that passes here starts cleanly there.
-
-It checks structure — that references resolve, that no progress leaked into the course, that
+28 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
+over the same files, which is the point: a bundle that passes here starts cleanly there. It
+checks structure — that references resolve, that no progress leaked into the course, that
 every lesson is reachable. It says nothing about whether the course is any good.
 
 One thing it cannot check is worth knowing before you ship: a course carrying optional
-lessons must still be finishable by a learner who declines every offer. Nothing enforces
-that, and `bundle-format.md` section 13 explains why it is the invariant that keeps an
+lessons must still be finishable by someone who declines every offer. Nothing enforces
+that, and section 13 of `bundle-format.md` explains why it is the invariant that keeps an
 older runner — which ignores the offers entirely — from teaching a broken course.
 
-## Design
+[`skomp/tutorail-authoring`](https://github.com/skomp/tutorail-authoring) holds an
+interview-driven skill and toolkit for writing and maintaining bundles, and a course-quality
+checker. It calls this repository's validator, so install the runner first.
 
-`docs/superpowers/specs/2026-09-11-tutorial-runner-design.md` records the architecture, the
-measured host facts behind the packaging choices, and the designs that were tried and
-rejected.
+---
 
-## Licence
+## Project status
 
-MIT.
+Version 0.7.0. Early, in active use, and honest about its edges.
+
+**What works today.** Discovery across many catalogues, local or Git-hosted, with caching
+and per-source failure reporting. Materialising a course into a workspace and validating it
+before teaching. The teaching loop, ownership enforcement, validation outcomes and progress
+recording. Authored optional lessons and failure modes. Generated detours with provenance.
+Assumed-concept review, and follow-up recommendations at the end of a course.
+
+**Known gaps.**
+
+- **The offer / defer / re-offer behaviour for optional lessons is specified and
+  implemented, but no harness exercises it**
+  ([tutorAIl#22](https://github.com/skomp/tutorAIl/issues/22)). The structural checks on
+  `optional_lessons` and `failure_modes` are tested; the conversational behaviour around
+  them is not.
+- **Bundle updates after a learner has started are not solved.** An instance is a copy, and
+  nothing refreshes it.
+- **Remote trust and signing are not solved.** A catalogue you register is a repository you
+  have decided to trust.
+- **Only catalogues are cached, not bundles.** A course you have not chosen is not on your
+  machine.
+- **The three repositories are currently private.** The install commands above need access
+  to them.
+
+**Not goals for v1:** a standalone UI, a hosted backend, any model API client, accounts,
+cloud state, a marketplace, payments, or an autonomous coding mode.
+
+### Installing on Codex
+
+Two things are worth knowing rather than discovering.
+
+**`codex plugin add` does not work here, and fails silently.** A marketplace entry whose
+source path is the marketplace root registers the marketplace and then enumerates zero
+plugins with no error; putting the plugin in a subdirectory whose `skills/` is a symlink
+installs a plugin containing no skill at all, and reports success. Both were measured;
+section 17 of the design specification has the detail. The `~/.agents/skills/` symlink is
+the supported route until that is resolved.
+
+**The two hosts do not run the same copy.** Claude Code installs a published version from
+the marketplace: it changes only when you run `claude plugin update tutorail@tutorail`,
+and it never contains uncommitted work. Codex follows the symlink into a checkout, so it
+runs whatever is currently checked out there — including a half-finished edit mid-save.
+That is why the Codex instructions above clone to `~/.local/share/tutorail` rather than to
+a directory you work in. If you *are* developing the runner, point the symlink at your
+working checkout deliberately.
+
+One skill body serves both hosts.
+
+### Tests
+
+No pytest; two plain scripts, both currently passing.
+
+```
+python3 tests/test_validate_bundle.py     # 614 assertions
+python3 tests/test_catalogs.py            # 338 assertions
+```
+
+Every validator check and every catalogue failure kind is proven firing, because a check
+that cannot report a positive is worse than no check.
+
+### Contributing
+
+There is no `CONTRIBUTING.md` yet. Work is tracked as
+[GitHub issues](https://github.com/skomp/tutorAIl/issues). This repository holds the runner,
+the bundle format, the validator and discovery; courses belong in
+[`skomp/tutorail-bundles`](https://github.com/skomp/tutorail-bundles) and authoring tools in
+[`skomp/tutorail-authoring`](https://github.com/skomp/tutorail-authoring).
+
+### Licence
+
+The plugin manifests declare MIT. There is no `LICENSE` file in this repository yet, so
+that declaration is not yet backed by licence text.
