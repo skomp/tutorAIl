@@ -3,7 +3,9 @@
 
 Run it with:  python3 tests/test_validate_bundle.py
 
-No pytest, no PyYAML - nothing is installed in this environment.
+No pytest. PyYAML may or may not be installed; it makes no difference,
+because the scripts never use it (tutorAIl#29). The suite asserts that,
+in test_yaml_reader_ignores_the_environment.
 
 The point of this suite is NOT to show the validator passing. A validator that
 can only be shown passing is a false oracle. Every check gets a deliberately
@@ -28,6 +30,7 @@ never mutated in place: each case works on a fresh copy in a temp directory.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -3868,11 +3871,6 @@ REAL_MANIFEST = (BASELINES["automaton"] / "tutorial.yaml").read_text()
 
 def test_yaml_reader() -> None:
     print("\nthe restricted YAML reader:")
-    if vb._pyyaml is not None:  # pragma: no cover
-        note(
-            "  NOTE: PyYAML is importable here, so validate_bundle used it. "
-            "The restricted reader is still tested directly below."
-        )
 
     def load(text: str):
         return vb._RestrictedYaml(text, "<test>").parse()
@@ -4024,6 +4022,149 @@ def test_yaml_reader() -> None:
                 f"it did NOT reject it - it guessed, and returned {value!r}",
             )
 
+
+
+
+# --------------------------------------------------------------------------
+# The reader does not depend on the environment
+# --------------------------------------------------------------------------
+#
+# tutorAIl#29: load_yaml used to prefer PyYAML when it could import it, so the
+# verdict a bundle got - and the diagnostic its author read - was decided by
+# what happened to be installed on the machine. The three cases below are the
+# ones that differed: an anchor and a duplicate key were ACCEPTED by PyYAML and
+# rejected here, and a tab used for indentation was rejected by both with
+# different wording. The scalar case covers the quieter divergence, where both
+# readers reported success and returned different values.
+#
+# The probe runs in a subprocess so that one run can have `import yaml` fail
+# while the other has it succeed. It reports whether yaml was importable, so
+# the block is measured rather than assumed.
+
+_YAML_PROBE = '''\
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import yamlite
+
+try:
+    import yaml  # noqa: F401
+    importable = True
+except Exception:
+    importable = False
+
+CASES = [
+    ("anchor", "base: &a\\n  x: 1\\ncopy: *a\\n"),
+    ("duplicate key", "a: 1\\na: 2\\n"),
+    ("tab indent", "root:\\n\\t- id: a\\n"),
+    ("plain scalars", "a: no\\nb: 0x10\\nc: 010\\nd: .inf\\ne: 1e3\\nf: 2026-09-13\\n"),
+]
+
+out = {"yaml_importable": importable, "reader": yamlite.YAML_READER, "cases": {}}
+for name, text in CASES:
+    try:
+        out["cases"][name] = ["parsed", repr(yamlite.load_yaml(text, "probe.yaml"))]
+    except yamlite.YamlError as exc:
+        out["cases"][name] = ["YamlError", str(exc)]
+    except Exception as exc:
+        out["cases"][name] = [type(exc).__name__, str(exc)]
+print(json.dumps(out))
+'''
+
+# What the restricted reader does with each case. A message is matched as a
+# substring, a parsed value compared exactly.
+_YAML_PROBE_EXPECTED = {
+    "anchor": ("YamlError", "probe.yaml: line 1: anchors (&name) are not supported"),
+    "duplicate key": ("YamlError", "probe.yaml: line 2: duplicate key 'a'"),
+    "tab indent": ("YamlError", "probe.yaml: line 2: a tab is used for indentation"),
+    "plain scalars": (
+        "parsed",
+        "{'a': 'no', 'b': '0x10', 'c': 10, 'd': '.inf', 'e': 1000.0, "
+        "'f': '2026-09-13'}",
+    ),
+}
+
+
+def _run_yaml_probe(probe: Path, blocker: Path | None) -> dict:
+    env = dict(os.environ)
+    if blocker is not None:
+        existing = env.get("PYTHONPATH")
+        env["PYTHONPATH"] = (
+            f"{blocker}{os.pathsep}{existing}" if existing else str(blocker)
+        )
+    else:
+        # Dropped, not inherited: whoever runs this suite may already be
+        # shadowing yaml on PYTHONPATH, and then both probe runs would have
+        # the same environment and the comparison would prove nothing. The
+        # probe puts the scripts directory on sys.path itself.
+        env.pop("PYTHONPATH", None)
+    done = subprocess.run(
+        [sys.executable, str(probe), str(SCRIPT.parent)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if done.returncode != 0:  # pragma: no cover
+        raise AssertionError(f"the YAML probe failed: {done.stderr[-400:]}")
+    return json.loads(done.stdout)
+
+
+def test_yaml_reader_ignores_the_environment() -> None:
+    print("\nthe reader is the same whether or not PyYAML is importable:")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        probe = root / "yaml_probe.py"
+        probe.write_text(_YAML_PROBE)
+        blocker = root / "noyaml"
+        blocker.mkdir()
+        (blocker / "yaml.py").write_text('raise ImportError("blocked by the suite")\n')
+
+        with_yaml = _run_yaml_probe(probe, blocker=None)
+        without_yaml = _run_yaml_probe(probe, blocker=blocker)
+
+    # Control. The block has to be shown working, or a green run below would
+    # only mean the suite compared one configuration with itself.
+    record(
+        without_yaml["yaml_importable"] is False,
+        "the control run cannot import yaml (the block works)",
+        "PYTHONPATH did not shadow PyYAML, so nothing was compared",
+    )
+    if with_yaml["yaml_importable"]:
+        note(
+            "  (PyYAML is importable here, so the two probe runs really did "
+            "differ in their environment.)"
+        )
+    else:
+        note(
+            "  NOTE: PyYAML is NOT importable here, so the two probe runs had "
+            "the same environment and only the absolute expectations below "
+            "were exercised. Install PyYAML to exercise the comparison."
+        )
+
+    for name, (kind, detail) in _YAML_PROBE_EXPECTED.items():
+        got_with = with_yaml["cases"][name]
+        got_without = without_yaml["cases"][name]
+        record(
+            got_with == got_without,
+            f"{name}: both environments give the same answer",
+            f"with PyYAML: {got_with!r}; without: {got_without!r}",
+        )
+        for label, got in (("with PyYAML", got_with), ("without PyYAML", got_without)):
+            if kind == "parsed":
+                ok = got[0] == "parsed" and got[1] == detail
+            else:
+                ok = got[0] == kind and detail in got[1]
+            record(
+                ok,
+                f"{name}: the restricted reader's answer, {label}",
+                f"expected {kind} {detail!r}, got {got[0]} {got[1]!r}",
+            )
+
+    record(
+        with_yaml["reader"] == without_yaml["reader"],
+        "YAML_READER does not change with the environment",
+        f"with PyYAML: {with_yaml['reader']!r}; "
+        f"without: {without_yaml['reader']!r}",
+    )
 
 def test_names_file() -> None:
     print("\ncheck 6's material-mention match (delimiter-aware, not substring):")
@@ -6136,6 +6277,7 @@ def main() -> int:
     test_mode_is_never_inferred()
     test_cli()
     test_yaml_reader()
+    test_yaml_reader_ignores_the_environment()
     test_names_file()
     test_supplies_helpers()
     test_check6_supplies_exemption()

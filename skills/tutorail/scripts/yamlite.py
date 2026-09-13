@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """A restricted YAML reader shared by the tutorAIl scripts.
 
-Stdlib only. PyYAML is used when it is importable; otherwise the reader in
-this module parses the deliberately shallow subset the tutorAIl formats use,
+Stdlib only. This is the ONLY reader: the parse never consults the
+environment, and PyYAML is not used even when it happens to be importable.
+The reader parses the deliberately shallow subset the tutorAIl formats use,
 and *rejects* anything outside it rather than guessing.
 
 Two scripts need this reader, so it lives in one place:
@@ -14,6 +15,14 @@ Two scripts need this reader, so it lives in one place:
 
 Both run on a learner's machine, which is why neither may import a third-party
 parser.
+
+This module used to prefer PyYAML when it could import it (tutorAIl#29). That
+made the answer a property of the machine rather than of the document: PyYAML
+accepts an anchor and silently collapses a duplicate key, where this reader
+refuses both, and it resolves `no`, `0x10` and `2026-09-13` to values this
+reader leaves as strings. A bundle that validated for its author could fail
+for a learner with no change to the bundle, and the diagnostic an author read
+was decided by something the author did not choose. The preference is gone.
 
 Guessing is the failure this module exists to avoid. A reader that silently
 mis-parses an anchor, a tag or a multi-line plain scalar turns a structural
@@ -521,19 +530,13 @@ class _RestrictedYaml:
         return text + "\n"
 
 
-try:  # pragma: no cover - depends on the environment
-    import yaml as _pyyaml
-except Exception:  # pragma: no cover
-    _pyyaml = None
-
-YAML_READER = "PyYAML" if _pyyaml is not None else "restricted (no PyYAML installed)"
+# A fixed string, kept so that a report can say which reader produced a
+# diagnostic. There is no second reader to select and nothing reads this to
+# choose one: it never varies, by machine or by flag. If it ever becomes
+# conditional again, tutorAIl#29 explains why that was a defect.
+YAML_READER = "restricted (built in, stdlib only)"
 
 
 def load_yaml(text: str, where: str) -> Any:
-    """Parse YAML, preferring PyYAML, falling back to the restricted reader."""
-    if _pyyaml is not None:  # pragma: no cover - depends on the environment
-        try:
-            return _pyyaml.safe_load(text)
-        except _pyyaml.YAMLError as exc:
-            raise YamlError(f"{where}: {exc}") from exc
+    """Parse YAML with the restricted reader, whatever the environment holds."""
     return _RestrictedYaml(text, where).parse()
