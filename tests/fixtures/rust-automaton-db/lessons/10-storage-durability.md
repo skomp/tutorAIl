@@ -1,6 +1,6 @@
 ---
 id: 10-storage-durability
-title: Storage engine I: durability
+title: "Storage engine I: durability"
 design_refs: [durability, atomicity, deletion, temporal-semantics]
 validators: [cargo-check, cargo-test]
 ---

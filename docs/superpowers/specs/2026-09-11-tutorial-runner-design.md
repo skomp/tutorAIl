@@ -1158,7 +1158,7 @@ should not re-derive these.
 | Path resolution in skill body | relative to skill directory, **both hosts** |
 | `project_doc_fallback_filenames` | real, but ambient-instructions only — **not** a skills mechanism |
 | Local filesystem | case-insensitive; `lesson.md` resolves as `LESSON.md` |
-| Local toolchain | Python 3.11.9 (no PyYAML), `jq` 1.8.2, no `yq`, cargo/rustc 1.98.0 |
+| Local toolchain | Python 3.11.9, `jq` 1.8.2, no `yq`, cargo/rustc 1.98.0. **PyYAML 6.0.3 arrived 2026-09-13** and changes which reader `yamlite` uses — tutorAIl#29 |
 
 ---
 

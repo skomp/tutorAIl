@@ -1,6 +1,6 @@
 ---
 id: 11-automaton-aware-segments
-title: Storage engine II: automaton-aware immutable segments
+title: "Storage engine II: automaton-aware immutable segments"
 design_refs: [automaton-index, durability, deletion, temporal-semantics, key-ordering]
 validators: [cargo-check, cargo-test]
 ---
