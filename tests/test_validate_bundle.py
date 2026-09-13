@@ -2362,6 +2362,176 @@ def m_no_teaching_method(root: Path) -> None:
     )
 
 
+# -- check 28: unrecognised top-level manifest fields
+
+
+def _append_top_level(root: Path, literal: str, expected: dict) -> None:
+    """Append top-level keys to tutorial.yaml and prove the reader saw them.
+
+    The same shape as _declare_teaching_method, for the same reason. The
+    restricted reader rejects shapes PyYAML accepts, so an appended block it
+    silently dropped - or one the baseline already carried - would leave a
+    case that reports on something other than what it thinks it planted.
+    """
+    manifest = root / "tutorial.yaml"
+    before = vb.load_yaml(manifest.read_text(), "tutorial.yaml")
+    assert isinstance(before, dict), "the baseline manifest does not parse"
+    for name in expected:
+        assert name not in before, (
+            f"the baseline already carries {name!r} as a top-level key, so "
+            f"this fixture would be asserting about the wrong declaration"
+        )
+    append(manifest, f"\n{literal}\n")
+    parsed = vb.load_yaml(manifest.read_text(), "tutorial.yaml")
+    assert isinstance(parsed, dict), "the mutated manifest no longer parses"
+    for name, value in expected.items():
+        assert name in parsed, (
+            f"the appended key {name!r} did not survive the reader, so this "
+            f"fixture proves nothing"
+        )
+        got = parsed[name]
+        assert got == value and type(got) is type(value), (
+            f"{name} parsed to {got!r} ({type(got).__name__}), not "
+            f"{value!r} ({type(value).__name__})"
+        )
+
+
+def m_unknown_top_level_field(root: Path) -> None:
+    """The exact line tutorAIl#24 measured passing in silence."""
+    _append_top_level(root, "zzz_not_a_field: 1", {"zzz_not_a_field": 1})
+
+
+def m_three_unknown_top_level_fields(root: Path) -> None:
+    _append_top_level(
+        root,
+        "zzz_alpha: 1\nzzz_beta: two\nzzz_gamma: [three]",
+        {"zzz_alpha": 1, "zzz_beta": "two", "zzz_gamma": ["three"]},
+    )
+
+
+def m_misspelled_teaching_method(root: Path) -> None:
+    """The case tutorAIl#24 exists for: a MAY whose name went wrong.
+
+    Nothing else in the validator can see this. Check 27 only ever reads
+    the value under the correctly spelled key, so a course that silently
+    draws a shorter banner has, before check 28, no report anywhere.
+    """
+    _append_top_level(
+        root,
+        f'teachng_method: "{TEACHING_METHOD_SENTENCE}"',
+        {"teachng_method": TEACHING_METHOD_SENTENCE},
+    )
+
+
+def m_misspelled_teaching_method_plural(root: Path) -> None:
+    """`teaching_methods`, the spelling named in the issue itself."""
+    _append_top_level(
+        root,
+        f'teaching_methods: "{TEACHING_METHOD_SENTENCE}"',
+        {"teaching_methods": TEACHING_METHOD_SENTENCE},
+    )
+
+
+def m_misspelled_lessons_beside_the_real_one(root: Path) -> None:
+    """`lesson` added BESIDE a correct `lessons`.
+
+    The singular alone is the whole defect here: the real list is intact, so
+    nothing else in the validator has anything to report, and check 28 is the
+    only thing between the author and a key the runner will never read.
+    """
+    _append_top_level(root, "lesson: lessons/00-foundations.md",
+                      {"lesson": "lessons/00-foundations.md"})
+
+
+def m_required_key_misspelled(root: Path) -> None:
+    """`lessons:` RENAMED to `lesson:` - the destructive form.
+
+    Both reports are correct and both are wanted: check 8's finding that the
+    required field is gone, and check 28's warning naming the spelling that
+    ate it. test_a_misspelled_required_key_is_reported_twice asserts the
+    pair.
+    """
+    edit(root / "tutorial.yaml", "\nlessons:\n", "\nlesson:\n")
+
+
+def m_no_unknown_top_level_field(root: Path) -> None:
+    """The false-positive control: a manifest using only defined fields.
+
+    It mutates nothing and asserts there is nothing to mutate. A check that
+    warns about a valid bundle is worse than the silence it replaced, and
+    this is the direction that says so.
+    """
+    parsed = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    unknown = sorted(set(parsed) - set(vb.KNOWN_MANIFEST_FIELDS))
+    assert not unknown, (
+        f"this baseline already carries {unknown}, so it cannot show a valid "
+        f"manifest drawing no warning"
+    )
+
+
+def m_instance_stamp_is_a_defined_field(root: Path) -> None:
+    """The stamp the runner writes, in the document that must carry it.
+
+    run_case has already called to_instance(), so `instance:` is present.
+    This asserts that it really is - a silent case over a manifest that
+    never carried the key would prove nothing about the key.
+    """
+    parsed = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    assert isinstance(parsed.get("instance"), dict), (
+        f"to_instance() did not leave a parsed 'instance' mapping; got "
+        f"{parsed.get('instance')!r}"
+    )
+
+
+def m_bundle_carries_the_instance_stamp(root: Path) -> None:
+    """A BUNDLE carrying the stamp - check 7's finding, and 28's silence."""
+    append(
+        root / "tutorial.yaml",
+        "\ninstance:\n"
+        "  materialized_from: local:../tests/fixtures\n"
+        "  materialized_at: 2026-09-11\n"
+        "  runner_version: 1\n",
+    )
+    parsed = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    assert isinstance(parsed.get("instance"), dict), (
+        "the stamp did not survive the reader, so this fixture proves nothing"
+    )
+
+
+def m_supplies_is_a_defined_field(root: Path) -> None:
+    """`supplies` is in the format and in NO bundle in this repository.
+
+    The list of known fields is derived from bundle-format.md section 2, not
+    from the manifests that happen to exist. A list read off the fixtures
+    would omit `supplies`, and the first bundle to declare one would be
+    warned about a field the format defines. This plants a well-formed
+    declaration and asserts check 28 has nothing to say about it.
+    """
+    material = root / "lessons" / "01-subcommands" / "usage.txt"
+    assert material.is_file(), (
+        f"{material} is missing, so this fixture cannot declare a 'from' "
+        f"that resolves"
+    )
+    _append_top_level(
+        root,
+        "supplies:\n"
+        "  - from: lessons/01-subcommands/usage.txt\n"
+        "    to: docs/usage.txt\n"
+        "    describe: the usage text the learner's CLI has to reproduce\n",
+        {
+            "supplies": [
+                {
+                    "from": "lessons/01-subcommands/usage.txt",
+                    "to": "docs/usage.txt",
+                    "describe": (
+                        "the usage text the learner's CLI has to reproduce"
+                    ),
+                }
+            ]
+        },
+    )
+
+
 # --------------------------------------------------------------------------
 # The case table
 # --------------------------------------------------------------------------
@@ -2392,7 +2562,8 @@ class Case:
     expect: str = ""
     verify: Mutator | None = None
     #  "fires"         - the named check must report, exit 1
-    #  "silent"        - the named check must NOT report, exit 0
+    #  "silent"        - the named check must produce neither a finding NOR a
+    #                    warning, exit 0
     #  "warns"         - the named check must WARN and not report, exit 0
     #  "indeterminate" - no findings, but a check did not run, exit 3
     kind: str = "fires"
@@ -3017,6 +3188,51 @@ CASES: list[Case] = [
          "is declared but blank ('   ')", where="tutorial.yaml"),
     Case("27: an INSTANCE with a good teaching_method is silent", 27, "cli",
          "instance", m_teaching_method_is_a_sentence, kind="silent"),
+    # ---- check 28: unrecognised top-level manifest fields. WARNINGS ONLY,
+    # always, in both modes.
+    Case("28: the line tutorAIl#24 measured passing in silence", 28, "cli",
+         "bundle", m_unknown_top_level_field,
+         "unknown top-level field 'zzz_not_a_field'", kind="warns",
+         where="tutorial.yaml"),
+    Case("28: a misspelled teaching_method is named, with the near miss", 28,
+         "broker", "bundle", m_misspelled_teaching_method,
+         "'teachng_method', which is a near miss for 'teaching_method'",
+         kind="warns", where="tutorial.yaml"),
+    Case("28: teaching_methods - the spelling the issue names", 28, "broker",
+         "bundle", m_misspelled_teaching_method_plural,
+         "'teaching_methods', which is a near miss for 'teaching_method'",
+         kind="warns", where="tutorial.yaml"),
+    Case("28: 'lesson' beside a correct 'lessons' is still reported", 28,
+         "automaton", "bundle", m_misspelled_lessons_beside_the_real_one,
+         "'lesson', which is a near miss for 'lessons'", kind="warns",
+         where="tutorial.yaml"),
+    # ---- check 28 in INSTANCE mode. An instance carries a copy of
+    # tutorial.yaml, and an author fixing a spelling is as likely to be
+    # looking at it as at the bundle it came from.
+    Case("28: an INSTANCE carrying an unknown field warns too", 28, "cli",
+         "instance", m_unknown_top_level_field,
+         "unknown top-level field 'zzz_not_a_field'", kind="warns",
+         where="tutorial.yaml"),
+    Case("28: an INSTANCE's misspelled teaching_method warns too", 28, "cli",
+         "instance", m_misspelled_teaching_method,
+         "'teachng_method', which is a near miss for 'teaching_method'",
+         kind="warns", where="tutorial.yaml"),
+    # ---- check 28, the directions that must NEVER report. A check that
+    # warns about a valid bundle is worse than the silence it replaced, and
+    # this check sees EVERY bundle's manifest, so a false positive here is
+    # cry-wolf on all of them.
+    Case("28: a manifest using only defined fields is silent", 28,
+         "automaton", "bundle", m_no_unknown_top_level_field, kind="silent"),
+    Case("28: and so is every other baseline's", 28, "broker", "bundle",
+         m_no_unknown_top_level_field, kind="silent"),
+    Case("28: the instance stamp is a DEFINED field, not an unknown one", 28,
+         "cli", "instance", m_instance_stamp_is_a_defined_field,
+         kind="silent"),
+    # (A BUNDLE carrying the stamp cannot be a "silent" case: check 7 fires,
+    # so the run exits 1. test_the_instance_stamp_gets_exactly_one_report
+    # asserts that direction - check 7's finding and NO check-28 warning.)
+    Case("28: supplies is defined by the format though no fixture uses it",
+         28, "cli", "bundle", m_supplies_is_a_defined_field, kind="silent"),
 ]
 
 
@@ -3139,6 +3355,22 @@ def run_case(case: Case) -> None:
                     case.name,
                     f"check {case.check} FALSE POSITIVE - it reported "
                     + "; ".join(f"{h.where}: {h.message[:110]}" for h in hits),
+                )
+                return
+            # Warnings too, and this is not belt-and-braces. A warning is not
+            # a finding and never changes the exit code, so before this was
+            # here a "silent" case on a WARNING-ONLY check could not fail:
+            # checks 25 and 28 warn and warn only, and the two assertions
+            # below them - no finding, exit 0 - are both satisfied by a check
+            # that warned about every single bundle. Silence has to mean
+            # silence for the check named, or these cases are false oracles.
+            noisy = [w for w in report.warnings if w.check == case.check]
+            if noisy:
+                record(
+                    False,
+                    case.name,
+                    f"check {case.check} FALSE POSITIVE - it WARNED about "
+                    + "; ".join(f"{w.where}: {w.message[:110]}" for w in noisy),
                 )
                 return
             if report.exit_code() != 0:
@@ -5321,6 +5553,485 @@ def test_teaching_method_status() -> None:
     )
 
 
+def test_manifest_near_miss_distance() -> None:
+    """The suggestion helper over the BUNDLE field list, before anything
+    relies on what it suggests.
+
+    near_misses() is shared with catalogue mode, but the list it is given
+    here is different and four times longer, so the two properties that
+    matter have to be re-established against THIS list: the spellings
+    tutorAIl#24 is about are matched, and no field this format defines is a
+    near miss for another - which would make a real key's suggestion
+    ambiguous the moment someone typed a neighbour of it.
+    """
+    print("\ncheck 28: near misses over the manifest field list:")
+    known = vb.KNOWN_MANIFEST_FIELDS
+    record(bool(known), "the field list is non-empty", f"known = {known}")
+    for name, expected in (
+        ("teachng_method", ["teaching_method"]),
+        ("teaching_methods", ["teaching_method"]),
+        ("teaching-method", ["teaching_method"]),
+        ("lesson", ["lessons"]),
+        ("subject", ["subjects"]),
+        ("tutor_owns", ["tutor_owned"]),
+        ("zzz_not_a_field", []),
+        ("notes", []),
+    ):
+        got = vb.near_misses(name, known)
+        record(
+            got == expected,
+            f"near_misses({name!r}) -> {expected}",
+            f"got {got}",
+        )
+    collisions = {
+        a: vb.near_misses(a, tuple(b for b in known if b != a))
+        for a in known
+        if vb.near_misses(a, tuple(b for b in known if b != a))
+    }
+    record(
+        not collisions,
+        "no field this format defines is a near miss for another, so a "
+        "suggestion is never a coin toss between two real fields",
+        f"colliding: {collisions}",
+    )
+
+
+def test_known_manifest_fields_match_the_field_reference() -> None:
+    """The list comes from the FORMAT, not from the bundles that exist.
+
+    This is the anti-cry-wolf test. Check 28 sees every bundle's manifest,
+    so one field missing from vb.KNOWN_MANIFEST_FIELDS warns about every
+    correct bundle that uses it. The authority is bundle-format.md section
+    2's field reference table, and this parses it rather than trusting that
+    the two were once copied from each other.
+
+    The parse is proved to be a live instrument first - a table read that
+    silently returned nothing would make the comparison below vacuous.
+    """
+    print("\ncheck 28: the field list against bundle-format.md section 2:")
+    doc = REPO / "skills/tutorail/references/bundle-format.md"
+    text = doc.read_text()
+    marker = "\n### Field reference\n"
+    record(
+        text.count(marker) == 1,
+        "bundle-format.md has exactly one '### Field reference' heading",
+        f"found {text.count(marker)}",
+    )
+    after = text.split(marker, 1)[1] if marker in text else ""
+    # The first contiguous table after the heading, and only that one: the
+    # same section later carries the `validators` kind table, whose first
+    # column is a `kind` value rather than a field name.
+    rows: list[str] = []
+    started = False
+    for line in after.splitlines():
+        if line.startswith("|"):
+            started = True
+            rows.append(line)
+        elif started:
+            break
+    documented = {
+        m.group(1)
+        for m in (re.match(r"\|\s*`([a-z_]+)`\s*\|", row) for row in rows)
+        if m is not None
+    }
+    record(
+        len(documented) >= 20,
+        f"the table parse is a live instrument - it read {len(documented)} "
+        f"field names out of {len(rows)} rows",
+        f"documented = {sorted(documented)}; rows = {len(rows)}",
+    )
+    for sentinel in ("bundle_format", "teaching_method", "supplies", "advance_on"):
+        record(
+            sentinel in documented,
+            f"the parse found {sentinel!r}, so it is reading the right table",
+            f"documented = {sorted(documented)}",
+        )
+
+    # `instance` is the one field in the list that the AUTHORING table does
+    # not carry, and correctly so: it is written by the runner, not by an
+    # author, and bundle-format.md section 2 is what an author reads.
+    record(
+        set(vb.KNOWN_MANIFEST_FIELDS) - {"instance"} == documented,
+        "vb.KNOWN_MANIFEST_FIELDS is exactly the documented fields plus the "
+        "runner-written 'instance' stamp",
+        f"only in the code:  "
+        f"{sorted(set(vb.KNOWN_MANIFEST_FIELDS) - {'instance'} - documented)}\n"
+        f"       only in the document: "
+        f"{sorted(documented - set(vb.KNOWN_MANIFEST_FIELDS))}",
+    )
+    record(
+        "instance" in vb.KNOWN_MANIFEST_FIELDS,
+        "'instance' is a defined field, so check 28 never warns about it in "
+        "either mode - a bundle carrying it is check 7's finding",
+        f"KNOWN_MANIFEST_FIELDS = {vb.KNOWN_MANIFEST_FIELDS}",
+    )
+
+    # The fixtures are NOT a sufficient source for this list, and `supplies`
+    # is the proof: the format defines it and no manifest in this repository
+    # declares it. A list read off the bundles that exist would drop it.
+    declaring = [
+        name
+        for name, path in ALL_BASELINES.items()
+        if "supplies"
+        in vb.load_yaml((path / "tutorial.yaml").read_text(), "tutorial.yaml")
+    ]
+    record(
+        not declaring and "supplies" in vb.KNOWN_MANIFEST_FIELDS,
+        "'supplies' is in the list and in no baseline manifest, which is why "
+        "the list is derived from the format and not from the fixtures",
+        f"baselines declaring supplies: {declaring}",
+    )
+
+
+def test_unknown_top_level_field_warns_and_never_rejects() -> None:
+    """Several unknown keys, each named, in both modes, at exit 0.
+
+    The case table proves one key at a time. This proves the plural: three
+    keys produce three warnings, one per key, each naming its own key - not
+    one warning that mentions the first and stops, and not three copies of
+    the same message.
+
+    Every assertion is paired with the same baseline UNMUTATED, so a clean
+    result cannot come from a check that never ran.
+    """
+    print("\ncheck 28: several unknown fields, in both modes:")
+    for mode in ("bundle", "instance"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("cli", Path(tmpdir))
+            if mode == "instance":
+                to_instance(root)
+            base = vb.validate(root, mode)
+            record(
+                not _warnings_for(base, 28) and base.exit_code() == 0,
+                f"{mode}: the unmutated baseline draws no check-28 warning",
+                f"exit {base.exit_code()}, warnings = "
+                f"{[str(w) for w in _warnings_for(base, 28)]}",
+            )
+            state, detail = base.status.get(28, ("missing", ""))
+            record(
+                state == vb.RAN and "0 unrecognised" in detail,
+                f"{mode}: and its status says the check RAN and saw nothing",
+                f"status = {(state, detail)!r}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("cli", Path(tmpdir))
+            if mode == "instance":
+                to_instance(root)
+            m_three_unknown_top_level_fields(root)
+            report = vb.validate(root, mode)
+            warned = _warnings_for(report, 28)
+            record(
+                len(warned) == 3,
+                f"{mode}: three unknown keys produce three warnings",
+                f"got {[str(w) for w in warned]}",
+            )
+            for name in ("zzz_alpha", "zzz_beta", "zzz_gamma"):
+                about = [w for w in warned if repr(name) in w.message]
+                record(
+                    len(about) == 1 and about[0].where == "tutorial.yaml",
+                    f"{mode}: exactly one warning NAMES {name!r}, about "
+                    f"tutorial.yaml",
+                    f"got {[str(w) for w in about]}",
+                )
+            record(
+                not [f for f in report.findings if f.check == 28],
+                f"{mode}: check 28 produced no finding",
+                f"findings = {[str(f) for f in report.findings]}",
+            )
+            record(
+                report.exit_code() == 0,
+                f"{mode}: and the run still exits 0 - a warning never "
+                f"rejects a bundle",
+                f"exit {report.exit_code()}, findings = "
+                f"{[str(f) for f in report.findings]}",
+            )
+            state, detail = report.status.get(28, ("missing", ""))
+            record(
+                state == vb.RAN and "3 unrecognised" in detail,
+                f"{mode}: and the status line counts them",
+                f"status = {(state, detail)!r}",
+            )
+
+    record(
+        28 in vb.WARNING_ONLY,
+        "check 28 is declared WARNING_ONLY: an unrecognised key is what a "
+        "manifest written for a newer runner looks like, and rejecting it "
+        "would break the additive-key policy",
+        f"WARNING_ONLY = {vb.WARNING_ONLY}",
+    )
+    record(
+        28 not in vb.BUNDLE_ONLY and 28 not in vb.INSTANCE_ONLY,
+        "check 28 is declared for BOTH modes - an instance carries a copy of "
+        "tutorial.yaml, misspelling and all",
+        f"BUNDLE_ONLY = {vb.BUNDLE_ONLY}, INSTANCE_ONLY = {vb.INSTANCE_ONLY}",
+    )
+
+
+def test_unknown_top_level_field_reads_keys_not_text() -> None:
+    """READ THE PARSED KEYS, never the manifest's text.
+
+    A tutorial.yaml is full of places a field name appears without being a
+    top-level field: a comment above a key, prose inside `description`, and
+    - unlike a catalogue - a whole second and third level of real keys, any
+    of which a text scan would count as a top-level field.
+
+    The text scan is run here as a live instrument and shown reporting every
+    phantom, so the clean result from check 28 below is a real result rather
+    than a search that could not find anything.
+    """
+    print("\ncheck 28 reads parsed keys, not text:")
+    phantoms = ("zzz_commented", "zzz_in_prose", "zzz_nested")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("cli", Path(tmpdir))
+        manifest = root / "tutorial.yaml"
+        append(manifest, "\n# a note about zzz_commented: it is a comment\n")
+        # A key one level down, inside a validator definition. Measured: no
+        # check reports it - check 8 reads `kind` and the fields that kind
+        # requires and ignores the rest - so a check-28 report about it would
+        # be the only voice in the run, and it would be a text scan talking.
+        # (The level below the top is not uniform: an unknown key inside a
+        # `covers` body IS a check 23 finding, and one inside a `supplies`
+        # entry a check 22 finding. Check 28 reaches none of them.)
+        edit(
+            manifest,
+            "explains-choice: { kind: manual }",
+            "explains-choice: { kind: manual, zzz_nested: one-level-down }",
+        )
+        # And a field name inside the folded `description` scalar, which is
+        # prose to a parser and a key to a regex.
+        edit(
+            manifest,
+            "  errors with Result, and a unit test.",
+            "  errors with Result, and a unit test. It mentions zzz_in_prose: "
+            "in a sentence.",
+        )
+        raw = manifest.read_text()
+        document = vb.load_yaml(raw, "tutorial.yaml")
+        record(
+            all(name in raw for name in phantoms),
+            "every phantom name really is in the file's TEXT",
+            f"raw does not contain {[n for n in phantoms if n not in raw]}",
+        )
+        record(
+            all(name not in document for name in phantoms),
+            "and NO phantom name is a top-level KEY, which is the fact that "
+            "matters",
+            f"top-level keys = {sorted(document)}",
+        )
+        # The positive control for the text search: a naive check 28 - every
+        # identifier followed by a colon, minus the known ones - reports all
+        # three.
+        scanned = {
+            name
+            for name in re.findall(r"([A-Za-z_][A-Za-z0-9_]*):", raw)
+            if name not in vb.KNOWN_MANIFEST_FIELDS
+        }
+        record(
+            all(name in scanned for name in phantoms),
+            f"a text-scanning check 28 WOULD report every phantom "
+            f"({', '.join(phantoms)}), so the scan is a live instrument",
+            f"scanned = {sorted(scanned)}",
+        )
+
+        report = vb.validate(root, "bundle")
+        warned = _warnings_for(report, 28)
+        record(
+            not any(name in w.message for w in warned for name in phantoms),
+            "check 28 says nothing about the comment, the prose or the "
+            "nested key, where a text search would have reported three keys",
+            "; ".join(str(w) for w in warned) or "(no warnings)",
+        )
+        record(
+            not warned,
+            "and it reports nothing at all, because every real top-level key "
+            "in this manifest is one the format defines",
+            "; ".join(str(w) for w in warned),
+        )
+        record(
+            report.exit_code() == 0 and not report.findings,
+            "and nothing ELSE reports the nested key either, which is the "
+            "measured fact the comment above relies on: a key inside a "
+            "validator definition is accepted in silence",
+            f"exit {report.exit_code()}, findings = "
+            f"{[str(f) for f in report.findings]}",
+        )
+
+        # And the phantoms do not SUPPRESS a real one: plant a genuine
+        # top-level key in the same file and watch exactly it be reported.
+        m_unknown_top_level_field(root)
+        planted = vb.validate(root, "bundle")
+        warned = _warnings_for(planted, 28)
+        record(
+            len(warned) == 1 and "'zzz_not_a_field'" in warned[0].message,
+            "and a REAL top-level key in the same file is still reported, "
+            "exactly once",
+            f"got {[str(w) for w in warned]}",
+        )
+
+
+def test_the_instance_stamp_gets_exactly_one_report() -> None:
+    """`instance:` is a defined field, so check 28 never warns about it.
+
+    In INSTANCE mode it is required, and warning would be a false positive
+    on every instance the runner ever creates. In BUNDLE mode it is wrong,
+    and check 7 already says so by name, as a finding, with the reason - so
+    a check-28 warning beside it would be a second report about one key,
+    which is the redundancy the note on check 20 refuses.
+
+    The positive control is the pairing: the same planted stamp is shown
+    producing check 7's finding, so check 28's silence is silence about
+    something the validator demonstrably saw.
+    """
+    print("\ncheck 28 and the instance stamp - one key, one report:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("cli", Path(tmpdir))
+        to_instance(root)
+        report = vb.validate(root, "instance")
+        record(
+            not _warnings_for(report, 28),
+            "instance mode: the stamp the runner writes draws no warning",
+            f"warnings = {[str(w) for w in _warnings_for(report, 28)]}",
+        )
+        record(
+            report.exit_code() == 0 and not report.findings,
+            "and the instance validates clean",
+            f"exit {report.exit_code()}, findings = "
+            f"{[str(f) for f in report.findings]}",
+        )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("cli", Path(tmpdir))
+        m_bundle_carries_the_instance_stamp(root)
+        report = vb.validate(root, "bundle")
+        seven = [f for f in report.findings if f.check == 7]
+        record(
+            len(seven) == 1
+            and seven[0].where == "tutorial.yaml"
+            and "must not carry it" in seven[0].message,
+            "bundle mode: check 7 reports the stamp, once, by name",
+            f"findings = {[str(f) for f in report.findings]}",
+        )
+        record(
+            not _warnings_for(report, 28),
+            "and check 28 adds NO second report about the same key",
+            f"warnings = {[str(w) for w in _warnings_for(report, 28)]}",
+        )
+        state, detail = report.status.get(28, ("missing", ""))
+        record(
+            state == vb.RAN and "0 unrecognised" in detail,
+            "check 28 nevertheless RAN over that manifest - the silence is a "
+            "verdict, not a skip",
+            f"status = {(state, detail)!r}",
+        )
+
+
+def test_a_misspelled_required_key_is_reported_twice() -> None:
+    """Warning about an unknown key never excuses a missing one.
+
+    `lessons:` renamed to `lesson:` is one edit that breaks two rules, and
+    both must be reported: check 8's FINDING that a required field is gone,
+    which fails the bundle, and check 28's WARNING naming the spelling that
+    ate it, which is the only thing in the run that says where it went.
+
+    This is the assertion that stops check 28 from being read as a
+    replacement for the required-field check. Softening an unknown key to a
+    warning is safe precisely because absence stays a finding.
+    """
+    print("\ncheck 28 beside check 8: a misspelled REQUIRED key:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("automaton", Path(tmpdir))
+        m_required_key_misspelled(root)
+        parsed = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+        record(
+            "lessons" not in parsed and "lesson" in parsed,
+            "the fixture really renamed the key",
+            f"top-level keys = {sorted(parsed)}",
+        )
+        report = vb.validate(root, "bundle")
+        eight = [
+            f
+            for f in report.findings
+            if f.check == 8 and "'lessons' is missing" in f.message
+        ]
+        record(
+            len(eight) == 1,
+            "check 8 still FAILS the bundle: the required field is missing",
+            f"findings = {[str(f) for f in report.findings if f.check == 8]}",
+        )
+        warned = _warnings_for(report, 28)
+        record(
+            len(warned) == 1
+            and "'lesson'" in warned[0].message
+            and "near miss for 'lessons'" in warned[0].message,
+            "and check 28 WARNS, naming the spelling that ate it",
+            f"warnings = {[str(w) for w in warned]}",
+        )
+        record(
+            report.exit_code() == 1,
+            "the run exits 1 - the warning did not soften the finding",
+            f"exit {report.exit_code()}",
+        )
+
+
+def test_no_manifest_in_reach_gains_an_unknown_field_warning() -> None:
+    """Check 28 warns about nothing that exists today.
+
+    Every tutorial.yaml in this repository is listed, in the mode its state
+    files say it is, and one that is NOT here is reported as skipped rather
+    than counted as clean. The published bundles are swept too when the
+    sibling checkout is present.
+
+    A check that warns about a valid bundle is worse than the silence it
+    replaces, and this check sees every manifest there is, so this sweep is
+    the test that matters most. Its positive control plants a key in a copy
+    of a real manifest and watches the same sweep report it.
+    """
+    print("\ncheck 28 warns about no manifest in reach:")
+    manifests = sorted(REPO.glob("**/tutorial.yaml"))
+    record(
+        len(manifests) >= 8,
+        f"the sweep found {len(manifests)} manifests in this repository",
+        "the glob found almost nothing, so a clean sweep proves nothing",
+    )
+    published = Path.home() / "src/github.com/skomp/tutorail-bundles"
+    if published.is_dir():
+        manifests += sorted(published.glob("*/tutorial.yaml"))
+    else:
+        note(f"  SKIPPED: {published} is not present, so it was not checked")
+        print(f"  skip {published} (not present)")
+
+    for manifest in manifests:
+        root = manifest.parent
+        mode = "instance" if (root / "STATE.md").is_file() else "bundle"
+        report = vb.validate(root, mode)
+        warned = _warnings_for(report, 28)
+        state, detail = report.status.get(28, ("missing", ""))
+        record(
+            not warned and state == vb.RAN,
+            f"{root.name} ({mode}): check 28 ran and warned about nothing "
+            f"({detail})",
+            f"status = {(state, detail)!r}, warnings = "
+            f"{[str(w) for w in warned]}",
+        )
+
+    # The positive control for the sweep itself.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir) / "planted"
+        shutil.copytree(manifests[0].parent, root)
+        mode = "instance" if (root / "STATE.md").is_file() else "bundle"
+        m_unknown_top_level_field(root)
+        report = vb.validate(root, mode)
+        warned = _warnings_for(report, 28)
+        record(
+            len(warned) == 1 and "'zzz_not_a_field'" in warned[0].message,
+            f"the same sweep DOES report a key planted in "
+            f"{manifests[0].parent.name}",
+            f"the sweep cannot report a positive, so its clean results prove "
+            f"nothing. warnings = {[str(w) for w in warned]}",
+        )
+
+
 def test_no_real_bundle_ships_a_stamped_template() -> None:
     """Check 26 rejects nothing that exists today.
 
@@ -5445,6 +6156,13 @@ def main() -> int:
     test_alias_normalisation_matches_the_runtime()
     test_assumes_reviewed_is_bundle_only()
     test_teaching_method_status()
+    test_manifest_near_miss_distance()
+    test_known_manifest_fields_match_the_field_reference()
+    test_unknown_top_level_field_warns_and_never_rejects()
+    test_unknown_top_level_field_reads_keys_not_text()
+    test_the_instance_stamp_gets_exactly_one_report()
+    test_a_misspelled_required_key_is_reported_twice()
+    test_no_manifest_in_reach_gains_an_unknown_field_warning()
     test_no_real_bundle_ships_a_stamped_template()
     test_check_coverage()
 

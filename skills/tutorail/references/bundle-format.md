@@ -182,6 +182,29 @@ advance_on: validated-evidence-only
 | `solution_code` | SHOULD | `on-request-only` or `freely`. |
 | `advance_on` | SHOULD | `validated-evidence-only` or `learner-assertion`. |
 
+**A top-level field this table does not list is warned about, never rejected.** Check 28
+names it and the bundle still validates. A manifest is data a newer runner may extend, and
+a validator that refused a key it had not heard of would reject precisely the bundle
+written for the next version of this format — the failure that section 13's rule of
+degrading rather than refusing exists to prevent. One key is exempt in both directions:
+`instance`, the stamp recording what an instance was materialized from. It is absent from
+the table because the runner writes it and you do not, and check 28 says nothing about it
+either way — a *bundle* carrying one is check 7's finding.
+
+Read the warning anyway, because a misspelled field has no other signal anywhere. A runner
+reads `tutorial.yaml` by field name and ignores a name it does not know, so
+`teaching_methods` is not a broken `teaching_method`; it is nothing at all. The course runs
+on, the banner is one sentence shorter, and without check 28 nothing anywhere says why. A
+key close to a field this table lists is called out as the likely misspelling it almost
+always is.
+
+**Warning about an unknown key never excuses a missing one.** A bundle is unusable when a
+MUST field is **absent**, and absence is still a finding: check 8 reports every required
+field that is not there. So renaming `lessons` to `lesson` produces both reports in one
+run — check 8's finding that `lessons` is gone, which fails the bundle, and check 28's
+warning naming the spelling that ate it, which is the only thing in the run that says where
+the list went.
+
 **`teaching_method`** is the course's method in the learner's own words. `style` and the
 teaching switches — `one_task_at_a_time`, `solution_code`, `advance_on` — already say that
 kind of thing to a machine, in tags and enums; this field says it to the person about to
@@ -1518,6 +1541,9 @@ Confirm each of these by looking, not by remembering:
       `after` in its frontmatter
 - [ ] `STATE.template.md` exists and describes a learner who has not started
 - [ ] `tutorial.yaml`, `COURSE.md`, `DESIGN.md`, `lessons/` all exist
+- [ ] every top-level field in `tutorial.yaml` is one the field reference lists — a key it
+      does not list is a warning rather than a rejection, but it is almost always a
+      misspelling, and the runner reads nothing by a name it does not know
 - [ ] `teaching_method`, if the manifest declares it at all, holds a real sentence about
       how the course teaches — an empty value is a finding, not a default, and leaving the
       key out entirely is the correct way to say nothing

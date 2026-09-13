@@ -34,10 +34,10 @@ Exit codes:
 A run may also print WARNINGS. A warning never changes the exit code and
 never makes a bundle invalid: it is for a rule that is real but whose only
 available evidence is circumstantial, where reporting a finding would fail
-bundles that are correct. Checks 23 and 25 are where they come from in bundle
-mode. Catalogue check 3 warns for a different and stronger reason: a
-catalogue is data a newer runner may extend, so an unrecognised entry field
-is named and the catalogue still passes.
+bundles that are correct. Checks 23 and 25 are where those come from in
+bundle mode. Check 28 and catalogue checks 1 and 3 warn for a different and
+stronger reason: a manifest and a catalogue are both data a NEWER runner may
+extend, so an unrecognised field is named and the document still passes.
 
 Stdlib only. Python 3.11. PyYAML is used when importable; otherwise a
 restricted reader parses the deliberately shallow subset the format uses and
@@ -128,6 +128,8 @@ CHECKS: dict[int, str] = {
     26: "[bundle] STATE.template.md does not carry assumes_reviewed",
     27: "teaching_method, when declared, is a non-empty sentence the banner "
         "can print",
+    28: "every top-level field in tutorial.yaml is one this format defines; "
+        "an unrecognised one WARNS",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
@@ -139,10 +141,17 @@ INSTANCE_ONLY = {11, 14, 15, 17, 21}
 # is real, but the only evidence available for it is textual. A bundle whose
 # COURSE.md names a concept in words the manifest does not use is correct,
 # and failing it would be exactly the cry-wolf behaviour checks 5 and 6 are
-# shaped to avoid. The suite's coverage meta-test reads this set, so a check
-# named here must be demonstrated WARNING and one not named here must be
-# demonstrated FINDING; neither stands in for the other.
-WARNING_ONLY = {25}
+# shaped to avoid.
+#
+# Check 28's rule warns for the other reason, the one the comment above
+# KNOWN_MANIFEST_FIELDS argues in full: an unrecognised top-level key is what
+# a manifest written for a NEWER runner looks like to this one, and rejecting
+# it would break the additive-key policy bundle-format.md section 13 states.
+#
+# The suite's coverage meta-test reads this set, so a check named here must
+# be demonstrated WARNING and one not named here must be demonstrated
+# FINDING; neither stands in for the other.
+WARNING_ONLY = {25, 28}
 
 RAN = "ran"
 NOT_APPLICABLE = "n/a"
@@ -175,6 +184,70 @@ REQUIRED_MANIFEST_FIELDS = (
     "learner_owned",
     "ownership_policy",
     "validators",
+)
+
+# Every top-level key a tutorial.yaml may carry: the MUSTs above, and the
+# SHOULDs and MAYs beside them, exactly as bundle-format.md section 2's field
+# reference lists them - plus `instance`, the stamp the runner writes when it
+# materializes. Check 28 WARNS about a key that is not in here, in BOTH modes.
+#
+# It WARNS and never rejects, which is catalogue check 1's rule and is here
+# for catalogue check 1's reason. bundle-format.md section 13 settled what an
+# older reader does with a key it has never heard of: it DEGRADES, it does not
+# refuse. A manifest is data a newer runner may extend, so a validator that
+# rejected an unrecognised top-level key would turn a valid newer bundle into
+# an unusable one - the one failure the additive-key policy exists to prevent.
+#
+# Warning here cannot soften the case that matters, because the keys a bundle
+# genuinely cannot do without are REQUIRED and their ABSENCE is still a
+# finding: check 8 reports every missing entry of REQUIRED_MANIFEST_FIELDS. A
+# misspelled required key therefore produces BOTH - check 8's finding that the
+# field is gone, and check 28's warning naming the spelling that ate it. A key
+# nobody recognises sitting BESIDE the required ones takes nothing away, and
+# warning about an unknown key never excuses a missing one.
+#
+# `instance` is in this one list rather than being made mode-dependent. In
+# instance mode it is what check 7 REQUIRES. In bundle mode it is what check 7
+# REJECTS - by name, as a finding, with the reason - so a check-28 warning
+# about it would be a second report about one key, which is the redundancy the
+# notes on checks 3 and 20 refuse. Check 7 owns `instance:` in both
+# directions; check 28 only has to not get in its way.
+#
+# `supplies` is in this list and is declared by no bundle in this repository.
+# The list is derived from the FORMAT, not from the bundles that happen to
+# exist: a list read off the fixtures would drop `supplies`, and the first
+# bundle to declare it would be warned about a field the format defines.
+#
+# Matched against the keys of the PARSED mapping, never against the file's
+# text - see the docstring on unknown_entry_fields() for why that distinction
+# is load-bearing rather than stylistic.
+KNOWN_MANIFEST_FIELDS = (
+    "advance_on",
+    "aliases",
+    "assumes",
+    "bundle_format",
+    "covers",
+    "description",
+    "failure_modes",
+    "id",
+    "instance",
+    "learner_owned",
+    "lessons",
+    "level",
+    "one_task_at_a_time",
+    "optional_lessons",
+    "ownership_policy",
+    "recommended_follow_ups",
+    "recommended_previous_bundles",
+    "solution_code",
+    "style",
+    "subjects",
+    "supplies",
+    "teaching_method",
+    "title",
+    "tutor_owned",
+    "validators",
+    "workspace_kind",
 )
 
 KNOWN_BUNDLE_FORMATS = (1,)
@@ -517,11 +590,33 @@ LIMITATIONS = """What a pass does and does not mean
     check 27 says nothing about whether the sentence is TRUE. Whether the
       course teaches the way it claims to is judgement, and this validator
       makes none.
-    NOTE for anyone extending this: bundle mode does not report unrecognised
-      top-level manifest fields at all, so a MISSPELLED `teaching_method`
-      (`teaching-method`, `teachingMethod`) is silently ignored by every
-      check here, this one included. Catalogue mode warns about an unknown
-      field; bundle mode has no such machinery."""
+    a MISSPELLED `teaching_method` (`teaching-method`, `teachingMethod`) is
+      invisible to check 27, which only ever looks at the value under the
+      correctly spelled key. It is CHECK 28 that names it, as a warning.
+
+  Unrecognised top-level fields (check 28):
+    check 28 is WARNINGS ONLY, in BOTH modes, and it is the only check that
+      looks at the top-level field NAMES of tutorial.yaml as a set. It warns
+      once per key the format does not define and names a near miss when
+      there is one, and the bundle still passes: a manifest is data a newer
+      runner may extend, and rejecting a key this validator has not heard of
+      would break the additive-key policy of bundle-format.md section 13.
+    IT CANNOT TELL A TYPO FROM AN EXTENSION, and does not try. Both get the
+      same warning, because from here they are the same observation: this
+      runner will read nothing by that name.
+    it says nothing about VALUES. A field spelled correctly and filled in
+      with nonsense passes check 28 untouched; that is check 8's question
+      for the required fields and check 27's for `teaching_method`.
+    it reaches TOP LEVEL ONLY, and the level below it is not uniform.
+      Measured: an unknown key inside a `covers` or `assumes` concept body is
+      a check 23 finding, and one inside a `supplies` entry is a check 22
+      finding - but one inside a validator definition, an `optional_lessons`
+      entry or a `failure_modes` entry is accepted in silence by every check
+      here, check 28 included. Those keys belong to the checks that own those
+      structures, and check 28 does not reach down into them.
+    `instance` is a DEFINED field and check 28 never warns about it, in
+      either mode. A bundle carrying the stamp is check 7's finding, and one
+      key deserves one report."""
 
 
 @dataclass(frozen=True)
@@ -3519,10 +3614,13 @@ def check_teaching_method(manifest: Any, report: Report) -> None:
     key and then puts something unusable under it. The runner prints the
     value verbatim, so a list, a mapping, a number or a key with nothing
     under it reaches the banner as a repr or as a blank line where a
-    sentence was promised. Nothing else in this validator can see that:
-    bundle mode does not report unrecognised or misshapen top-level fields
-    at all - check 8 knows only the REQUIRED ones, and `teaching_method` is
-    not one of them.
+    sentence was promised. Nothing else in this validator can see that.
+    Check 8 knows only the REQUIRED fields and `teaching_method` is not one
+    of them; check 28 knows every top-level field's NAME and nothing about
+    its value, so a `teaching_method` spelled correctly and left blank walks
+    past it. The two are complementary and neither covers the other: 28
+    catches `teachng_method: <a good sentence>`, 27 catches
+    `teaching_method: <nothing usable>`.
 
     It runs in BOTH modes. An instance carries a copy of tutorial.yaml, and
     the banner is drawn from the instance, so an instance carrying a
@@ -3570,6 +3668,96 @@ def check_teaching_method(manifest: Any, report: Report) -> None:
 
     words = len(raw.split())
     report.ran(27, f"declared, {words} word{'' if words == 1 else 's'}")
+
+
+def unknown_manifest_fields(manifest: dict) -> list[str]:
+    """The top-level keys of a parsed tutorial.yaml the format does not define.
+
+    The bundle twin of unknown_top_level_fields(), and it carries the same
+    constraint for the same reason: READ THE KEYS OF THE PARSED MAPPING,
+    never the manifest's text. A manifest is full of places a field name
+    appears without being a top-level field - a comment above the key, a
+    `description` that mentions `lessons` in prose, an inner key of
+    `optional_lessons` or of a validator definition, a `failure_modes`
+    summary. A text search counts every one of those and misses a key whose
+    line it cannot pattern-match, which is exactly the arithmetic the
+    docstring on unknown_entry_fields() measures.
+
+    A key has a position in the parsed structure. A comment, a prose
+    sentence and a nested key at level two do not, so none of them can reach
+    this function.
+    """
+    known = set(KNOWN_MANIFEST_FIELDS)
+    return sorted((str(key) for key in manifest if str(key) not in known), key=str)
+
+
+def check_manifest_fields(manifest: Any, report: Report) -> None:
+    """Check 28 - both modes. It WARNS and can never produce a finding.
+
+    An author who misspells an optional field gets silence from every other
+    check in this file. `teaching_methods` is not `teaching_method`, so the
+    runner reads no teaching method, draws a banner one sentence shorter,
+    and nothing anywhere says why (tutorAIl#24). The same silence covers
+    `lesson`, `covered`, `assumed`, `tutor_owns` - every field whose absence
+    is legal.
+
+    So the key is NAMED, and the bundle still passes. The reasoning for
+    warning rather than rejecting is argued in full above
+    KNOWN_MANIFEST_FIELDS, and it is catalogue check 1's reasoning: a
+    manifest is data a newer runner may extend, and an older reader degrades
+    rather than refusing. `exit_code()` never consults `warnings`, so this
+    check can never stop a course.
+
+    It runs in BOTH modes. An instance carries a copy of tutorial.yaml, an
+    author who is going to fix the spelling is as likely to be looking at the
+    instance as at the bundle it came from, and the `instance:` stamp that
+    makes the instance's manifest differ from the bundle's is a field this
+    format defines - so there is nothing mode-dependent left to say.
+
+    It is a check of its own rather than part of check 8 because check 8 is a
+    FINDING check about the required fields, and a warning-only rule folded
+    into it would be invisible in the check table. Catalogue check 1 made the
+    opposite call for the opposite reason: there, the whole check was already
+    the question about the document's own shape.
+    """
+    if not isinstance(manifest, dict):
+        report.blocked(
+            28,
+            "tutorial.yaml did not parse into a mapping, so it has no "
+            "top-level keys to read",
+        )
+        return
+
+    unknown = unknown_manifest_fields(manifest)
+    for name in unknown:
+        suggestions = near_misses(name, KNOWN_MANIFEST_FIELDS)
+        if suggestions:
+            report.warn(
+                28,
+                "tutorial.yaml",
+                f"unknown top-level field {name!r}, which is a near miss for "
+                f"{' or '.join(repr(s) for s in suggestions)}. A runner reads "
+                f"tutorial.yaml by field name and ignores a name it does not "
+                f"know, so a misspelling is silently absent rather than "
+                f"reported: the course runs without whatever the field was "
+                f"meant to control, and nothing says why. Correct the "
+                f"spelling. This is a WARNING and the bundle is still usable",
+            )
+        else:
+            report.warn(
+                28,
+                "tutorial.yaml",
+                f"unknown top-level field {name!r}. A runner ignores a field "
+                f"name it does not know, so this bundle carries nothing by "
+                f"it. That is correct for a field a newer bundle adds, which "
+                f"is why this is a WARNING and the bundle is still usable. "
+                f"The top-level fields this format defines are "
+                f"{', '.join(KNOWN_MANIFEST_FIELDS)}",
+            )
+    report.ran(
+        28,
+        f"{len(manifest)} top-level field(s), {len(unknown)} unrecognised",
+    )
 
 
 # --------------------------------------------------------------------------
@@ -3699,6 +3887,12 @@ def validate(target: Path, mode: str) -> Report:
     # Check 27, both modes for the same reason: the banner is drawn from the
     # instance's copy of tutorial.yaml, not from the bundle source.
     check_teaching_method(manifest_dict, report)
+    # Check 28, both modes, and given the RAW manifest rather than
+    # manifest_dict: an unusable tutorial.yaml has no top-level keys to read,
+    # and reporting `ran, 0 unrecognised` over the empty stand-in would be a
+    # check certifying a file it never saw. It blocks instead, exactly as
+    # check 8 does two steps above, and for the same reason.
+    check_manifest_fields(manifest, report)
     if mode == "bundle":
         check_no_generated_dir(target, report)
         template_fm = check_state_template(target, manifest_dict, report)
