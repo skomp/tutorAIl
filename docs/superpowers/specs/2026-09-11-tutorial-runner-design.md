@@ -1498,6 +1498,7 @@ real files. One repository cannot satisfy both without duplication.
 | Validator (`skills/tutorail/scripts/validate_bundle.py`) | **done** — 26 bundle checks + 7 catalogue checks |
 | Validator test suite | **done** — 506 assertions; every check proven firing |
 | Optional lessons (`optional_lessons`, `failure_modes`) | **done** — 2026-09-12, §6; checks 18-21 |
+| First-load banner + `teaching_method` | **done** — 2026-09-13, released in 0.6.0; `state-lifecycle.md` §3 step 7, check 27; tutorAIl#23 |
 | Offer / defer / re-offer behaviour | **untested** — no harness exercises it; tutorAIl#22 |
 | Multi-catalogue support (`skills/tutorail/scripts/catalogs.py`) | **done** — 2026-09-12, §7 |
 | Catalogue test suite (`tests/test_catalogs.py`) | **done** — 338 assertions; every failure kind proven firing |
