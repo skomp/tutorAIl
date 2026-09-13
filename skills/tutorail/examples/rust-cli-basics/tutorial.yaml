@@ -5,6 +5,10 @@ description: >
   Core Rust taught by building `tally`, a small command-line tool that counts
   the lines or the words in a text file. Arguments, one subcommand dispatch,
   errors with Result, and a unit test.
+teaching_method: >
+  You write every line of `tally` yourself, one task at a time, and each lesson changes
+  that same program rather than starting a new one. A lesson finishes when `cargo check`
+  or `cargo test` says so, and solutions are yours for the asking.
 subjects: [rust, cli, command-line, error-handling, testing]
 aliases: [argv, subcommand, rust-basics, first-rust-program, beginner-rust]
 level: beginner

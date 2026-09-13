@@ -126,6 +126,8 @@ CHECKS: dict[int, str] = {
         "this bundle",
     25: "every covers concept is recognisable somewhere in COURSE.md",
     26: "[bundle] STATE.template.md does not carry assumes_reviewed",
+    27: "teaching_method, when declared, is a non-empty sentence the banner "
+        "can print",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
@@ -498,7 +500,28 @@ LIMITATIONS = """What a pass does and does not mean
       a course that declares no `assumes`, are the runner's to report at
       materialization (state-lifecycle.md section 10.5). Check 26 asks one
       question - does the template carry the field - because that is the one
-      failure no runner and no learner can see."""
+      failure no runner and no learner can see.
+
+  The first-load banner (`teaching_method`):
+    an ABSENT key is normal and is never reported. `teaching_method` is a
+      MAY; a bundle that omits it draws a banner one sentence shorter, and
+      check 27 reports "n/a", which is not the same as passing. Every bundle
+      written before the field existed is still valid, unedited.
+    a key that IS declared must carry a non-empty string, in BOTH modes, and
+      anything else is a finding: the runner prints the value verbatim, so a
+      list, a mapping, a number or a key with nothing under it reaches the
+      learner as a repr, and a blank string as an empty line. Unlike check
+      22's `supplies:`, an empty value here is NOT read as "nothing
+      declared" - there is no scaffolding step that writes an empty
+      `teaching_method`, and the field means nothing without its sentence.
+    check 27 says nothing about whether the sentence is TRUE. Whether the
+      course teaches the way it claims to is judgement, and this validator
+      makes none.
+    NOTE for anyone extending this: bundle mode does not report unrecognised
+      top-level manifest fields at all, so a MISSPELLED `teaching_method`
+      (`teaching-method`, `teachingMethod`) is silently ignored by every
+      check here, this one included. Catalogue mode warns about an unknown
+      field; bundle mode has no such machinery."""
 
 
 @dataclass(frozen=True)
@@ -3481,6 +3504,74 @@ def check_course_coverage(root: Path, manifest: Any, report: Report) -> None:
     report.ran(25, detail)
 
 
+def check_teaching_method(manifest: Any, report: Report) -> None:
+    """Check 27 - both modes.
+
+    `teaching_method` is a MAY. It says in one or two sentences HOW the
+    course teaches, and the runner prints it in the first-load banner below
+    `description`. A bundle that omits it is correct and complete: the
+    banner is one sentence shorter, and nothing warns. That is what lets
+    every bundle written before the field existed keep validating without an
+    edit, and it is the reason the text lives in the manifest rather than in
+    a new file the format would have to require.
+
+    So the only thing this check can say is about a bundle that declares the
+    key and then puts something unusable under it. The runner prints the
+    value verbatim, so a list, a mapping, a number or a key with nothing
+    under it reaches the banner as a repr or as a blank line where a
+    sentence was promised. Nothing else in this validator can see that:
+    bundle mode does not report unrecognised or misshapen top-level fields
+    at all - check 8 knows only the REQUIRED ones, and `teaching_method` is
+    not one of them.
+
+    It runs in BOTH modes. An instance carries a copy of tutorial.yaml, and
+    the banner is drawn from the instance, so an instance carrying a
+    malformed value is as broken as a bundle carrying one.
+
+    It says nothing about whether the sentence is TRUE - whether the course
+    teaches the way it claims to is judgement, and this validator makes
+    none.
+    """
+    if not isinstance(manifest, dict) or "teaching_method" not in manifest:
+        report.na(27, "the bundle declares no teaching_method")
+        return
+
+    raw = manifest["teaching_method"]
+    if not isinstance(raw, str):
+        actual = (
+            "nothing at all - the key is written with no value under it"
+            if raw is None
+            else f"{type(raw).__name__}: {raw!r}"
+        )
+        report.add(
+            27,
+            "tutorial.yaml",
+            f"'teaching_method' must be one or two sentences saying how this "
+            f"course teaches; it is {actual}. The runner prints the value "
+            f"verbatim in the first-load banner, below 'description'. The "
+            f"field is optional: a course with nothing to say here leaves the "
+            f"key out altogether and the banner is one sentence shorter.",
+        )
+        report.ran(27, "declared, malformed")
+        return
+
+    if not raw.strip():
+        report.add(
+            27,
+            "tutorial.yaml",
+            f"'teaching_method' is declared but blank ({raw!r}). The banner "
+            f"would show an empty line below 'description' where a sentence "
+            f"was promised. Say how the course teaches, or leave the key out "
+            f"altogether - it is optional, and a bundle that omits it is "
+            f"correct.",
+        )
+        report.ran(27, "declared, blank")
+        return
+
+    words = len(raw.split())
+    report.ran(27, f"declared, {words} word{'' if words == 1 else 's'}")
+
+
 # --------------------------------------------------------------------------
 # Driver
 # --------------------------------------------------------------------------
@@ -3605,6 +3696,9 @@ def validate(target: Path, mode: str) -> Report:
     check_concepts(manifest_dict, report)
     check_recommendations(manifest_dict, report)
     check_course_coverage(target, manifest_dict, report)
+    # Check 27, both modes for the same reason: the banner is drawn from the
+    # instance's copy of tutorial.yaml, not from the bundle source.
+    check_teaching_method(manifest_dict, report)
     if mode == "bundle":
         check_no_generated_dir(target, report)
         template_fm = check_state_template(target, manifest_dict, report)

@@ -2231,6 +2231,136 @@ def m_instance_carries_assumes_reviewed(root: Path) -> None:
     )
 
 
+# -- check 27: teaching_method, the first-load banner's third sentence
+
+
+TEACHING_METHOD_SENTENCE = (
+    "You select a programming language. The course then adapts the project "
+    "layout, the API shape and the tests to that language."
+)
+
+
+def _declare_teaching_method(root: Path, literal: str, expected: object) -> None:
+    """Append one `teaching_method:` declaration and prove what it parses to.
+
+    Appended at column 0 rather than spliced in, so one helper serves a
+    bundle and an instance alike: to_instance() has already appended the
+    `instance:` block to tutorial.yaml by the time a mutator runs, and a
+    top-level key after it is still a top-level key.
+
+    `expected` is the fixture verification, and it is not decoration. Every
+    case below turns on the TYPE the reader hands the validator - str, list,
+    dict, int, None - and a quoting slip (`"2"` where 2 was meant, a folded
+    block that swallows its own blank line) would silently turn a case into
+    a test of something else that still passes. Asserting the parsed value
+    is the only way to see that.
+    """
+    manifest = root / "tutorial.yaml"
+    assert "teaching_method" not in manifest.read_text(), (
+        "the baseline already declares teaching_method, so this fixture would "
+        "be asserting about the wrong declaration"
+    )
+    append(manifest, f"\n{literal}\n")
+    parsed = vb.load_yaml(manifest.read_text(), "tutorial.yaml")
+    assert isinstance(parsed, dict), "the mutated manifest no longer parses"
+    assert "teaching_method" in parsed, (
+        "the appended key did not survive the reader, so this fixture proves "
+        "nothing"
+    )
+    got = parsed["teaching_method"]
+    assert got == expected and type(got) is type(expected), (
+        f"teaching_method parsed to {got!r} ({type(got).__name__}), not "
+        f"{expected!r} ({type(expected).__name__})"
+    )
+
+
+def m_teaching_method_is_a_list(root: Path) -> None:
+    _declare_teaching_method(
+        root,
+        "teaching_method:\n"
+        "  - You select a programming language.\n"
+        "  - The course adapts every later step to it.",
+        [
+            "You select a programming language.",
+            "The course adapts every later step to it.",
+        ],
+    )
+
+
+def m_teaching_method_is_a_mapping(root: Path) -> None:
+    _declare_teaching_method(
+        root,
+        "teaching_method:\n  style: adaptive",
+        {"style": "adaptive"},
+    )
+
+
+def m_teaching_method_is_a_number(root: Path) -> None:
+    _declare_teaching_method(root, "teaching_method: 2", 2)
+
+
+def m_teaching_method_has_no_value(root: Path) -> None:
+    """The key written and then left unfinished.
+
+    NOT read as "nothing declared", which is what check 22 does with an
+    empty `supplies:`. There is no scaffolding step that writes an empty
+    `teaching_method`, and the field is nothing but its sentence.
+    """
+    _declare_teaching_method(root, "teaching_method:", None)
+
+
+def m_teaching_method_is_empty(root: Path) -> None:
+    _declare_teaching_method(root, 'teaching_method: ""', "")
+
+
+def m_teaching_method_is_whitespace(root: Path) -> None:
+    """Blank to a reader, non-empty to `if value:`.
+
+    The case that separates a real emptiness test from `not value`.
+    """
+    _declare_teaching_method(root, 'teaching_method: "   "', "   ")
+
+
+def m_teaching_method_is_a_sentence(root: Path) -> None:
+    """LEGAL and silent - the declaration the issue's example writes."""
+    _declare_teaching_method(
+        root,
+        f'teaching_method: "{TEACHING_METHOD_SENTENCE}"',
+        TEACHING_METHOD_SENTENCE,
+    )
+
+
+def m_teaching_method_is_a_folded_block(root: Path) -> None:
+    """LEGAL and silent, in the folded form a two-sentence field really uses.
+
+    Folded scalars come back with a trailing newline, so a check written as
+    `value.strip()` passes here and one written against the raw string
+    would not - which is why this is a separate case from the quoted one.
+    """
+    _declare_teaching_method(
+        root,
+        "teaching_method: >\n"
+        "  You select a programming language. The course then adapts the "
+        "project\n"
+        "  layout, the API shape and the tests to that language.",
+        TEACHING_METHOD_SENTENCE + "\n",
+    )
+
+
+def m_no_teaching_method(root: Path) -> None:
+    """The backward-compatibility control: the field is a MAY.
+
+    Every bundle written before the field existed omits it, so this mutates
+    nothing and asserts that there is nothing to mutate. What it proves is
+    only half the rule - that no finding appears; that the check reports
+    'n/a' rather than silently never running is asserted in
+    test_teaching_method_status().
+    """
+    assert "teaching_method" not in (root / "tutorial.yaml").read_text(), (
+        "this baseline declares teaching_method, so it cannot show a bundle "
+        "that predates the field still validating"
+    )
+
 
 # --------------------------------------------------------------------------
 # The case table
@@ -2847,6 +2977,46 @@ CASES: list[Case] = [
     # a false positive here would block every course a learner has reviewed.
     Case("26: an INSTANCE carrying assumes_reviewed is silent", 26, "engine",
          "instance", m_instance_carries_assumes_reviewed, kind="silent"),
+    # ---- check 27: teaching_method
+    Case("27: teaching_method is a list of sentences", 27, "broker", "bundle",
+         m_teaching_method_is_a_list, "it is list:",
+         where="tutorial.yaml"),
+    Case("27: teaching_method is a mapping", 27, "broker", "bundle",
+         m_teaching_method_is_a_mapping, "it is dict:",
+         where="tutorial.yaml"),
+    Case("27: teaching_method is a number", 27, "broker", "bundle",
+         m_teaching_method_is_a_number, "it is int: 2",
+         where="tutorial.yaml"),
+    Case("27: the key is written with nothing under it", 27, "broker",
+         "bundle", m_teaching_method_has_no_value,
+         "it is nothing at all - the key is written with no value under it",
+         where="tutorial.yaml"),
+    Case("27: teaching_method is an empty string", 27, "broker", "bundle",
+         m_teaching_method_is_empty, "is declared but blank ('')",
+         where="tutorial.yaml"),
+    Case("27: teaching_method is only whitespace", 27, "broker", "bundle",
+         m_teaching_method_is_whitespace, "is declared but blank ('   ')",
+         where="tutorial.yaml"),
+    # ---- check 27, the allowances. The field is a MAY, so the silent
+    # directions are the ones that matter: a false positive here rejects a
+    # bundle for filling in an OPTIONAL field, or for omitting it.
+    Case("27: a one-line teaching_method is silent", 27, "broker", "bundle",
+         m_teaching_method_is_a_sentence, kind="silent"),
+    Case("27: a folded two-sentence teaching_method is silent", 27, "broker",
+         "bundle", m_teaching_method_is_a_folded_block, kind="silent"),
+    Case("27: a bundle that predates the field is silent", 27, "automaton",
+         "bundle", m_no_teaching_method, kind="silent"),
+    # ---- check 27 is NOT bundle-only. An instance carries a copy of
+    # tutorial.yaml and the banner is drawn from the instance, so both
+    # directions have to hold there too.
+    Case("27: an INSTANCE with a malformed teaching_method fires", 27, "cli",
+         "instance", m_teaching_method_is_a_list, "it is list:",
+         where="tutorial.yaml"),
+    Case("27: an INSTANCE with a blank teaching_method fires", 27, "cli",
+         "instance", m_teaching_method_is_whitespace,
+         "is declared but blank ('   ')", where="tutorial.yaml"),
+    Case("27: an INSTANCE with a good teaching_method is silent", 27, "cli",
+         "instance", m_teaching_method_is_a_sentence, kind="silent"),
 ]
 
 
@@ -5060,6 +5230,97 @@ def test_assumes_reviewed_is_bundle_only() -> None:
     )
 
 
+def test_teaching_method_status() -> None:
+    """Check 27's STATUS line, which the case table cannot see.
+
+    run_case reads findings only, so a "silent" case is satisfied by a check
+    that never ran at all. Three of check 27's five outcomes are silences -
+    the key absent, a quoted sentence, a folded block - and the absent one is
+    the one a MAY has to get right. This asserts the status value itself:
+    "n/a" with a reason when nothing is declared, "ran" when something is,
+    in BOTH modes.
+
+    The positive control is the pairing. Every assertion about an n/a is made
+    on the same baseline that is then shown reporting `ran` once the field is
+    added, so an n/a cannot be the check silently failing to execute.
+    """
+    print("\ncheck 27: the status line for a MAY, in both modes:")
+    for mode in ("bundle", "instance"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("cli", Path(tmpdir))
+            if mode == "instance":
+                to_instance(root)
+            report = vb.validate(root, mode)
+            state, reason = report.status.get(27, ("missing", ""))
+            record(
+                state == vb.NOT_APPLICABLE and "teaching_method" in reason,
+                f"{mode}: a manifest with no teaching_method reports n/a",
+                f"status = {(state, reason)!r}",
+            )
+            record(
+                report.exit_code() == 0,
+                f"{mode}: and the bundle still validates clean",
+                f"exit {report.exit_code()}, findings = "
+                f"{[str(f) for f in report.findings]}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("cli", Path(tmpdir))
+            if mode == "instance":
+                to_instance(root)
+            m_teaching_method_is_a_sentence(root)
+            report = vb.validate(root, mode)
+            state, detail = report.status.get(27, ("missing", ""))
+            record(
+                state == vb.RAN and "21 words" in detail,
+                f"{mode}: a declared teaching_method reports ran, with its "
+                f"length",
+                f"status = {(state, detail)!r}",
+            )
+            record(
+                report.exit_code() == 0 and not report.findings,
+                f"{mode}: and a good sentence produces no finding",
+                f"exit {report.exit_code()}, findings = "
+                f"{[str(f) for f in report.findings]}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("cli", Path(tmpdir))
+            if mode == "instance":
+                to_instance(root)
+            m_teaching_method_is_empty(root)
+            report = vb.validate(root, mode)
+            hits = [f for f in report.findings if f.check == 27]
+            record(
+                len(hits) == 1
+                and hits[0].where == "tutorial.yaml"
+                and report.exit_code() == 1,
+                f"{mode}: a blank teaching_method is ONE finding about "
+                f"tutorial.yaml, and it fails the run",
+                f"exit {report.exit_code()}, findings = "
+                f"{[str(f) for f in report.findings]}",
+            )
+            state, detail = report.status.get(27, ("missing", ""))
+            record(
+                state == vb.RAN and detail == "declared, blank",
+                f"{mode}: and the status says the check ran and what it saw",
+                f"status = {(state, detail)!r}",
+            )
+
+    record(
+        27 not in vb.BUNDLE_ONLY and 27 not in vb.INSTANCE_ONLY,
+        "check 27 is declared for BOTH modes - an instance carries the "
+        "manifest the banner is drawn from",
+        f"BUNDLE_ONLY = {vb.BUNDLE_ONLY}, INSTANCE_ONLY = {vb.INSTANCE_ONLY}",
+    )
+    record(
+        27 not in vb.WARNING_ONLY,
+        "check 27 is a FINDING, not a warning: a banner the runner cannot "
+        "print is a defect in the bundle, not a matter of taste",
+        f"WARNING_ONLY = {vb.WARNING_ONLY}",
+    )
+
+
 def test_no_real_bundle_ships_a_stamped_template() -> None:
     """Check 26 rejects nothing that exists today.
 
@@ -5183,6 +5444,7 @@ def main() -> int:
     test_run_case_checks_where()
     test_alias_normalisation_matches_the_runtime()
     test_assumes_reviewed_is_bundle_only()
+    test_teaching_method_status()
     test_no_real_bundle_ships_a_stamped_template()
     test_check_coverage()
 

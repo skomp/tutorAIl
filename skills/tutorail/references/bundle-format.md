@@ -160,6 +160,7 @@ advance_on: validated-evidence-only
 | `id` | MUST | Stable, unique, `[a-z0-9-]+`. Never changes once published. |
 | `title` | MUST | Human-facing course name. |
 | `description` | MUST | One or two sentences. Shown when a learner is choosing. |
+| `teaching_method` | MAY | One or two sentences on how the course teaches. Shown in the first-load banner, below `description`. Non-empty when declared. |
 | `subjects` | MUST | Lowercase topic tags used for discovery, e.g. `[rust, databases]`. |
 | `aliases` | SHOULD | Extra terms a learner might say instead of a subject. |
 | `level` | MUST | e.g. `beginner`, `intermediate`, `intermediate-to-advanced`. |
@@ -180,6 +181,26 @@ advance_on: validated-evidence-only
 | `one_task_at_a_time` | SHOULD | Default `true`. |
 | `solution_code` | SHOULD | `on-request-only` or `freely`. |
 | `advance_on` | SHOULD | `validated-evidence-only` or `learner-assertion`. |
+
+**`teaching_method`** is the course's method in the learner's own words. `style` and the
+teaching switches — `one_task_at_a_time`, `solution_code`, `advance_on` — already say that
+kind of thing to a machine, in tags and enums; this field says it to the person about to
+take the course, in a sentence they read once. `description` says what a learner will come
+away knowing; `teaching_method` says what taking the course is like — that the learner
+writes every line and the tutor reads it back, that the course adapts each later step to a
+language the learner picks, that no lesson advances on an assertion. The runner shows it
+once, in the banner it draws when it creates the instance, directly below `title` and
+`description` (`state-lifecycle.md` section 3, step 7). Nothing else shows it, and the
+catalogue does not carry it: a catalogue entry is metadata for *choosing* a course, and
+this sentence is for the learner who has already chosen.
+
+It is optional, and it stays optional. A bundle that declares no `teaching_method` draws a
+banner one sentence shorter, and nothing warns — which is the reason the text lives in this
+manifest rather than in a file of its own: every bundle published before the field existed
+already declares `title` and `description`, so every one of them shows a banner without an
+edit. Declare it when the course's method is something a learner would otherwise have to
+infer from the first lesson, and leave it out rather than restate `description` in other
+words. When you do declare it, it MUST be a non-empty string.
 
 **`lessons`** is the authoritative lesson sequence — the **main path**, which every
 learner walks in order. It defines two things nothing else does:
@@ -1479,6 +1500,9 @@ Confirm each of these by looking, not by remembering:
       `after` in its frontmatter
 - [ ] `STATE.template.md` exists and describes a learner who has not started
 - [ ] `tutorial.yaml`, `COURSE.md`, `DESIGN.md`, `lessons/` all exist
+- [ ] `teaching_method`, if the manifest declares it at all, holds a real sentence about
+      how the course teaches — an empty value is a finding, not a default, and leaving the
+      key out entirely is the correct way to say nothing
 - [ ] every `lessons` entry resolves to a file that exists
 - [ ] every lesson in `lessons/` is listed exactly once — in `lessons` **or** in
       `optional_lessons`, never in both — counting both top-level `.md` files and
@@ -1751,10 +1775,10 @@ genuinely cannot be finished with the failure in place.
 ## 13. Older runners, and bundles that predate this
 
 `bundle_format` stays `1`. `optional_lessons`, `failure_modes`, `supplies`, `covers`,
-`assumes`, `recommended_follow_ups` and `recommended_previous_bundles` are all
-additive: a bundle written before this section existed is valid exactly as it stands,
-nothing in this document changes what it means, and no edit is implied. Run the
-validator over it and see.
+`assumes`, `recommended_follow_ups`, `recommended_previous_bundles` and
+`teaching_method` are all additive: a bundle written before this section existed is
+valid exactly as it stands, nothing in this document changes what it means, and no edit
+is implied. Run the validator over it and see.
 
 The other direction is the one to understand before you ship a course that uses the
 feature. A runner that predates it reads `tutorial.yaml`, does not recognise the new
@@ -1772,6 +1796,10 @@ keys, and ignores them. The effect on a learner is precise, and worth stating pl
   have done, and simply never sees the two screens. Nothing was gating anything, so nothing
   is unlocked by their absence — which is the clearest statement of what the relationship
   keys are worth and what they are not;
+- **no banner is drawn, and `teaching_method` is never shown.** An older runner opens the
+  course in prose, the way every runner did before the banner existed. The learner loses
+  the opening orientation and nothing else: the field is read at one moment, is shown at
+  one moment, and gates nothing;
 - **nothing is taught wrongly.** The main path is untouched by `optional_lessons`, because
   an optional lesson is never in it. An unplaced supply is not the same case — a
   manifest-scope entry IS on the main path — but it costs the learner the toil the key

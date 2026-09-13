@@ -151,7 +151,28 @@ Steps, in order:
 6. **Verify the invariant**, by looking: the instance has `STATE.md` and does not have
    `STATE.template.md`. Say that you checked. **Then validate the instance, before
    step 7 and before anything is placed outside `tutorial/`: section 3.1.**
-7. **Report what was created** — the instance path, the course title, the first lesson.
+7. **Draw the banner, then report what was created.** This is the moment the learner
+   first meets the course, and it is the only moment the banner is drawn: the manifest's
+   `title` in large text — the runner writes Markdown to a terminal, so a large heading or
+   ASCII art can carry the name — then `description`, then `teaching_method` when the
+   manifest declares it (`bundle-format.md` section 2).
+
+   **A resume never draws it.** The rule holds because of where it is written rather than
+   because a session remembers to obey it: materialization runs exactly once per instance,
+   so a step in this list cannot fire twice, and a resume never reaches this step at all.
+   Written into the teaching loop instead, the same rule would become a condition to
+   re-check every session and eventually to get wrong. It is also the right answer for the
+   learner: the first words of a resume belong to where they are standing, not to the name
+   of a course they chose weeks ago and have not forgotten.
+
+   When the manifest declares no `teaching_method`, the banner is one sentence shorter.
+   That is the whole of the difference — nothing warns, nothing is reported as missing, and
+   nothing about the start of the course is blocked or delayed. `title` and `description`
+   are MUST fields, so every bundle, including every one published before
+   `teaching_method` existed, has a banner to draw without an edit.
+
+   Then report what was created — the instance path, the course title, the first lesson.
+   The banner names the course; this says where it now lives and what happens next.
 8. **Place what the manifest supplies, then report it.** When `tutorial.yaml` declares
    `supplies` at the top level, place those entries now: the instance exists, no lesson
    has opened yet, and this is the one moment manifest-scope entries are placed. `from`
