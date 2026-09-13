@@ -405,5 +405,6 @@ the bundle format, the validator and discovery; courses belong in
 
 ### Licence
 
-The plugin manifests declare MIT. There is no `LICENSE` file in this repository yet, so
-that declaration is not yet backed by licence text.
+MIT. The full text is in [`LICENSE`](LICENSE) at the repository root, and both plugin
+manifests (`.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`) declare the same
+`"license": "MIT"`.
