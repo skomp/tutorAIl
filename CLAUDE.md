@@ -40,3 +40,32 @@ thing it looks for before you trust its silence. This repository has caught it i
 validator that could not fail, a test harness that matched a message from the wrong file, a
 grep whose zero came from an untested pattern, and a merge watch that errored on every
 iteration while reporting itself healthy.
+
+## Releasing
+
+An installed copy receives a change only when the **version number** moves. Claude Code
+compares manifest versions, not commit shas: refreshing the marketplace pulls the new
+commits and then reports the plugin as already current. Thirty commits sat unreachable
+behind 0.4.0 this way, and nothing reported a problem.
+
+The version lives in three files and they move together:
+
+| File | Read by |
+|---|---|
+| `.claude-plugin/marketplace.json` (`plugins[0].version`) | Claude Code, resolving the marketplace entry |
+| `.claude-plugin/plugin.json` | Claude Code, after install |
+| `.codex-plugin/plugin.json` | Codex |
+
+`claude plugin validate .` checks the first two agree. **Nothing checks the third** — the
+Codex manifest is the one to remember.
+
+Releasing is: bump all three, run both suites (`python3 tests/test_validate_bundle.py` and
+`python3 tests/test_catalogs.py` — there is no pytest here), commit, **push**, then
+`claude plugin marketplace update tutorail && claude plugin update tutorail@tutorail`.
+The push is not optional: the marketplace source is the GitHub repository, so an unpushed
+bump is invisible to it.
+
+Minor for added format surface, patch for a fix. Verify by diffing the installed cache
+under `~/.claude/plugins/cache/tutorail/tutorail/<version>/` against the working tree —
+and probe for something the previous version lacks, so a silent no-op cannot pass as a
+success.
