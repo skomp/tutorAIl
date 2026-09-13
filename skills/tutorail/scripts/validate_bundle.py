@@ -39,9 +39,10 @@ bundle mode. Check 28 and catalogue checks 1 and 3 warn for a different and
 stronger reason: a manifest and a catalogue are both data a NEWER runner may
 extend, so an unrecognised field is named and the document still passes.
 
-Stdlib only. Python 3.11. PyYAML is used when importable; otherwise a
-restricted reader parses the deliberately shallow subset the format uses and
-*rejects* anything outside it rather than guessing.
+Stdlib only. Python 3.11. The restricted reader in yamlite.py parses the
+deliberately shallow subset the format uses and *rejects* anything outside it
+rather than guessing. It is the only reader, whatever else is installed, so a
+bundle's verdict is a property of the bundle and not of the machine.
 
 Green means "structurally well-formed and executable by a runner". It says
 nothing about pedagogical quality, lesson ordering, whether DESIGN.md is
@@ -68,22 +69,10 @@ from typing import Any
 # ._RestrictedYaml keep resolving for anything that imports this module.
 
 try:
-    from yamlite import (
-        YAML_READER,
-        YamlError,
-        _RestrictedYaml,
-        _pyyaml,
-        load_yaml,
-    )
+    from yamlite import YAML_READER, YamlError, _RestrictedYaml, load_yaml
 except ImportError:  # pragma: no cover - only when sys.path lacks this dir
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from yamlite import (
-        YAML_READER,
-        YamlError,
-        _RestrictedYaml,
-        _pyyaml,
-        load_yaml,
-    )
+    from yamlite import YAML_READER, YamlError, _RestrictedYaml, load_yaml
 
 
 # --------------------------------------------------------------------------
@@ -260,9 +249,11 @@ KNOWN_BUNDLE_FORMATS = (1,)
 # overlay, discovered by listing the directory and placed by reading `after:`.
 GENERATED_DIR = "lessons.generated"
 GENERATED_KINDS = ("side-lesson", "main-path-draft")
-# `generated_at` is deliberately not format-checked: PyYAML parses an unquoted
-# 2026-09-11 into a datetime.date while the restricted reader returns a string,
-# so a type or pattern assertion here would depend on which reader is installed.
+# `generated_at` is deliberately not format-checked. Check 14 asserts that the
+# field is there and not empty; no script parses its value, and ordering two
+# detours by it is the tutor's job. The reader reads an unquoted 2026-09-11 as
+# the string "2026-09-11" on every machine, so a pattern assertion would now be
+# well-defined - it is simply not one this validator makes.
 GENERATED_REQUIRED_FIELDS = ("generated", "generated_at", "kind", "reason", "after")
 
 # Optional lessons (checks 18-21).
@@ -461,10 +452,8 @@ LIMITATIONS = """What a pass does and does not mean
     the ABSENCE of the directory is normal and is never reported. Checks 14,
       15 and 17 report "n/a" when there is nothing to check, which is not the
       same as passing.
-    check 14 does not check the FORMAT of generated_at, because PyYAML reads
-      an unquoted date as a datetime.date and the restricted reader reads it
-      as a string, so any pattern assertion would depend on which reader is
-      installed.
+    check 14 does not check the FORMAT of generated_at. It checks that the
+      field is present and not empty; no check reads the value.
     nothing checks whether `reason` is a real reason, whether a side-lesson
       was warranted, or whether a main-path-draft matches the chapter
       COURSE.md maps. Those are judgement, and this validator makes none.

@@ -380,7 +380,7 @@ One skill body serves both hosts.
 No pytest; two plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 614 assertions
+python3 tests/test_validate_bundle.py     # 628 assertions
 python3 tests/test_catalogs.py            # 338 assertions
 ```
 
@@ -388,12 +388,12 @@ Every validator check and every catalogue failure kind is proven firing — or, 
 that only ever warn, proven warning — because a check that cannot report a positive is
 worse than no check.
 
-**Both suites pass against the built-in YAML reader, and some assertions fail when PyYAML
-is installed.** The scripts need nothing beyond the standard library, but `yamlite` prefers
-PyYAML when it can import it, and the two readers word their errors differently. The
-verdict a bundle gets should be a property of the bundle and not of the machine, which is
-[tutorAIl#29](https://github.com/skomp/tutorAIl/issues/29). Until that is settled, the
-suites describe the built-in reader.
+**Both suites pass whether or not PyYAML is installed.** The scripts parse YAML with the
+built-in restricted reader in `yamlite.py` and never use PyYAML, even where it is
+importable, so the verdict a bundle gets is a property of the bundle and not of the
+machine. `test_yaml_reader_ignores_the_environment` asserts that, by parsing an anchor, a
+duplicate key, a tab used for indentation and six ambiguous scalars in two subprocesses —
+one of them with `import yaml` made to fail — and comparing the answers.
 
 ### Contributing
 

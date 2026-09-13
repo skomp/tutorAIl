@@ -3,7 +3,9 @@
 
 Run it with:  python3 tests/test_catalogs.py
 
-No pytest, no PyYAML, and NO NETWORK. Nothing here contacts a host.
+No pytest and NO NETWORK - nothing here contacts a host. PyYAML may or
+may not be installed; it makes no difference, because the scripts never
+use it (tutorAIl#29).
 
 The point of this suite is not to show the script working. Every failure kind
 gets a fixture that makes it fire, with a message a learner could act on, and
