@@ -25,8 +25,8 @@ no app, no server, and no model API key.
 
 ## Quick start
 
-**Prerequisites:** Claude Code or Codex, Python 3 and `git` (the two scripts need nothing
-else — no PyYAML), plus whatever toolchain the course you pick requires.
+**Prerequisites:** Claude Code or Codex, Python 3 and `git` — the scripts need nothing
+beyond the standard library — plus whatever toolchain the course you pick requires.
 
 ### Install — Claude Code
 
@@ -94,7 +94,19 @@ progress file, and resumes at the pending task — in a brand new conversation, 
    and hands back one correction, and does not repair the work.
 7. **Progress is written down** once you have demonstrated it, and the loop repeats.
 
-Two properties fall out of this. Progress lives in your repository rather than in a chat
+Two things interrupt that loop on purpose. The tutor may **offer a side trail** the author
+wrote for the moment you have reached, which you can decline and still finish the course.
+And if you are blocked on something the course never teaches, it may **write a detour** and
+then send you back to the exact lesson you left, progress intact. Being stuck on the
+current lesson's own subject is different, and deliberately so: asking for a lesson on what
+the exercise exists to make you work out is the answer with extra steps. What you get
+instead is help that escalates while ownership does not — the goal restated, then what you
+expected against what happens, then the concept named, then the one line that is wrong,
+then the smallest true statement that unblocks. If that runs out, the tutor says plainly
+that it can show you the solution and waits for you to ask; whether it may answer at all is
+the course's `solution_code` setting.
+
+Two further properties fall out of this. Progress lives in your repository rather than in a chat
 log, so a fresh session resumes correctly. And the tutor holds one lesson at a time — not
 the course — so a 23-lesson course costs the same per turn as a 3-lesson one.
 
@@ -145,17 +157,19 @@ Six courses exist today. One ships with the plugin; the other five live in
 [`skomp/tutorail-bundles`](https://github.com/skomp/tutorail-bundles) and arrive when you
 register that repository as a catalogue.
 
-`Scope` is the course's own declared scope, derived from the length of its lesson list.
-There is no other duration estimate, and none is implied.
+`Scope` comes from the catalogue entry, not from the course manifest, which has no field
+for it. Its lesson count is derived from the manifest's lesson list; the rough duration
+beside it is the author's own estimate. There is no other duration figure anywhere, and
+none is implied.
 
 | Course | What you build | Language | Level | Scope | Where |
 |---|---|---|---|---|---|
 | Rust Fundamentals Through a Command-Line Tool | A tool that counts the lines or words in a file — arguments, one subcommand, `Result`, a unit test. No crates. | Rust | beginner | 3 lessons; a few hours | [ships with the plugin](skills/tutorail/examples/rust-cli-basics) |
-| Build a Durable Event Broker in Go | A persistent, partitioned event broker from first principles, then batching, retention, observability and a deliberately limited follower. | Go | intermediate-to-advanced | 15 lessons; a few weeks | `tutorail-bundles` |
-| Make Music with Integer Arithmetic | A Bytebeat synthesiser that turns integer expressions into a valid WAV file. | TypeScript, JavaScript, Python, Go or Kotlin | beginner-to-intermediate | 4 lessons; a few days | `tutorail-bundles` |
-| Build a Fixed-Window Rate Limiter | A small in-memory rate limiter with an explicit contract and deterministic time. | your choice | intermediate | 3 lessons; a few hours | `tutorail-bundles` |
-| Learn Rust by Building AutomatonDB | An automaton-native, partitioned database with storage-engine and distributed-systems depth. | Rust | intermediate-to-advanced | 23 lessons; months of work | `tutorail-bundles` |
-| Learn WebGL 2 by Building a 3D Scene | An interactive, lit and textured 3D scene, from the rendering pipeline up to a loaded glTF model. | TypeScript | intermediate | 18 lessons; months of work | `tutorail-bundles` |
+| Build a Durable Event Broker in Go | A persistent, partitioned event broker from first principles, then batching, retention, observability and a deliberately limited follower. | Go | intermediate-to-advanced | 15 lessons; a few weeks | [`tutorail-bundles`](https://github.com/skomp/tutorail-bundles) |
+| Make Music with Integer Arithmetic | A Bytebeat synthesiser that turns integer expressions into a valid WAV file. | TypeScript, JavaScript, Python, Go or Kotlin | beginner-to-intermediate | 4 lessons; a few days | [`tutorail-bundles`](https://github.com/skomp/tutorail-bundles) |
+| Build a Fixed-Window Rate Limiter | A small in-memory rate limiter with an explicit contract and deterministic time. | your choice | intermediate | 3 lessons; a few hours | [`tutorail-bundles`](https://github.com/skomp/tutorail-bundles) |
+| Learn Rust by Building AutomatonDB | An automaton-native, partitioned database with storage-engine and distributed-systems depth. | Rust | intermediate-to-advanced | 23 lessons; months of work | [`tutorail-bundles`](https://github.com/skomp/tutorail-bundles) |
+| Learn WebGL 2 by Building a 3D Scene | An interactive, lit and textured 3D scene, from the rendering pipeline up to a loaded glTF model. | TypeScript | intermediate | 18 lessons; months of work | [`tutorail-bundles`](https://github.com/skomp/tutorail-bundles) |
 
 ### Registering the bundles repository
 
@@ -172,11 +186,15 @@ you what arrived. A catalogue may also be a plain file on disk, and a private re
 needs no extra setup — fetching uses the Git credentials you already have. TutorAIl stores
 no tokens and never prompts for one.
 
-You can inspect the result yourself without fetching anything:
+The tutor can show you what is registered at any point, and from a checkout of this
+repository you can run the same thing yourself without fetching anything:
 
 ```
 python3 skills/tutorail/scripts/catalogs.py status
 ```
+
+An installed plugin carries the same scripts inside its own directory rather than at that
+path, so ask the tutor unless you have the repository cloned.
 
 `discover` refreshes and lists; `resolve`, `covers`, `follow-ups` and `prepare` answer
 "which course is this", "who teaches this concept", "what comes next" and "what should I
@@ -196,7 +214,7 @@ progress. This is the shipped example, in full:
 ```
 rust-cli-basics/
 ├── tutorial.yaml        manifest: id, subjects, ordered lessons, optional lessons,
-│                        validators, ownership, supplied files
+│                        failure modes, validators, ownership
 ├── COURSE.md            goal, teaching philosophy, chapter map, coverage list
 ├── DESIGN.md            durable subject decisions, anchored per section
 ├── STATE.template.md    the shape a fresh learner starts in
@@ -233,15 +251,24 @@ before the first task — so a defect in a course is found by the runner rather 
 learner five lessons in.
 
 **Ownership is declared, not assumed.** The manifest names tutor-owned and learner-owned
-paths and an `ownership_policy`. Under the default policy the tutor will not edit a
-learner-owned path — not when it would be faster, not when you are stuck, not for a
-trivial one-line fix. A compiler error is part of the course. The narrow exceptions are a
-policy that permits it and you explicitly asking, and placing files the bundle declares it
-`supplies` (a dataset, a starting config), which is setup rather than your work.
+paths and an `ownership_policy`, which every course must state — there is no default. Under
+`tutor-must-not-edit-learner-owned`, the normal choice and what four of the six courses
+above declare, the tutor will not edit a learner-owned path: not when it would be faster,
+not when you are stuck, not for a trivial one-line fix. A compiler error is part of the
+course.
+
+The other two values relax that deliberately. `on-request` lets the tutor edit your files
+when you ask it to — the two portable courses use it so the tutor can build the project
+skeleton once you have chosen a language, and each states in its own lesson exactly how far
+that reaches. `unrestricted` needs no asking at all and is for courses where you are not
+writing the artefact. Whatever the policy, a file the bundle declares it `supplies` (a
+dataset, a starting config) is placed as setup rather than assigned as your work, and
+placement never overwrites a file that already exists.
 
 **What loads each turn** is the runner file, the manifest, your `STATE.md`, the one active
-lesson, and the design sections that lesson cites by anchor. Not `COURSE.md`, not a
-completed lesson, not the rest of the course. That budget is the reason the format exists.
+lesson, the design sections that lesson cites by anchor, and the files in your workspace the
+current task actually concerns. Not `COURSE.md`, not a completed lesson, not the rest of the
+course. That budget is the reason the format exists.
 
 The normative detail is in the reference documents, which the tutor loads only when it
 needs them:
@@ -288,6 +315,11 @@ older runner — which ignores the offers entirely — from teaching a broken co
 interview-driven skill and toolkit for writing and maintaining bundles, and a course-quality
 checker. It calls this repository's validator, so install the runner first.
 
+If you have built something worth teaching, the format is how you hand it over: the
+sequence you would put someone through, the mistakes worth anticipating, and the checks
+that say a step is genuinely done. What you get back is not a document people skim, but a
+course that walks a learner through building it themselves.
+
 ---
 
 ## Project status
@@ -331,8 +363,11 @@ section 17 of the design specification has the detail. The `~/.agents/skills/` s
 the supported route until that is resolved.
 
 **The two hosts do not run the same copy.** Claude Code installs a published version from
-the marketplace: it changes only when you run `claude plugin update tutorail@tutorail`,
-and it never contains uncommitted work. Codex follows the symlink into a checkout, so it
+the marketplace: it changes only when you update it, and it never contains uncommitted
+work. Updating takes both commands — `claude plugin marketplace update tutorail && claude
+plugin update tutorail@tutorail` — because the second alone compares manifest *versions*,
+not commits, and will report you are already current while the new work sits unreachable
+behind the old version number. Codex follows the symlink into a checkout, so it
 runs whatever is currently checked out there — including a half-finished edit mid-save.
 That is why the Codex instructions above clone to `~/.local/share/tutorail` rather than to
 a directory you work in. If you *are* developing the runner, point the symlink at your
@@ -342,15 +377,23 @@ One skill body serves both hosts.
 
 ### Tests
 
-No pytest; two plain scripts, both currently passing.
+No pytest; two plain scripts, run from a checkout of this repository.
 
 ```
 python3 tests/test_validate_bundle.py     # 614 assertions
 python3 tests/test_catalogs.py            # 338 assertions
 ```
 
-Every validator check and every catalogue failure kind is proven firing, because a check
-that cannot report a positive is worse than no check.
+Every validator check and every catalogue failure kind is proven firing — or, for the two
+that only ever warn, proven warning — because a check that cannot report a positive is
+worse than no check.
+
+**Both suites pass against the built-in YAML reader, and some assertions fail when PyYAML
+is installed.** The scripts need nothing beyond the standard library, but `yamlite` prefers
+PyYAML when it can import it, and the two readers word their errors differently. The
+verdict a bundle gets should be a property of the bundle and not of the machine, which is
+[tutorAIl#29](https://github.com/skomp/tutorAIl/issues/29). Until that is settled, the
+suites describe the built-in reader.
 
 ### Contributing
 
