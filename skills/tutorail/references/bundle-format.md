@@ -279,6 +279,18 @@ chooses, selects `on-request` and has the tutor ask before it builds anything. T
 real and is stated where that value is defined: the relaxation holds for the whole course,
 not for the one lesson that needed it.
 
+**So say in the lesson what the tutor may create, and where it stops.** The policy value
+is course-wide, and the lesson that needed the relaxation is the only place the promise
+`COURSE.md` makes to the learner can still be kept. Name the limit, not only the
+permission: "the tutor may set the project up" grants nothing the policy had not granted
+already, and leaves a tutor reading it three lessons later no edge to stop at.
+`portable-fixed-window-rate-limiter` in `skomp/tutorail-bundles` is the worked example.
+Its `COURSE.md` promises that the learner "writes every implementation"; its
+`ownership_policy` is `on-request` so the tutor can offer to build the project skeleton;
+and one clause in the first lesson's *Suggested progression* holds the two together —
+the tutor creates "the skeleton only, never any part of the limiter, which stays theirs
+to write."
+
 **Ownership globs are relative to the learner's workspace, not to the bundle.** They
 describe the world *after* materialization, when the bundle has been copied into
 `<workspace>/tutorial/` and sits beside the learner's own files. So `tutorial/STATE.md`
@@ -1063,6 +1075,21 @@ replication, and so on. For a compiler course: the IR shape, the calling convent
 
 This is subject knowledge, not learner progress.
 
+**It is read by the tutor, and by nobody else.** A lesson's `design_refs` pulls the named
+sections into the tutor's context and stops there: `runner-protocol.md` section 1 loads
+"only the `DESIGN.md` sections whose anchors are listed in that lesson's `design_refs`",
+and marks `DESIGN.md` in full as "never". The instance's copy is `tutor_owned` (section
+2), and nothing in this format or the protocol tells the tutor to pass a definition on. A
+term defined only in an anchor therefore reaches the learner when the tutor happens to
+explain it and otherwise not at all — a shipped course put two symbols in one anchor and
+nowhere else, and a learner met one of them six times across three lessons and its partner
+never.
+
+So define a term where its reader is. An anchor is the right home for the reasoning behind
+a decision, which the tutor needs in order to teach it and to judge an answer against it.
+It is the wrong home for a term the learner must understand at the first task: that one
+belongs in `COURSE.md` or in the lesson, which is what the learner reads.
+
 **Every section MUST have a stable anchor**, because lessons reference sections
 individually and the tutor loads only the ones a lesson needs:
 
@@ -1273,6 +1300,9 @@ Material available if the learner asks. Not required.
 `design_refs` is how a lesson stays cheap. A lesson about splitting a file into a
 library declares only the anchors it truly needs. It does not pull in storage,
 networking or replication design that belongs to a later chapter. List the minimum.
+
+Listing an anchor puts the section in front of the **tutor**, and no further (section 4).
+A term the learner has to understand is defined where the learner reads.
 
 ### Writing an optional lesson
 
@@ -1593,6 +1623,8 @@ Confirm each of these by looking, not by remembering:
       is fine: "while the refactor is in progress" is teaching, not progress.
 - [ ] every foldered lesson's body is named `LESSON.md` in exact case — confirm with a
       directory listing, because a case-insensitive filesystem will hide a mistake
+- [ ] if `ownership_policy` is `on-request`, the lesson that needed the relaxation says
+      what the tutor may create — naming the limit, not only the permission
 - [ ] `workspace_kind` is one of the three permitted values
 - [ ] no learner's source code appears anywhere in the bundle
 
