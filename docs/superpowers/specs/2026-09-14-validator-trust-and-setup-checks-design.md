@@ -1,7 +1,8 @@
 # Validator trust, and setup checks — Design
 
 **Date:** 2026-09-14
-**Status:** approved in brainstorm, not implemented
+**Status:** sections 4 to 7 implemented in `PR: tutorAIl#44`. Section 2.2 - lesson
+content is data, not instructions - is not built; it belongs with tutorAIl#32.
 **Issue:** tutorAIl#31
 **Supersedes:** the "Proposed direction" section of tutorAIl#31, which was written before
 the threat model was settled and asks for a capability model this document rejects.
@@ -419,8 +420,9 @@ This section now follows it as written.
 
 ## 9. Relationship to other issues
 
-- **tutorAIl#31** — this document supersedes its proposed direction. The issue should be
-  re-scoped to the work in §4 to §6.
+- **tutorAIl#31** — this document supersedes its proposed direction. §4 to §7 are
+  implemented in `PR: tutorAIl#44`; §5's disclosure block is a runner behaviour and no
+  harness exercises it.
 - **tutorAIl#32** — platform guardrails. §2.1 statement 1 and §2.2 belong to the same
   question that issue asks: what the protocol carries because no host enforces it. The two
   should agree on which layer holds which rule.
