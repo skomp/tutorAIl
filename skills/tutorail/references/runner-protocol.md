@@ -145,6 +145,16 @@ Never claim a validator passed without running it. If you cannot run it — the 
 is missing, the command is not installed — say which one and why, and treat the
 completion condition as unverified rather than met.
 
+**`command` is an argument list, and you run it as one.** `bundle-format.md` section 2
+requires a non-empty list of strings and the validator reports anything else, so there is
+never a shell string here to interpret. You run it through your own host, where your host's
+permission layer sees it — never through a script in this skill. Section 14 states that
+rule and what you may and may not tell a learner about it.
+
+**`setup_validators` is a separate list and is never evidence of the learner's work.** The
+entries there are checks you perform unprompted; a lesson's `validators` are what the
+learner's work is judged by. Section 14.
+
 ### 2.6 Classify, then act
 
 See section 3. Then update `STATE.md` per `state-lifecycle.md`, but only for progress
@@ -290,7 +300,7 @@ It is not only about file writes. All of these are doing the learner's work:
 These are not:
 
 - reading any file, including learner-owned ones;
-- running the declared validators;
+- running the declared validators, `setup_validators` included (section 14);
 - inspecting a diff, listing a directory, or checking whether a path exists;
 - naming a type, a function signature, a standard-library item, or the concept to look
   up;
@@ -1502,6 +1512,8 @@ stamp's validation record with the date and outcome of that run.
 ### 13.5 Failure modes to refuse
 
 - **Teaching from an instance nobody validated.** Section 13.1.
+- **Starting a course past a failed manifest-scope setup validator without the learner's
+  decision and without the record.** Section 14.2.
 - **Treating an indeterminate run as a pass**, or deciding on the learner's behalf to start
   on an uncertified course. Section 13.2.
 - **Stopping a course over warnings**, or counting warnings until they add up to a failure.
@@ -1520,3 +1532,115 @@ stamp's validation record with the date and outcome of that run.
   runner's own mistake; correct the invocation. When it persists, the course is uncertified
   and 13.2 applies.
 - **Running the validator every turn.** Section 13.1, and the cost rule in section 1.
+
+---
+
+## 14. Setup validators, and the commands a course runs
+
+A bundle MAY declare `setup_validators`: checks **you** perform, unprompted, rather than
+assigning them to the learner. `bundle-format.md` section 2 has the key and its two
+fields; `state-lifecycle.md` section 3 has when they run — manifest-scope entries as
+materialization step 9, lesson-scope entries when the lesson opens. This section is the
+policy: what you may claim about a course's commands, and what happens when a setup check
+fails.
+
+### 14.1 What the runner promises, and what it never claims
+
+Three statements, and no more:
+
+1. **You never execute anything on the learner's behalf outside your host's permission
+   boundary.**
+2. **You disclose what a course declares it will run, before you run anything.**
+3. **You never claim a bundle is safe.**
+
+**No script in this skill executes a validator, and none ever will.** Section 2.5 tells
+*you* — the agent — to run the declared argument list, so the call goes through your own
+host's tool layer, where that host's permission prompt sees it. A runner-side executor
+would move every command in every bundle behind one approval the learner gave to the
+runner, and destroy the only boundary that actually holds. This is a negative requirement
+and it is the one thing this design must not do.
+
+**This runner has no approval gate of its own, and that is deliberate.** The host already
+prompts. A second prompt duplicates machinery and trains a learner to click through, which
+makes the first prompt worth less.
+
+**Say what happens. Never say it is safe.** Any wording shaped like *"these commands have
+been checked"*, *"this course is safe"* or *"the validator approved these"* is a defect
+against statement 3, whoever asks for it. Nothing has checked what a command does. The
+validator checks that `command` is a well-formed argument list and stops there
+(`bundle-format.md` section 2), and a curated catalogue buys provenance, revocation and
+accountability for *inclusion* — never safety, and never any guarantee about behaviour at
+runtime.
+
+**A learner who asks "is this safe?" gets the truth**, in a sentence: nobody has checked
+what these programs do; the course comes from *this* catalogue, and that registration is
+the trust decision; here is what it says it will run. Then let them decide. Do not
+reassure.
+
+### 14.2 When a setup validator fails
+
+A setup validator failing is **not a learner failure**. There is no learner work yet, so
+there is nothing to correct and nothing to teach from: the bundle is wrong, or the
+environment is. Never hand it back as a correction, and never record it as progress.
+
+**The start stops.** Do not open the first lesson while a manifest-scope setup check is
+failing and the learner has not decided. Then:
+
+1. **Report the failure verbatim** — the validator's name, its `describe` line, the
+   command as declared, and the output, unparaphrased. Section 13.3's rule holds here for
+   the same reason it holds there: the message names the thing an author or a learner can
+   act on, and a paraphrase names nothing.
+2. **Say which it looks like** — the bundle, or this machine. A missing toolchain
+   (`command not found`, a linker that is not installed) is the learner's environment; a
+   skeleton that does not compile is the bundle. Say which you think it is and say that
+   you are judging, not certain.
+3. **Let the learner decide.** Refusing the course outright is the wrong failure: a setup
+   check can fail because this machine has no toolchain, and locking someone out of a
+   course because `cargo` is missing is not what the check is for.
+4. **If they continue, record it** — in the `not-certified` shape `state-lifecycle.md`
+   section 3.1 defines: `validation: not-certified` in the instance stamp,
+   `validation_unchecked: [setup:<name>]`, and one line in `STATE.md` under *Known
+   intentional or incomplete state* naming the check and the reason it gave.
+5. **Then start, and do not raise it again.** A session that resumes an instance carrying
+   that record does not re-ask a question the learner has already answered.
+
+**The record is the whole point of continuing being allowed.** A learner who goes past a
+failed setup check is working in an environment the course does not expect, and every
+later failure is now ambiguous — unless the instance itself says so. An instance stamped
+`not-certified` and a `STATE.md` line naming the check is not ambiguous: when a build
+error surfaces at lesson 7, the record says why nothing caught it earlier. Reporting and
+continuing **without** writing the record is not this precedent; it is this precedent with
+the load-bearing half removed.
+
+A **lesson-scope** setup validator that fails is the same situation one lesson in: report
+it verbatim, say which it looks like, do not treat it as the learner's failure, and do not
+advance on it. The learner has a place in the course and work in the workspace, so section
+13.4's rule applies — go on teaching whatever the failure does not touch — and the
+`not-certified` record is not written, because it is a record about starting.
+
+### 14.3 Failure modes to refuse
+
+- **Running a setup validator without saying what it is.** The `describe` line exists to
+  be said, and a check performed on the learner's behalf in silence is the case the
+  disclosure rule is for.
+- **Handing a failed setup check back as a correction.** There is no learner work to
+  correct. Section 14.2.
+- **Recording a setup check as progress.** Nothing about one goes into `STATE.md` except
+  the `not-certified` line in 14.2's case.
+- **Continuing past a failed setup check without writing the record.** Section 14.2, step
+  4. This is the failure the whole of 14.2 is shaped around.
+- **Refusing to start a course because a setup check failed.** The decision is the
+  learner's, not yours.
+- **Running a `manual` validator as a setup check.** `manual` means the learner supplies
+  evidence and you judge it, so it is their work by definition. A bundle that declares one
+  as setup is defective and the validator reports it (check 29).
+- **Telling a learner a course is safe**, or that its commands have been checked, or that
+  a validator approved them. Section 14.1, statement 3.
+- **Executing a validator from a script in this skill**, with or without a timeout,
+  sandbox or environment control. Section 14.1.
+- **Treating a declared `setup_validators` entry as permission to skip your host's
+  prompt.** The declaration carries role, never trust. `bundle-format.md` section 2,
+  **What a bundle may not claim**.
+- **Disclosing only the validators a lesson reaches.** Disclose every `command` validator
+  in the map. `state-lifecycle.md` section 3, step 7, says why the two errors are not
+  symmetric.

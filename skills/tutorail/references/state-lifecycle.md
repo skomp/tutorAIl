@@ -171,6 +171,55 @@ Steps, in order:
    are MUST fields, so every bundle, including every one published before
    `teaching_method` existed, has a banner to draw without an edit.
 
+   **Then the disclosure block, below the banner's sentences.** The learner is told at this
+   step and the first command runs at step 9 — *disclose, then act*. Two parts, each drawn
+   only when the manifest gives it something to say:
+
+   ```
+   This course runs programs on your machine: cargo, git
+
+   Before the first lesson it will run one itself:
+     cargo check — confirms the placed skeleton compiles
+   ```
+
+   - **The distinct programs.** `argv[0]` of every `command` validator in the manifest's
+     `validators` map, de-duplicated, in the order the map declares them. Drawn when the
+     map holds at least one `command` validator. This is the part a learner can judge
+     before reading a single lesson: `cargo, git` is unremarkable, `curl` is a reason to
+     stop. Do not dump the full argument lists here — that is noise a learner cannot
+     evaluate, and the programs are the part they can.
+   - **What you will run unprompted**, in full, each with its `describe` line. Drawn when
+     the manifest declares at least one `setup_validators` entry, **of any kind** — not
+     only `command`. A `file-exists` setup check also happens without the learner asking,
+     and what the disclosure is about is that something is unprompted, never that
+     something is risky.
+
+   The two conditions are independent. A course with command validators and no setup step
+   draws only the first part; a course whose only setup check is `file-exists` draws only
+   the second; a course with neither draws no block at all — the same pattern
+   `teaching_method` already uses, where the banner is one sentence shorter and nothing
+   warns.
+
+   **Disclose every `command` validator in the map, not only the ones a lesson reaches.**
+   Reachability is computable — a validator is reached by a lesson's `validators`, by
+   either `setup_validators`, or by a `failure_modes` signal — and computing it here is
+   still the wrong answer. It would create a second source of truth for the runner's own
+   dispatch logic, which then has to track it forever and fails silently when it does not.
+   **The accepted cost, stated so it is not rediscovered as a flaw: the block can name a
+   program this course never runs.** That was accepted deliberately, because the two errors
+   are not symmetric — over-disclosure makes the block slightly noisy, while
+   under-disclosure means a learner consented to something nobody told them about, and no
+   later correction reaches a consent already given.
+
+   **Lesson-scope `setup_validators` are not disclosed here.** They are announced when the
+   lesson opens, in the same breath as that lesson's supplies placement, using the same
+   `describe` line. Listing every setup check of every lesson at materialization would
+   restate the course's whole structure on a screen the learner meets before lesson one.
+
+   **The block states what happens. It never states that it is safe.** Nothing here has
+   checked a command, nothing can, and any wording shaped like *"these commands have been
+   checked"* is a defect — see `runner-protocol.md` section 14.
+
    Then report what was created — the instance path, the course title, the first lesson.
    The banner names the course; this says where it now lives and what happens next.
 8. **Place what the manifest supplies, then report it.** When `tutorial.yaml` declares
@@ -218,8 +267,30 @@ Steps, in order:
    exemption is create-only and covers declared paths only. A course written before the key
    existed gets one other, narrower exemption, and `runner-protocol.md` section 10.1 is
    where it is stated.
-9. **Show the assumed-concept review, if there is one.** When the manifest declares a
-   non-empty `assumes`, this is the moment: after placement, before the first task.
+9. **Run the manifest's setup validators, if it declares any.** When `tutorial.yaml`
+   declares `setup_validators` at the top level, run those checks now, in the order they
+   are listed: step 8 has placed the supplies, and verifying the placed skeleton is the
+   point. Say the entry's `describe` line before each one — the learner was told at step 7
+   that this would happen, and this is it happening.
+
+   **You run them yourself, as the agent, through your own host.** Nothing in this skill
+   executes a validator, and nothing in it ever will: the moment a script here ran a
+   bundle's command, the call would stop passing through the host's permission layer, and
+   that layer is the only boundary there is. `runner-protocol.md` section 14 states the
+   rule and why it is the one thing this design must not do.
+
+   **Nothing about a setup validator is progress.** Same rule `supplies` carries: nothing
+   is written to `STATE.md` for a setup check that passed, and none of it is a task the
+   learner completed.
+
+   **A setup validator that fails is not a learner failure**, and it never goes back as a
+   correction — there is no learner work yet to correct. It means the bundle or the
+   environment is wrong. Stop, and follow `runner-protocol.md` section 14.2: report it
+   verbatim, say whether the cause looks like the bundle or the machine, and let the
+   learner decide whether to go on. If they go on, **record the decision** as section 3.1
+   below describes. Do not start teaching on a failed setup check without that record.
+10. **Show the assumed-concept review, if there is one.** When the manifest declares a
+   non-empty `assumes`, this is the moment: after the setup checks, before the first task.
    `runner-protocol.md` section 11 has what it looks like and what the three answers are;
    section 10 of this document has the stamp it leaves. A course that declares no
    `assumes` skips this step entirely and leaves no stamp. Then start teaching.
@@ -296,21 +367,52 @@ instance:
   validated: 2026-09-12
   validation: pass            # pass | not-certified
   validation_warnings: 2      # omit the key when there were none
-  validation_unchecked: [1]   # only with not-certified: the checks that did not run
+  validation_unchecked: [1]   # only with not-certified: what did not run
 ```
 
-`validation: not-certified` is written in one case only — an exit 3 the learner decided to
-start on anyway (section 13.2 of `runner-protocol.md`). **A run that produced findings
-leaves no record at all.** That absence is deliberate and it is what closes the hole: an
-instance whose stamp carries no `validated` key has never been certified, so the next
-session that opens it runs the check before teaching rather than assuming a check that
-never happened.
+`validation: not-certified` is written in **two** cases, and in no others:
 
-Also write one line into `STATE.md` under *Known intentional or incomplete state* when the
-outcome was `not-certified`, naming the checks that did not run and the reason the
-validator gave. It is the one entry in that section that describes the course rather than
-the learner's code, and it earns its place: when a defect surfaces at lesson 7, the
-instance itself says why nothing caught it. A pass writes nothing into `STATE.md`.
+1. **an exit 3 the learner decided to start on anyway** (section 13.2 of
+   `runner-protocol.md`). `validation_unchecked` then holds the check numbers that did not
+   run — `[1]` above is check 1;
+2. **a manifest-scope setup validator that failed at step 9, which the learner decided to
+   continue past** (section 14.2 of `runner-protocol.md`). `validation_unchecked` then
+   holds an entry of the form `setup:<validator name>` for each failed setup check —
+   `validation_unchecked: [setup:cargo-check]`. The `setup:` prefix is the spelling
+   `failure_modes.signals` already uses for `validator:<name>`, and it is what keeps one
+   key readable when it carries both kinds: a bare number is a validator check, a prefixed
+   name is a setup validator.
+
+Case 2 amends a stamp that already exists, because step 9 runs after 3.1 has written one.
+An instance that passed validation and then failed a setup check has `validation` changed
+from `pass` to `not-certified` and the `setup:` entry added; `validated` keeps the date of
+the validator run, which is what it records.
+
+**A run that produced findings leaves no record at all.** That absence is deliberate and it
+is what closes the hole: an instance whose stamp carries no `validated` key has never been
+certified, so the next session that opens it runs the check before teaching rather than
+assuming a check that never happened.
+
+Also write one line into `STATE.md` under *Known intentional or incomplete state* whenever
+the outcome was `not-certified`, naming what did not run and the reason given — for case 1
+the checks and the validator's own reason, for case 2 the setup validator and the failure
+it reported. It is the one entry in that section that describes the course rather than the
+learner's code, and it earns its place: when a defect surfaces at lesson 7, the instance
+itself says why nothing caught it. A pass writes nothing into `STATE.md`.
+
+```
+## Known intentional or incomplete state
+
+- Setup check `cargo-check` failed at materialization and the course was started anyway:
+  `error: linker `cc` not found`. Nothing has confirmed the placed skeleton builds, so a
+  build failure in any lesson may predate the learner's work.
+```
+
+**Recording is not optional, and reporting without recording is not this precedent.**
+`not-certified` exists for the record, not for the permission: an instance whose stamp says
+`not-certified` and whose `STATE.md` names what did not run is the thing that makes a later
+failure legible. Continuing past a failed setup check without writing the record is this
+precedent with the load-bearing half removed.
 
 #### When the course does not start
 

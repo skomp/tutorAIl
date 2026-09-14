@@ -112,7 +112,8 @@ The loop in one screen:
    `design_refs`;
 4. inspect the learner's workspace files that the current task actually concerns;
 5. place anything that lesson declares in `supplies`, reporting what you placed and what
-   was already there and left alone — setup, never a task;
+   was already there and left alone — setup, never a task, and run anything it declares in
+   `setup_validators`, saying each entry's `describe` line first;
 6. give exactly one actionable task;
 7. take the learner's evidence, run the lesson's declared validators, classify the
    outcome;
@@ -239,7 +240,7 @@ not before.
 |---|---|
 | `references/catalogue-format.md` | no active instance was found and you must find a tutorial to offer; the learner asks what tutorials are available; the learner wants to add a catalogue or register a course; a catalogue failed to refresh |
 | `references/state-lifecycle.md` | materializing a new instance; the first time this session you are about to change `STATE.md`; a task completes; a lesson completes; an offer of an optional lesson is accepted or deferred; the learner acknowledges the assumed-concept review; you need to advance `active_lesson`; you are about to write a generated lesson |
-| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when a course declares `assumes`; when a course finishes or the learner asks what comes after it |
+| `references/runner-protocol.md` | before the first task of a teaching session; when validating; when completion conditions look met; when unsure whether an edit is yours to make; when considering whether to write a lesson; when deciding whether to offer or re-offer an optional lesson; when a course declares `assumes`; when a course declares `setup_validators`, or a setup check fails, or the learner asks whether a course is safe to run; when a course finishes or the learner asks what comes after it |
 | `references/bundle-format.md` | authoring, importing or repairing a **bundle**, including promoting a generated lesson into one. Not needed to teach. |
 
 Two scripts, and a learner's session runs both — each at one moment, never per turn.
@@ -249,6 +250,13 @@ the first task: a finding stops the course from starting, a warning never does, 
 indeterminate run is not a pass. `references/state-lifecycle.md` section 3.1 has the step,
 `references/runner-protocol.md` section 13 the outcomes and the report. It is the same
 script an author checks a bundle or a catalogue with.
+
+**Neither script ever runs a bundle's validator.** A `command` validator is an argument
+list that *you* run, through your own host, where your host's permission prompt sees it.
+Moving that into a script here would put every command in every bundle behind one approval
+the learner gave to the runner. `references/runner-protocol.md` section 14 has the rule,
+what a course discloses before it runs anything, and the one thing never to tell a learner:
+that a course is safe.
 
 ## When something is wrong
 
