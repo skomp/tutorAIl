@@ -254,6 +254,15 @@ Reachability is computable — a validator is reached by a lesson's `validators`
 drift out of step with the runner, and under-disclosure is the failure that matters.
 Over-disclosing an unused validator is wrong in the harmless direction.
 
+**The accepted cost, stated so it is not rediscovered as a flaw:** the banner can name a
+program this course never runs. That is the price of the rule and it was accepted
+deliberately, because the two errors are not symmetric. Over-disclosure makes a banner
+slightly noisy. Under-disclosure means a learner consented to something nobody told them
+about, and no later correction reaches a consent already given.
+
+Computing reachability would also create a second source of truth for the runner's dispatch
+logic, which has to track it forever and fails silently when it does not.
+
 An unreferenced validator is arguably worth a warning of its own. That is a separate
 concern and is not part of this design.
 
@@ -349,26 +358,48 @@ both PyYAML configurations, which is a meaningful statement since tutorAIl#29 la
 
 ---
 
-## 7. Open decision
+## 7. A failed setup validator stops the start and records the decision
 
 **What happens when a manifest-scope setup validator fails at materialization.**
 
-This design takes the softer answer: report the failure verbatim, say plainly that the
-course's own setup check did not pass and that this is the bundle's problem, and let the
-learner decide whether to continue. The nearest precedent is the `not-certified` path in
-`references/state-lifecycle.md` §3.1.
+The course does not start silently. The runner reports the failure verbatim, says whether
+the cause looks like the bundle or the learner's machine, and asks the learner to decide.
+If the learner chooses to continue, **the decision is recorded**, in the shape
+`references/state-lifecycle.md` §3.1 already defines for `not-certified`:
 
-The stricter answer is defensible and was not ruled out: refuse to start, matching *"a newly
-materialized instance does not pass validation — do not start the course."* The difference
-is real — a strict rule means one broken bundle blocks a learner completely.
+- `validation: not-certified` in the instance stamp,
+- `validation_unchecked:` naming the checks that did not run,
+- one line in `STATE.md` under *Known intentional or incomplete state*, naming the checks
+  and the reason the validator gave.
 
-The softer answer was chosen because a setup check can fail for a reason that is not the
-bundle's fault at all: the learner's machine lacking a toolchain. Locking someone out of a
-course because `cargo` is not installed is the wrong failure. This was flagged during the
-design session as the weakest part and was not contested; it should be revisited if a real
-course produces a case where continuing past a failed setup check misleads a learner.
+### Why this, and not either of the two answers the design session argued
 
----
+The choice was framed as soft — report and let the learner continue — against strict —
+refuse to start. Both arguments were right, and they are not in conflict, because they are
+about different things.
+
+The case for soft is lockout: a setup check can fail because the learner's machine has no
+toolchain, which is not the bundle's fault, and refusing a course because `cargo` is missing
+is the wrong failure.
+
+The case for strict is ambiguity: a learner who continues past a failed setup check is
+working in an environment the course does not expect, and **every later failure is now
+ambiguous**.
+
+The record answers the second without conceding the first. An instance whose stamp says
+`not-certified` and whose `STATE.md` names the checks that did not run is not ambiguous —
+when a defect surfaces at lesson 7, the instance itself says why nothing caught it. That is
+the reason `state-lifecycle.md` gives for the key, and it applies here unchanged.
+
+### A correction to how this design read its own precedent
+
+An earlier draft of this section called the `not-certified` path "the softer answer". It is
+not. `not-certified` is written in exactly one case — an exit 3 the learner decided to start
+on anyway — and its purpose is the record, not the permission. **Reporting and continuing
+without writing the record is not that precedent; it is that precedent with the load-bearing
+half removed.**
+
+This section now follows it as written.
 
 ## 8. Non-goals
 
@@ -396,4 +427,6 @@ course produces a case where continuing past a failed setup check misleads a lea
 - **tutorAIl#29** — landed. Validator names are now unique in every environment, which this
   design assumes when it says a `setup_validators` entry resolves a name in the map.
 - **tutorAIl#37** — the suite's assertion count varies with worktrees and sibling
-  repositories. §6.5's regression bar is harder to state precisely until that is fixed.
+  repositories. The worktree half is fixed in `PR: tutorAIl#40`; the sibling-repository half
+  is open, because dropping it changes what the suite covers. §6.5's regression bar can be
+  stated precisely for a checkout with no sibling present, and not otherwise.
