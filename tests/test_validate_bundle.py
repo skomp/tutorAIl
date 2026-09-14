@@ -6129,7 +6129,19 @@ def test_no_manifest_in_reach_gains_an_unknown_field_warning() -> None:
     of a real manifest and watches the same sweep report it.
     """
     print("\ncheck 28 warns about no manifest in reach:")
-    manifests = sorted(REPO.glob("**/tutorial.yaml"))
+    # `**` descends into `.claude/worktrees/`, and a git worktree under this
+    # checkout holds its own copy of tests/fixtures/ at a DIFFERENT revision.
+    # Counting those made the sweep validate bundles that are not in the commit
+    # under test, and made the suite's assertion total depend on how many
+    # worktrees the machine happens to have: 614 with none, 622 with one, 638
+    # with three, all at one commit. A reader who runs the suite and sees a
+    # different number could not tell a defect from a worktree. See tutorAIl#37.
+    in_repo = sorted(
+        m
+        for m in REPO.glob("**/tutorial.yaml")
+        if ".claude/worktrees/" not in m.as_posix()
+    )
+    manifests = list(in_repo)
     record(
         len(manifests) >= 8,
         f"the sweep found {len(manifests)} manifests in this repository",
@@ -6137,7 +6149,15 @@ def test_no_manifest_in_reach_gains_an_unknown_field_warning() -> None:
     )
     published = Path.home() / "src/github.com/skomp/tutorail-bundles"
     if published.is_dir():
-        manifests += sorted(published.glob("*/tutorial.yaml"))
+        from_published = sorted(published.glob("*/tutorial.yaml"))
+        manifests += from_published
+        # Say where the assertions come from. The sibling repository is a
+        # separate checkout at its own revision, so a total that silently mixes
+        # the two cannot be reproduced from this commit alone.
+        print(
+            f"  {len(in_repo)} manifests from this repository, "
+            f"{len(from_published)} from {published}"
+        )
     else:
         note(f"  SKIPPED: {published} is not present, so it was not checked")
         print(f"  skip {published} (not present)")
