@@ -30,6 +30,7 @@ never mutated in place: each case works on a fresh copy in a temp directory.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -46,6 +47,45 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 SCRIPT = REPO / "skills" / "tutorail" / "scripts" / "validate_bundle.py"
 FIXTURES = HERE / "fixtures"
+
+# Checkouts OUTSIDE this repository - the published bundles in
+# skomp/tutorail-bundles and the learner workspace in skomp/automaton-db -
+# are swept only when this is set. They are separate checkouts at their own
+# revisions, so sweeping them by default made the suite validate bundles that
+# are NOT in the commit under test, and made the assertion total depend on
+# which repositories the machine happens to hold: 606 without them and 628
+# with them, at one commit. A reader who saw one number where the README
+# quoted the other could not tell a defect from an absent sibling. The sweep
+# still finds real defects in those bundles, so it is opt-in rather than
+# gone, and what it finds is counted apart from the total. See tutorAIl#37.
+SIBLING_SWEEP_ENV = "TUTORAIL_SWEEP_SIBLING_REPOS"
+SWEEP_SIBLINGS = os.environ.get(SIBLING_SWEEP_ENV, "") not in ("", "0")
+
+
+def sibling_skip_reason(path: Path) -> str | None:
+    """Why this out-of-repository path is not swept, or None if it is.
+
+    A reason rather than a bool, because the skip line has to let a reader
+    tell "you did not ask for this sweep" from "you asked and the checkout
+    is not on this machine". Those are different facts about a green run.
+    """
+    if not SWEEP_SIBLINGS:
+        return f"{SIBLING_SWEEP_ENV} is not set"
+    if not path.exists():
+        return "not present"
+    return None
+
+
+def skip_reason(path: Path, outside: bool) -> str | None:
+    """Why this path is not swept, or None if it is.
+
+    `outside` says the path belongs to another checkout, which is the only
+    thing the opt-in gate applies to. A path in this repository is skipped
+    only when it is genuinely absent, and that should never happen.
+    """
+    if outside:
+        return sibling_skip_reason(path)
+    return None if path.exists() else "not present"
 
 sys.path.insert(0, str(SCRIPT.parent))
 import validate_bundle as vb  # noqa: E402
@@ -3246,6 +3286,11 @@ CASES: list[Case] = [
 _failures: list[str] = []
 _notes: list[str] = []
 _passed = 0
+# Assertions made against a checkout OUTSIDE this repository are counted
+# apart from the total, so the number this suite reports stays reproducible
+# from the commit under test alone whether or not the sweep is opted into.
+# The two are never added together (tutorAIl#37).
+_sibling_passed = 0
 _fired_checks: set[int] = set()
 # Checks demonstrated producing a WARNING. A warning-only check can never
 # appear in _fired_checks, so the coverage meta-test tracks the two
@@ -3255,6 +3300,25 @@ _warned_checks: set[int] = set()
 
 def note(text: str) -> None:
     _notes.append(text)
+
+
+@contextlib.contextmanager
+def sibling_assertions(active: bool = True):
+    """Count what this block asserts against the sibling total, not the total.
+
+    `active` is a parameter rather than a second context manager because the
+    sweeps interleave: one loop walks this repository's manifests and the
+    sibling checkout's, and only the second kind moves.
+    """
+    global _passed, _sibling_passed
+    before = _passed
+    try:
+        yield
+    finally:
+        if active:
+            moved = _passed - before
+            _passed -= moved
+            _sibling_passed += moved
 
 
 def record(ok: bool, label: str, detail: str = "") -> None:
@@ -3768,22 +3832,29 @@ def test_real_repositories() -> None:
             "bundle",
             Path.home()
             / "src/github.com/skomp/tutorail-bundles/rust-automaton-db",
+            True,
         ),
-        ("instance", Path.home() / "src/github.com/skomp/automaton-db/tutorial"),
-        ("bundle", REPO / "skills/tutorail/examples/rust-cli-basics"),
+        (
+            "instance",
+            Path.home() / "src/github.com/skomp/automaton-db/tutorial",
+            True,
+        ),
+        ("bundle", REPO / "skills/tutorail/examples/rust-cli-basics", False),
     ]
-    for mode, path in externals:
-        if not path.is_dir():
-            note(f"  SKIPPED: {path} is not present, so it was not checked")
-            print(f"  skip {path} (not present)")
+    for mode, path, outside in externals:
+        reason = skip_reason(path, outside)
+        if reason:
+            note(f"  SKIPPED: {path} ({reason}), so it was not checked")
+            print(f"  skip {path} ({reason})")
             continue
-        report = vb.validate(path, mode)
-        record(
-            report.exit_code() == 0,
-            f"{path} validates as a {mode}",
-            "; ".join(str(f) for f in report.findings)
-            or f"blocked = {report.blocked_checks}",
-        )
+        with sibling_assertions(outside):
+            report = vb.validate(path, mode)
+            record(
+                report.exit_code() == 0,
+                f"{path} validates as a {mode}",
+                "; ".join(str(f) for f in report.findings)
+                or f"blocked = {report.blocked_checks}",
+            )
 
 
 def test_mode_is_never_inferred() -> None:
@@ -5251,9 +5322,10 @@ def test_real_catalogue_gains_no_warning() -> None:
     describes. It must still validate at exit 0 with NO new warning.
     """
     print("\ncatalogue check 3 against the real generated catalogue:")
-    if not REAL_CATALOGUE.is_file():
-        note(f"  SKIPPED: {REAL_CATALOGUE} is not present, so it was not checked")
-        print(f"  skip {REAL_CATALOGUE} (not present)")
+    reason = sibling_skip_reason(REAL_CATALOGUE)
+    if reason:
+        note(f"  SKIPPED: {REAL_CATALOGUE} ({reason}), so it was not checked")
+        print(f"  skip {REAL_CATALOGUE} ({reason})")
         return
     raw = REAL_CATALOGUE.read_text()
     document = vb.load_yaml(raw, REAL_CATALOGUE.name)
@@ -5385,7 +5457,7 @@ def test_unknown_field_is_never_a_finding() -> None:
         *UNKNOWN_FIXTURES.values(),
         *TOP_LEVEL_FIXTURES.values(),
     ]
-    if REAL_CATALOGUE.is_file():
+    if not sibling_skip_reason(REAL_CATALOGUE):
         catalogues.append(REAL_CATALOGUE)
     # Both phrases are swept, and each is counted separately: a top-level
     # warning must not be able to stand in for the entry-level control, or
@@ -6148,7 +6220,12 @@ def test_no_manifest_in_reach_gains_an_unknown_field_warning() -> None:
         "the glob found almost nothing, so a clean sweep proves nothing",
     )
     published = Path.home() / "src/github.com/skomp/tutorail-bundles"
-    if published.is_dir():
+    from_published: list[Path] = []
+    reason = sibling_skip_reason(published)
+    if reason:
+        note(f"  SKIPPED: {published} ({reason}), so it was not checked")
+        print(f"  skip {published} ({reason})")
+    else:
         from_published = sorted(published.glob("*/tutorial.yaml"))
         manifests += from_published
         # Say where the assertions come from. The sibling repository is a
@@ -6158,23 +6235,21 @@ def test_no_manifest_in_reach_gains_an_unknown_field_warning() -> None:
             f"  {len(in_repo)} manifests from this repository, "
             f"{len(from_published)} from {published}"
         )
-    else:
-        note(f"  SKIPPED: {published} is not present, so it was not checked")
-        print(f"  skip {published} (not present)")
 
     for manifest in manifests:
         root = manifest.parent
         mode = "instance" if (root / "STATE.md").is_file() else "bundle"
-        report = vb.validate(root, mode)
-        warned = _warnings_for(report, 28)
-        state, detail = report.status.get(28, ("missing", ""))
-        record(
-            not warned and state == vb.RAN,
-            f"{root.name} ({mode}): check 28 ran and warned about nothing "
-            f"({detail})",
-            f"status = {(state, detail)!r}, warnings = "
-            f"{[str(w) for w in warned]}",
-        )
+        with sibling_assertions(manifest in from_published):
+            report = vb.validate(root, mode)
+            warned = _warnings_for(report, 28)
+            state, detail = report.status.get(28, ("missing", ""))
+            record(
+                not warned and state == vb.RAN,
+                f"{root.name} ({mode}): check 28 ran and warned about nothing "
+                f"({detail})",
+                f"status = {(state, detail)!r}, warnings = "
+                f"{[str(w) for w in warned]}",
+            )
 
     # The positive control for the sweep itself.
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -6206,31 +6281,37 @@ def test_no_real_bundle_ships_a_stamped_template() -> None:
     needle = vb.ASSUMES_REVIEWED
     record(bool(needle), "the search term is non-empty", f"needle = {needle!r}")
 
+    published = Path.home() / "src/github.com/skomp/tutorail-bundles"
     bundles = [
-        REPO / "skills/tutorail/examples/rust-cli-basics",
-        Path.home() / "src/github.com/skomp/tutorail-bundles/rust-automaton-db",
-        Path.home() / "src/github.com/skomp/tutorail-bundles/webgl-typescript-scene",
-        FIXTURES / "durable-event-broker",
-        FIXTURES / "streaming-query-engine",
-        FIXTURES / "event-stream-recipes",
+        (REPO / "skills/tutorail/examples/rust-cli-basics", False),
+        (published / "rust-automaton-db", True),
+        (published / "webgl-typescript-scene", True),
+        (FIXTURES / "durable-event-broker", False),
+        (FIXTURES / "streaming-query-engine", False),
+        (FIXTURES / "event-stream-recipes", False),
     ]
-    for path in bundles:
-        if not path.is_dir():
-            note(f"  SKIPPED: {path} is not present, so it was not checked")
-            print(f"  skip {path} (not present)")
+    for path, outside in bundles:
+        reason = skip_reason(path, outside)
+        if reason:
+            note(f"  SKIPPED: {path} ({reason}), so it was not checked")
+            print(f"  skip {path} ({reason})")
             continue
-        report = vb.validate(path, "bundle")
-        hits = [f for f in report.findings if f.check == 26]
-        record(
-            not hits and report.status.get(26, ("missing", ""))[0] == vb.RAN,
-            f"{path.name}: check 26 ran and reported nothing",
-            f"status = {report.status.get(26)!r}, findings = "
-            f"{[str(f) for f in hits]}",
-        )
+        with sibling_assertions(outside):
+            report = vb.validate(path, "bundle")
+            hits = [f for f in report.findings if f.check == 26]
+            state = report.status.get(26, ("missing", ""))[0]
+            record(
+                not hits and state == vb.RAN,
+                f"{path.name}: check 26 ran and reported nothing",
+                f"status = {report.status.get(26)!r}, findings = "
+                f"{[str(f) for f in hits]}",
+            )
 
     # The positive control for the sweep above: plant the stamp in a copy of
     # a real template and confirm the same run reports it.
-    present = [p for p in bundles if p.is_dir()]
+    present = [
+        path for path, outside in bundles if not skip_reason(path, outside)
+    ]
     if present:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / "planted"
@@ -6244,6 +6325,36 @@ def test_no_real_bundle_ships_a_stamped_template() -> None:
                 "the sweep cannot report a positive, so its clean results "
                 "prove nothing",
             )
+
+
+def test_the_total_is_reproducible_from_this_commit() -> None:
+    """The reported total must not depend on what else the machine holds.
+
+    Run last, because it reads the counter every other sweep writes to. The
+    defect it guards is tutorAIl#37: the suite reported 606 assertions on a
+    machine without skomp/tutorail-bundles and 628 on a machine with it, at
+    one commit, and README.md quoted one of the two.
+
+    The second assertion is the positive control for the gate. A directory
+    that certainly exists is still refused while the sweep is off, so the
+    gate is proved to decide by the environment variable rather than by
+    what happens to be present - which is the whole point of it.
+    """
+    print("\nthe reported total is reproducible from this commit:")
+    record(
+        SWEEP_SIBLINGS or _sibling_passed == 0,
+        "with the sibling sweep off, nothing outside this repository is "
+        "counted in the total",
+        f"_sibling_passed = {_sibling_passed}, which the total excludes",
+    )
+    reason = sibling_skip_reason(REPO)
+    record(
+        (reason is None) == SWEEP_SIBLINGS,
+        f"an existing directory is swept only when {SIBLING_SWEEP_ENV} says "
+        f"so (here: {'swept' if SWEEP_SIBLINGS else 'skipped'})",
+        f"REPO exists = {REPO.exists()}, reason = {reason!r}, "
+        f"SWEEP_SIBLINGS = {SWEEP_SIBLINGS}",
+    )
 
 
 def test_check_coverage() -> None:
@@ -6285,6 +6396,10 @@ def main() -> int:
     print(f"  script:      {SCRIPT}")
     print(f"  yaml reader: {vb.YAML_READER}")
     print(f"  python:      {sys.version.split()[0]}")
+    print(
+        f"  siblings:    {'swept' if SWEEP_SIBLINGS else 'not swept'} "
+        f"({SIBLING_SWEEP_ENV})"
+    )
 
     print("\nbroken fixtures, each asserting its own check fires:")
     for case in CASES:
@@ -6312,7 +6427,8 @@ def main() -> int:
     test_catalog_unknown_top_level_field_warns_and_never_rejects()
     test_catalog_missing_top_level_field_is_still_a_finding()
     test_catalog_top_level_check_reads_keys_not_text()
-    test_real_catalogue_gains_no_warning()
+    with sibling_assertions():
+        test_real_catalogue_gains_no_warning()
     test_unknown_field_is_never_a_finding()
     test_run_case_checks_where()
     test_alias_normalisation_matches_the_runtime()
@@ -6326,6 +6442,7 @@ def main() -> int:
     test_a_misspelled_required_key_is_reported_twice()
     test_no_manifest_in_reach_gains_an_unknown_field_warning()
     test_no_real_bundle_ships_a_stamped_template()
+    test_the_total_is_reproducible_from_this_commit()
     test_check_coverage()
 
     if _notes:
@@ -6334,6 +6451,15 @@ def main() -> int:
             print(text)
 
     print()
+    # Said in both branches, and never added to the total: the sibling
+    # checkouts are at their own revisions, so an assertion about them is not
+    # an assertion about this commit (tutorAIl#37).
+    if _sibling_passed:
+        print(
+            f"{_sibling_passed} further assertions passed against sibling "
+            f"repositories outside this commit, because "
+            f"{SIBLING_SWEEP_ENV} is set. They are not in the count below."
+        )
     if _failures:
         print(f"FAILED - {len(_failures)} of {_passed + len(_failures)} assertions:")
         for text in _failures:

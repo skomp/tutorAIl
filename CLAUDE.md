@@ -65,6 +65,12 @@ Releasing is: bump all three, run both suites (`python3 tests/test_validate_bund
 The push is not optional: the marketplace source is the GitHub repository, so an unpushed
 bump is invisible to it.
 
+Run the validator suite once more with `TUTORAIL_SWEEP_SIBLING_REPOS=1` before you push a
+release. The plain run validates only this commit, by design (tutorAIl#37); that run also
+validates the published bundles in `skomp/tutorail-bundles`, which is the only place a
+format change is seen against real courses. It reports what it added on its own line and
+never folds it into the total.
+
 Minor for added format surface, patch for a fix. Verify by diffing the installed cache
 under `~/.claude/plugins/cache/tutorail/tutorail/<version>/` against the working tree —
 and probe for something the previous version lacks, so a silent no-op cannot pass as a
