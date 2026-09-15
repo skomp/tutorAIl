@@ -1,7 +1,8 @@
 # Validator trust, and setup checks — Design
 
 **Date:** 2026-09-14
-**Status:** approved in brainstorm, not implemented
+**Status:** sections 4 to 7 implemented in `PR: tutorAIl#44`. Section 2.2 - lesson
+content is data, not instructions - is not built; it belongs with tutorAIl#32.
 **Issue:** tutorAIl#31
 **Supersedes:** the "Proposed direction" section of tutorAIl#31, which was written before
 the threat model was settled and asks for a capability model this document rejects.
@@ -352,9 +353,16 @@ warning.
 
 ### 6.5 Regression bar
 
-All eight fixture bundles in this repository and the five in `skomp/tutorail-bundles` stay
-clean — none declares `setup_validators` and none should begin failing. Both suites pass in
-both PyYAML configurations, which is a meaningful statement since tutorAIl#29 landed.
+All eight fixture bundles in this repository stay clean — none declares
+`setup_validators` and none should begin failing. The five bundles in
+`skomp/tutorail-bundles` stay clean too, checked with
+`TUTORAIL_SWEEP_SIBLING_REPOS=1` (tutorAIl#43).
+
+The bar is one number, and it is the same number on every machine:
+**651 assertions** for `tests/test_validate_bundle.py` and **338** for
+`tests/test_catalogs.py`. Measured in six configurations — default, `HOME` pointed at an
+empty directory, sibling sweep on, and each of those with PyYAML blocked on `PYTHONPATH`.
+All six agree, which is what tutorAIl#29 and tutorAIl#37 together bought.
 
 ---
 
@@ -419,14 +427,120 @@ This section now follows it as written.
 
 ## 9. Relationship to other issues
 
-- **tutorAIl#31** — this document supersedes its proposed direction. The issue should be
-  re-scoped to the work in §4 to §6.
+- **tutorAIl#31** — this document supersedes its proposed direction. §4 to §7 are
+  implemented in `PR: tutorAIl#44`; §5's disclosure block is a runner behaviour and no
+  harness exercises it.
 - **tutorAIl#32** — platform guardrails. §2.1 statement 1 and §2.2 belong to the same
   question that issue asks: what the protocol carries because no host enforces it. The two
   should agree on which layer holds which rule.
 - **tutorAIl#29** — landed. Validator names are now unique in every environment, which this
   design assumes when it says a `setup_validators` entry resolves a name in the map.
-- **tutorAIl#37** — the suite's assertion count varies with worktrees and sibling
-  repositories. The worktree half is fixed in `PR: tutorAIl#40`; the sibling-repository half
-  is open, because dropping it changes what the suite covers. §6.5's regression bar can be
-  stated precisely for a checkout with no sibling present, and not otherwise.
+- **tutorAIl#37** — closed. The suite's assertion count no longer varies with worktrees or
+  with sibling repositories: the worktree half landed in `PR: tutorAIl#40`, the
+  sibling-repository half in `PR: tutorAIl#43`, which put five sweep sites behind
+  `TUTORAIL_SWEEP_SIBLING_REPOS` and counts them apart from the total. §6.5's regression bar
+  is therefore statable as a single number on any machine, which it was not when this
+  document was written.
+
+---
+
+## 10. The design in three diagrams
+
+These restate §4 to §7. They add nothing and decide nothing; where a diagram and the prose
+disagree, the prose is right and the diagram is a defect.
+
+**They live here and not in the references on purpose.** `references/runner-protocol.md`
+loads into the tutor's context before the first task of every teaching session, so a
+diagram there costs tokens for every learner on every lesson. This document is never loaded
+by the runner.
+
+### 10.1 Structure — role lives at the invocation site
+
+The single structural point of §4: both lists resolve names into the *same* `validators`
+map, so the same validator is the learner's evidence in one place and the tutor's setup
+check in another. That is why role cannot be a field on the definition.
+
+```mermaid
+classDiagram
+    direction LR
+
+    class Manifest {
+        validators : name to Validator
+        setup_validators : list of SetupEntry
+    }
+    class LessonFrontmatter {
+        validators : list of name
+        setup_validators : list of SetupEntry
+    }
+    class Validator {
+        kind : command, file-exists, file-contains, git-diff, manual
+        command : list of string
+    }
+    class SetupEntry {
+        name
+        describe
+    }
+
+    Manifest "1" *-- "0..*" Validator : declares
+    Manifest "1" *-- "0..*" SetupEntry : runs at step 9
+    LessonFrontmatter "1" *-- "0..*" SetupEntry : runs when the lesson opens
+    SetupEntry ..> Validator : resolves name, never manual
+    LessonFrontmatter ..> Validator : resolves name, learner evidence
+```
+
+### 10.2 Materialization — disclose, then act
+
+§5's ordering, which is fixed at both ends by the existing sequence. The learner is told at
+step 7 and the first command runs at step 9.
+
+```mermaid
+flowchart TD
+    S6["Step 6 - validate the instance"]
+    S7["Step 7 - banner, and DISCLOSE:<br/>the distinct programs the course runs<br/>what the tutor will run unprompted"]
+    S8["Step 8 - place manifest supplies"]
+    S9["Step 9 - run manifest setup_validators"]
+    D{"every setup check passed?"}
+    L["Open lesson 1"]
+    F["Section 14.2 - the start stops"]
+
+    S6 --> S7 --> S8 --> S9 --> D
+    D -- yes --> L
+    D -- no --> F
+```
+
+### 10.3 A failed manifest-scope setup check
+
+§7, as `runner-protocol.md` section 14.2 implements it. Note what the diagram does **not**
+contain: there is no edge from `Reported` or `AwaitingLearner` straight to `Teaching`.
+Continuing past a failed setup check is allowed; continuing without passing through
+`Recorded` is the failure the whole of section 14.2 is shaped around.
+
+```mermaid
+stateDiagram-v2
+    direction TB
+
+    [*] --> Running : step 9
+    Running --> Passed
+    Running --> Failed
+    Passed --> Teaching
+
+    Failed --> Reported : report verbatim, name the validator,<br>its describe line, the command, the output
+    Reported --> Judged : say which it looks like -<br>the bundle, or this machine
+    Judged --> AwaitingLearner : the start stops
+
+    AwaitingLearner --> Declined : learner stops
+    AwaitingLearner --> Recorded : learner continues
+    Recorded --> Teaching : validation not-certified,<br>validation_unchecked [setup name],<br>one STATE.md line
+
+    Teaching --> [*] : never re-asked on resume
+    Declined --> [*]
+
+    note right of Recorded
+        The record is why continuing is allowed.
+        Without it, every later failure is ambiguous.
+    end note
+```
+
+A lesson-scope setup check that fails is the same situation one lesson in, with two
+differences: no `not-certified` record is written, because that record is about *starting*;
+and section 13.4 applies, so teaching continues on whatever the failure does not touch.

