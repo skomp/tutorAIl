@@ -4047,10 +4047,12 @@ sys.path.insert(0, sys.argv[1])
 import yamlite
 
 try:
-    import yaml  # noqa: F401
+    import yaml
     importable = True
+    decoy = getattr(yaml, "__tutorail_decoy__", False)
 except Exception:
     importable = False
+    decoy = False
 
 CASES = [
     ("anchor", "base: &a\\n  x: 1\\ncopy: *a\\n"),
@@ -4059,7 +4061,8 @@ CASES = [
     ("plain scalars", "a: no\\nb: 0x10\\nc: 010\\nd: .inf\\ne: 1e3\\nf: 2026-09-13\\n"),
 ]
 
-out = {"yaml_importable": importable, "reader": yamlite.YAML_READER, "cases": {}}
+out = {"yaml_importable": importable, "decoy": decoy,
+       "reader": yamlite.YAML_READER, "cases": {}}
 for name, text in CASES:
     try:
         out["cases"][name] = ["parsed", repr(yamlite.load_yaml(text, "probe.yaml"))]
@@ -4118,8 +4121,24 @@ def test_yaml_reader_ignores_the_environment() -> None:
         blocker.mkdir()
         (blocker / "yaml.py").write_text('raise ImportError("blocked by the suite")\n')
 
+        # A yaml module that IMPORTS and answers wrongly. Without it, this
+        # block can only compare two identical environments on a machine with
+        # no PyYAML, and a reader that prefers PyYAML would pass (tutorAIl#47).
+        # The decoy is importable everywhere, so the guard fires everywhere.
+        decoy = root / "decoyyaml"
+        decoy.mkdir()
+        (decoy / "yaml.py").write_text(
+            "__tutorail_decoy__ = True\n"
+            "class YAMLError(Exception):\n    pass\n"
+            "def safe_load(*a, **k):\n"
+            "    return {'__decoy__': 'the reader consulted PyYAML'}\n"
+            "def load(*a, **k):\n"
+            "    return safe_load()\n"
+        )
+
         with_yaml = _run_yaml_probe(probe, blocker=None)
         without_yaml = _run_yaml_probe(probe, blocker=blocker)
+        with_decoy = _run_yaml_probe(probe, blocker=decoy)
 
     # Control. The block has to be shown working, or a green run below would
     # only mean the suite compared one configuration with itself.
@@ -4128,16 +4147,42 @@ def test_yaml_reader_ignores_the_environment() -> None:
         "the control run cannot import yaml (the block works)",
         "PYTHONPATH did not shadow PyYAML, so nothing was compared",
     )
+    # The decoy is the guard that fires on ANY machine. It imports, so a reader
+    # that prefers PyYAML reaches it; it answers with a sentinel, so consulting
+    # it is visible. Without this, a machine with no PyYAML compares two
+    # identical environments and a reintroduced preference passes (tutorAIl#47).
+    record(
+        with_decoy["yaml_importable"] is True and with_decoy["decoy"] is True,
+        "the decoy yaml module was importable by the probe (the guard is armed)",
+        f"decoy not reached: importable={with_decoy['yaml_importable']}, "
+        f"decoy={with_decoy['decoy']}",
+    )
+    record(
+        with_decoy["cases"] == without_yaml["cases"],
+        "an importable yaml module changes no answer: the reader never "
+        "consults it",
+        f"the decoy changed an answer, so the reader consulted PyYAML: "
+        f"{with_decoy['cases']!r}",
+    )
+    record(
+        not any(
+            "__decoy__" in repr(v) for v in with_decoy["cases"].values()
+        ),
+        "no answer carries the decoy's sentinel",
+        f"a sentinel reached a result: {with_decoy['cases']!r}",
+    )
+
     if with_yaml["yaml_importable"]:
         note(
-            "  (PyYAML is importable here, so the two probe runs really did "
-            "differ in their environment.)"
+            "  (real PyYAML is importable here, so the unblocked run is a "
+            "genuine third configuration.)"
         )
     else:
         note(
-            "  NOTE: PyYAML is NOT importable here, so the two probe runs had "
-            "the same environment and only the absolute expectations below "
-            "were exercised. Install PyYAML to exercise the comparison."
+            "  NOTE: real PyYAML is NOT importable here, so the unblocked run "
+            "matches the blocked one. The decoy run above is what makes this "
+            "block a guard on this machine rather than a comparison of one "
+            "configuration with itself."
         )
 
     for name, (kind, detail) in _YAML_PROBE_EXPECTED.items():
