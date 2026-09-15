@@ -1501,7 +1501,7 @@ real files. One repository cannot satisfy both without duplication.
 | `rust-automaton-db` bundle | **done** — imported, corrected, verified |
 | `automaton-db/tutorial/` instance + `STATE.md` | **done** — uncommitted |
 | Validator (`skills/tutorail/scripts/validate_bundle.py`) | **done** — 28 bundle checks + 7 catalogue checks |
-| Validator test suite | **done** — 628 assertions; every check proven firing or warning |
+| Validator test suite | **done** — 608 assertions on a clean checkout, the same on any machine; every check proven firing or warning. `TUTORAIL_SWEEP_SIBLING_REPOS=1` adds the published bundles, counted separately (tutorAIl#37) |
 | Optional lessons (`optional_lessons`, `failure_modes`) | **done** — 2026-09-12, §6; checks 18-21 |
 | First-load banner + `teaching_method` | **done** — 2026-09-13, released in 0.6.0; `state-lifecycle.md` §3 step 7, check 27; tutorAIl#23 |
 | Offer / defer / re-offer behaviour | **untested** — no harness exercises it; tutorAIl#22 |
