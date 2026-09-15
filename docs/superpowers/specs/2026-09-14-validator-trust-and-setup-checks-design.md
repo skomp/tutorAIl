@@ -432,3 +432,106 @@ This section now follows it as written.
   repositories. The worktree half is fixed in `PR: tutorAIl#40`; the sibling-repository half
   is open, because dropping it changes what the suite covers. §6.5's regression bar can be
   stated precisely for a checkout with no sibling present, and not otherwise.
+
+---
+
+## 10. The design in three diagrams
+
+These restate §4 to §7. They add nothing and decide nothing; where a diagram and the prose
+disagree, the prose is right and the diagram is a defect.
+
+**They live here and not in the references on purpose.** `references/runner-protocol.md`
+loads into the tutor's context before the first task of every teaching session, so a
+diagram there costs tokens for every learner on every lesson. This document is never loaded
+by the runner.
+
+### 10.1 Structure — role lives at the invocation site
+
+The single structural point of §4: both lists resolve names into the *same* `validators`
+map, so the same validator is the learner's evidence in one place and the tutor's setup
+check in another. That is why role cannot be a field on the definition.
+
+```mermaid
+classDiagram
+    direction LR
+
+    class Manifest {
+        validators : name to Validator
+        setup_validators : list of SetupEntry
+    }
+    class LessonFrontmatter {
+        validators : list of name
+        setup_validators : list of SetupEntry
+    }
+    class Validator {
+        kind : command, file-exists, file-contains, git-diff, manual
+        command : list of string
+    }
+    class SetupEntry {
+        name
+        describe
+    }
+
+    Manifest "1" *-- "0..*" Validator : declares
+    Manifest "1" *-- "0..*" SetupEntry : runs at step 9
+    LessonFrontmatter "1" *-- "0..*" SetupEntry : runs when the lesson opens
+    SetupEntry ..> Validator : resolves name, never manual
+    LessonFrontmatter ..> Validator : resolves name, learner evidence
+```
+
+### 10.2 Materialization — disclose, then act
+
+§5's ordering, which is fixed at both ends by the existing sequence. The learner is told at
+step 7 and the first command runs at step 9.
+
+```mermaid
+flowchart TD
+    S6["Step 6 - validate the instance"]
+    S7["Step 7 - banner, and DISCLOSE:<br/>the distinct programs the course runs<br/>what the tutor will run unprompted"]
+    S8["Step 8 - place manifest supplies"]
+    S9["Step 9 - run manifest setup_validators"]
+    D{"every setup check passed?"}
+    L["Open lesson 1"]
+    F["Section 14.2 - the start stops"]
+
+    S6 --> S7 --> S8 --> S9 --> D
+    D -- yes --> L
+    D -- no --> F
+```
+
+### 10.3 A failed manifest-scope setup check
+
+§7, as `runner-protocol.md` section 14.2 implements it. Note what the diagram does **not**
+contain: there is no edge from `Reported` or `AwaitingLearner` straight to `Teaching`.
+Continuing past a failed setup check is allowed; continuing without passing through
+`Recorded` is the failure the whole of section 14.2 is shaped around.
+
+```mermaid
+stateDiagram-v2
+    direction TB
+
+    [*] --> Running : step 9
+    Running --> Passed
+    Running --> Failed
+    Passed --> Teaching
+
+    Failed --> Reported : report verbatim, name the validator,<br>its describe line, the command, the output
+    Reported --> Judged : say which it looks like -<br>the bundle, or this machine
+    Judged --> AwaitingLearner : the start stops
+
+    AwaitingLearner --> Declined : learner stops
+    AwaitingLearner --> Recorded : learner continues
+    Recorded --> Teaching : validation not-certified,<br>validation_unchecked [setup name],<br>one STATE.md line
+
+    Teaching --> [*] : never re-asked on resume
+    Declined --> [*]
+
+    note right of Recorded
+        The record is why continuing is allowed.
+        Without it, every later failure is ambiguous.
+    end note
+```
+
+A lesson-scope setup check that fails is the same situation one lesson in, with two
+differences: no `not-certified` record is written, because that record is about *starting*;
+and section 13.4 applies, so teaching continues on whatever the failure does not touch.
