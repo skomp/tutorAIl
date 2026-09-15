@@ -385,9 +385,30 @@ One skill body serves both hosts.
 No pytest; two plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 668 assertions
+python3 tests/test_validate_bundle.py     # 651 assertions
 python3 tests/test_catalogs.py            # 338 assertions
 ```
+
+**Those two numbers are properties of this commit, not of your machine.** A clean
+checkout reports them on any machine. Nothing outside the checkout is validated by
+default, so a number you see that differs from a number printed here is a defect and
+not a missing directory.
+
+The deeper sweep is still available and still finds real defects. Setting
+`TUTORAIL_SWEEP_SIBLING_REPOS=1` also validates the published bundles in
+[`skomp/tutorail-bundles`](https://github.com/skomp/tutorail-bundles) and the learner
+workspace in `skomp/automaton-db`, when the machine holds them:
+
+```
+TUTORAIL_SWEEP_SIBLING_REPOS=1 python3 tests/test_validate_bundle.py
+```
+
+Those are separate checkouts at their own revisions, so what they contribute is
+reported on its own line and never added to the total above — `and 22 more against
+sibling repositories outside this commit` on the machine this was measured on. The
+headline stays 608 either way. Run it before publishing a bundle; a plain `python3
+tests/test_validate_bundle.py` is the check that a commit of *this* repository is
+sound.
 
 Every validator check and every catalogue failure kind is proven firing — or, for the two
 that only ever warn, proven warning — because a check that cannot report a positive is

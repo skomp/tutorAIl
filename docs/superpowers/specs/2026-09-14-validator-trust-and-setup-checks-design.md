@@ -353,9 +353,16 @@ warning.
 
 ### 6.5 Regression bar
 
-All eight fixture bundles in this repository and the five in `skomp/tutorail-bundles` stay
-clean — none declares `setup_validators` and none should begin failing. Both suites pass in
-both PyYAML configurations, which is a meaningful statement since tutorAIl#29 landed.
+All eight fixture bundles in this repository stay clean — none declares
+`setup_validators` and none should begin failing. The five bundles in
+`skomp/tutorail-bundles` stay clean too, checked with
+`TUTORAIL_SWEEP_SIBLING_REPOS=1` (tutorAIl#43).
+
+The bar is one number, and it is the same number on every machine:
+**651 assertions** for `tests/test_validate_bundle.py` and **338** for
+`tests/test_catalogs.py`. Measured in six configurations — default, `HOME` pointed at an
+empty directory, sibling sweep on, and each of those with PyYAML blocked on `PYTHONPATH`.
+All six agree, which is what tutorAIl#29 and tutorAIl#37 together bought.
 
 ---
 
@@ -428,10 +435,12 @@ This section now follows it as written.
   should agree on which layer holds which rule.
 - **tutorAIl#29** — landed. Validator names are now unique in every environment, which this
   design assumes when it says a `setup_validators` entry resolves a name in the map.
-- **tutorAIl#37** — the suite's assertion count varies with worktrees and sibling
-  repositories. The worktree half is fixed in `PR: tutorAIl#40`; the sibling-repository half
-  is open, because dropping it changes what the suite covers. §6.5's regression bar can be
-  stated precisely for a checkout with no sibling present, and not otherwise.
+- **tutorAIl#37** — closed. The suite's assertion count no longer varies with worktrees or
+  with sibling repositories: the worktree half landed in `PR: tutorAIl#40`, the
+  sibling-repository half in `PR: tutorAIl#43`, which put five sweep sites behind
+  `TUTORAIL_SWEEP_SIBLING_REPOS` and counts them apart from the total. §6.5's regression bar
+  is therefore statable as a single number on any machine, which it was not when this
+  document was written.
 
 ---
 
