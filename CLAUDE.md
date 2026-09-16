@@ -48,18 +48,35 @@ compares manifest versions, not commit shas: refreshing the marketplace pulls th
 commits and then reports the plugin as already current. Thirty commits sat unreachable
 behind 0.4.0 this way, and nothing reported a problem.
 
-The version lives in three files and they move together:
+The version lives in four files and they move together:
 
 | File | Read by |
 |---|---|
 | `.claude-plugin/marketplace.json` (`plugins[0].version`) | Claude Code, resolving the marketplace entry |
 | `.claude-plugin/plugin.json` | Claude Code, after install |
 | `.codex-plugin/plugin.json` | Codex |
+| `README.md`, the `Version N.N.N.` line | a person deciding whether to install |
 
-`claude plugin validate .` checks the first two agree. **Nothing checks the third** — the
-Codex manifest is the one to remember.
+`claude plugin validate .` checks the first two agree. **Nothing checks the third or the
+fourth.** The Codex manifest and the README line are the two to remember, and the README
+line is the easier to miss because it is prose rather than a manifest.
 
-Releasing is: bump all three, run both suites (`python3 tests/test_validate_bundle.py` and
+This table said *three files* until 0.8.0, and the README line was left at 0.7.0 through
+the bump. Nothing caught it: the validator passed, both suites passed, and the plugin
+installed. It was found by grepping the old version string across the repository
+afterwards — which is now a step rather than an accident:
+
+```bash
+grep -rn '0\.7\.0' --include='*.json' --include='*.md' --exclude=CLAUDE.md . \
+  | grep -v worktrees        # expect none
+```
+
+Run it with the version you are leaving, after the bump, and expect zero hits.
+`--exclude=CLAUDE.md` is load-bearing: the paragraph above names real version numbers, so
+without it this check reports a hit on its own documentation every time and teaches you to
+ignore it.
+
+Releasing is: bump all four, run both suites (`python3 tests/test_validate_bundle.py` and
 `python3 tests/test_catalogs.py` — there is no pytest here), commit, **push**, then
 `claude plugin marketplace update tutorail && claude plugin update tutorail@tutorail`.
 The push is not optional: the marketplace source is the GitHub repository, so an unpushed
