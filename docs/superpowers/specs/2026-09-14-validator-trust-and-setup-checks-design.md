@@ -272,6 +272,98 @@ concern and is not part of this design.
 The banner states what happens. It never states that it is safe. This is statement 3 of
 §2.1 applied at the only place the runner speaks to a learner about commands.
 
+### 5.4 The block is derived by the validator, not by the tutor
+
+**Added 2026-09-16, closing tutorAIl#45's deterministic half.**
+
+As written above, §5.1 is an instruction the tutor reasons through: collect every
+`command` validator, take `argv[0]`, deduplicate, decide which of two parts apply. Nothing
+in this repository could test whether it did that correctly, because the output is prose in
+a conversation.
+
+`validate_bundle.py --instance` already runs at **step 6**, immediately before step 7 draws
+the banner, and already prints a structured report the tutor reads (§13 of
+`runner-protocol.md`). It has the manifest parsed in hand. So the derivation moves there,
+and step 7 becomes *repeat the block the validator printed* rather than *derive the block*.
+
+This does not make the behaviour testable — it makes the **content** testable, and shrinks
+what is left to judgement. The remaining risk is a tutor that ignores a correct block, and
+no test here can catch that. Say so rather than claiming more.
+
+The report gains a section beside `target:` and `yaml reader:`:
+
+```
+disclosure:
+  programs:    cargo, git
+  unprompted:  cargo-check — confirms the placed skeleton compiles
+```
+
+and, when there is nothing to disclose, says so rather than omitting the section:
+
+```
+disclosure:  nothing to disclose (no command validator, no setup_validators)
+```
+
+Silence would be ambiguous: an absent section could mean "this course runs no programs" or
+"an older validator that does not emit this". A fact that reports itself only by absence is
+the same defect as a check that cannot report a positive.
+
+**Derivation rules.**
+
+- `programs` — `argv[0]` of every `kind: command` validator in the map, deduplicated, and
+  **sorted**. Sorted rather than declaration-order so the line is reproducible across
+  manifests differing only in ordering. Every command validator, per §5.2.
+- `unprompted` — manifest-scope `setup_validators` only, in declaration order, each as
+  `name — describe`. Lesson-scope entries stay excluded, for the reason §5.1 gives.
+- The two parts stay independently conditional, exactly as §5.1 defines them.
+
+**Derivation is defensive.** The report prints even when checks have found faults, so a
+`command` that is not a list of strings, or a setup entry naming a validator that does not
+exist, is **skipped** rather than crashed on. Checks 8 and 29 already report those, and
+disclosure must not re-report them.
+
+**Emitted in bundle mode too**, not only `--instance`. The protocol consumes it at step 6,
+but an author validating a bundle then sees what their course will tell learners it runs —
+which is the moment to notice `curl` in the list. No consumer is required to read it.
+
+**The validator's role widens, deliberately.** It now reports a fact the teaching loop
+uses, not only problems that gate. The report already carries `target:`, `yaml reader:` and
+per-check counts, so this is the same kind of line; and it keeps the validator the one
+script that reads a manifest authoritatively. No new script, so `SKILL.md`'s "two scripts,
+and a learner's session runs both" stays true.
+
+### 5.5 How the block is tested
+
+Every assertion reads the `disclosure:` section **parsed out of the report**, never the raw
+output. `cargo` appears in validator names and lesson prose, so a substring match on the
+whole report would pass for reasons unrelated to disclosure — the failure this repository
+already met once as a harness matching a message from the wrong file. The extraction helper
+carries its own control: given a report with no `disclosure:` section it must return
+nothing, rather than yielding the next section's lines.
+
+| Case | Positive control |
+|---|---|
+| both lines correct, command validators + a manifest setup entry | a fixture with neither produces neither |
+| `nothing to disclose` when the manifest declares neither | adding one command validator makes `programs` appear |
+| `programs` names a command validator no lesson references (§5.2) | the assertion still holds when it *is* referenced |
+| only `programs` when there are no setup entries | — |
+| only `unprompted` when the sole setup validator is `file-exists` | proves the two parts are independent, not one condition |
+| dedupe and sort | **the fixture declares its validators in reverse alphabetical order** |
+| a malformed `command` is skipped, not crashed on | check 8 asserted to fire on the same fixture |
+| a setup entry naming a missing validator is skipped | check 29 asserted to fire |
+| lesson-scope setup entries do not appear | a manifest-scope entry in the same fixture does |
+| emitted in bundle mode as well as instance mode | — |
+
+The sort case is the one that would quietly not work. If the fixture declared `cargo`
+before `git`, the assertion passes whether or not any sorting code exists; declaring them
+reversed is what makes it a test. Same class as building a float test from `0.5` and
+`0.25`, which passes before and after the fix.
+
+**What this does not cover.** §7's failure path — the start stopping, the verbatim report,
+the `not-certified` record — is behaviour in a conversation and none of it is reachable
+from this suite. It stays open in tutorAIl#45, alongside tutorAIl#22, which asks for the
+same kind of harness for optional lessons. Those two want one answer, not two.
+
 ---
 
 ## 6. Validator changes
@@ -441,106 +533,3 @@ This section now follows it as written.
   `TUTORAIL_SWEEP_SIBLING_REPOS` and counts them apart from the total. §6.5's regression bar
   is therefore statable as a single number on any machine, which it was not when this
   document was written.
-
----
-
-## 10. The design in three diagrams
-
-These restate §4 to §7. They add nothing and decide nothing; where a diagram and the prose
-disagree, the prose is right and the diagram is a defect.
-
-**They live here and not in the references on purpose.** `references/runner-protocol.md`
-loads into the tutor's context before the first task of every teaching session, so a
-diagram there costs tokens for every learner on every lesson. This document is never loaded
-by the runner.
-
-### 10.1 Structure — role lives at the invocation site
-
-The single structural point of §4: both lists resolve names into the *same* `validators`
-map, so the same validator is the learner's evidence in one place and the tutor's setup
-check in another. That is why role cannot be a field on the definition.
-
-```mermaid
-classDiagram
-    direction LR
-
-    class Manifest {
-        validators : name to Validator
-        setup_validators : list of SetupEntry
-    }
-    class LessonFrontmatter {
-        validators : list of name
-        setup_validators : list of SetupEntry
-    }
-    class Validator {
-        kind : command, file-exists, file-contains, git-diff, manual
-        command : list of string
-    }
-    class SetupEntry {
-        name
-        describe
-    }
-
-    Manifest "1" *-- "0..*" Validator : declares
-    Manifest "1" *-- "0..*" SetupEntry : runs at step 9
-    LessonFrontmatter "1" *-- "0..*" SetupEntry : runs when the lesson opens
-    SetupEntry ..> Validator : resolves name, never manual
-    LessonFrontmatter ..> Validator : resolves name, learner evidence
-```
-
-### 10.2 Materialization — disclose, then act
-
-§5's ordering, which is fixed at both ends by the existing sequence. The learner is told at
-step 7 and the first command runs at step 9.
-
-```mermaid
-flowchart TD
-    S6["Step 6 - validate the instance"]
-    S7["Step 7 - banner, and DISCLOSE:<br/>the distinct programs the course runs<br/>what the tutor will run unprompted"]
-    S8["Step 8 - place manifest supplies"]
-    S9["Step 9 - run manifest setup_validators"]
-    D{"every setup check passed?"}
-    L["Open lesson 1"]
-    F["Section 14.2 - the start stops"]
-
-    S6 --> S7 --> S8 --> S9 --> D
-    D -- yes --> L
-    D -- no --> F
-```
-
-### 10.3 A failed manifest-scope setup check
-
-§7, as `runner-protocol.md` section 14.2 implements it. Note what the diagram does **not**
-contain: there is no edge from `Reported` or `AwaitingLearner` straight to `Teaching`.
-Continuing past a failed setup check is allowed; continuing without passing through
-`Recorded` is the failure the whole of section 14.2 is shaped around.
-
-```mermaid
-stateDiagram-v2
-    direction TB
-
-    [*] --> Running : step 9
-    Running --> Passed
-    Running --> Failed
-    Passed --> Teaching
-
-    Failed --> Reported : report verbatim, name the validator,<br>its describe line, the command, the output
-    Reported --> Judged : say which it looks like -<br>the bundle, or this machine
-    Judged --> AwaitingLearner : the start stops
-
-    AwaitingLearner --> Declined : learner stops
-    AwaitingLearner --> Recorded : learner continues
-    Recorded --> Teaching : validation not-certified,<br>validation_unchecked [setup name],<br>one STATE.md line
-
-    Teaching --> [*] : never re-asked on resume
-    Declined --> [*]
-
-    note right of Recorded
-        The record is why continuing is allowed.
-        Without it, every later failure is ambiguous.
-    end note
-```
-
-A lesson-scope setup check that fails is the same situation one lesson in, with two
-differences: no `not-certified` record is written, because that record is about *starting*;
-and section 13.4 applies, so teaching continues on whatever the failure does not touch.
