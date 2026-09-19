@@ -35,6 +35,23 @@ the `supplies` exemption, and a runner instruction telling the tutor to work aro
 that had been fixed. Guidance describing a fixed bug teaches a reader to distrust correct
 output. Delete it, or correct it in place, in the same change that makes it stale.
 
+**A spec's filename is its creation date, and it is amended in place.** So
+`2026-09-14-validator-trust-and-setup-checks-design.md` holds content added on the 16th, and
+the 09-11 spec was corrected on the 19th. That is the convention and it is worth keeping —
+one document per decision, not one per revision. But it misled a reader on 2026-09-19, who
+opened a permalink whose header said `Date: 2026-09-14`, found none of the sections he had
+been asked to review, and had no way to tell whether he was early or the document was wrong.
+
+Every spec therefore carries a **`**Last amended:**` line under its `**Date:**`, and it moves
+with any edit to that file.** It is hand-maintained and git already knows the answer, so it
+will go stale exactly the way the version number in `README.md` did — check it against
+`git log -1 --format=%ad --date=short -- <file>` when you touch a spec.
+
+Two related habits, same root: **link to a branch when you want something reviewed, and to a
+sha when you want to cite evidence.** A permalink is frozen by design, so a review request
+pinned to one shows the reviewer whatever was true when you sent it and never what is true
+when they read it.
+
 **A check that cannot report a positive is worse than no check.** Prove a probe can see the
 thing it looks for before you trust its silence. This repository has caught it in a
 validator that could not fail, a test harness that matched a message from the wrong file, a

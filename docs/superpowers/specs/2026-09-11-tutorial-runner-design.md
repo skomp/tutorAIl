@@ -1,6 +1,7 @@
 # Generic Tutorial Runner + Portable Tutorial Bundles — Design
 
 **Date:** 2026-09-11
+**Last amended:** 2026-09-19
 **Status:** Design approved. Formats and first bundle implemented; runner in progress.
 **Repositories:** `tutorAIl` (runner), `tutorail-bundles` (courses), `automaton-db` (a learner)
 

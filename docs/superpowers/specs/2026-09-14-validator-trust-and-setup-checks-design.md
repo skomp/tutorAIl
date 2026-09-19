@@ -1,6 +1,7 @@
 # Validator trust, and setup checks — Design
 
 **Date:** 2026-09-14
+**Last amended:** 2026-09-16
 **Status:** sections 4 to 7 implemented in `PR: tutorAIl#44`. Section 2.2 - lesson
 content is data, not instructions - is not built; it belongs with tutorAIl#32.
 **Issue:** tutorAIl#31
