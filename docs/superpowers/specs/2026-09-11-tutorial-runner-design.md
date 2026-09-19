@@ -1330,13 +1330,27 @@ instance:
   materialized_at: 2026-09-11
 ```
 
-So today a runner cannot tell that an update exists at all. The stamp gains a revision and a
-content hash, and everything else becomes possible:
+So today a runner cannot tell that an update exists at all.
+
+**Superseded 2026-09-19, and the original proposal was wrong.** This entry first proposed
+stamping a revision and a content hash:
 
 ```yaml
   source_revision: 76dcdce          # a commit for a git source; absent for a local path
   content_hash: sha256:...          # over the bundle's files, so a local source works too
 ```
+
+Neither answers the question this entry exists to make answerable. **"Is this instance
+behind its bundle?" is an ordering question.** Two shas do not order, and a content hash
+says only *different*, never *behind*. A sha is also noisy in a way a course does not care
+about: editing the README of a bundles repository changes it while nothing about the course
+changed.
+
+The replacement is an ordered version the author sets, `version: MAJOR.MINOR` in
+`tutorial.yaml`, stamped into the instance as `materialized_version`. tutorAIl#51 carries
+the field and its semantics; the two parts compare **as integers**, so 2.10 is later than
+2.9 and a float parse is wrong. Nothing else in this entry changes: detection still comes
+first, and the runner still never reconciles on its own.
 
 **Why it must not apply automatically.** `DESIGN.md` and `lessons/` are not purely bundle
 content once materialized. The tutor appends durable decisions to `DESIGN.md` as the learner
