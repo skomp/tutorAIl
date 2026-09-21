@@ -31,6 +31,7 @@ never mutated in place: each case works on a fresh copy in a temp directory.
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import os
 import re
@@ -2880,6 +2881,212 @@ def m_setup_validators_misspelled_singular(root: Path) -> None:
         f"setup_validator:\n  - name: cargo-check\n    describe: {SETUP_DESCRIBE}",
         {"setup_validator": [{"name": "cargo-check", "describe": SETUP_DESCRIBE}]},
     )
+
+
+# -- the disclosure block: fixtures
+#
+# NOT a check. The disclosure section produces no finding, no warning and
+# takes no check number - it is a fact the report carries beside `target:`
+# and `yaml reader:`, so that step 7 of `state-lifecycle.md` section 3
+# REPEATS a block the validator derived instead of deriving one itself
+# (design section 5.4). So these fixtures are not case-table entries: there
+# is no check for a case to name.
+
+
+def m_disclosure_reverse_alphabetical_commands(root: Path) -> None:
+    """Two more `command` validators, declared in REVERSE alphabetical order.
+
+    THE FIXTURE IS THE TEST HERE. `programs` is specified sorted rather than
+    in declaration order, and a fixture that happens to declare `cargo`
+    before `git` passes whether or not any sorting code exists - the same
+    class of false pass as a float test built from 0.5 and 0.25. So the two
+    added validators are declared `zip`, then `git`, ahead of the three
+    `cargo` ones the baseline ships, and the assertion below proves that the
+    declaration order really is strictly descending before any assertion
+    about the report is made.
+
+    The baseline's three `cargo` validators also make this the dedupe
+    fixture: four distinct validators, three programs.
+    """
+    edit(
+        root / "tutorial.yaml",
+        "validators:\n  cargo-check:",
+        "validators:\n"
+        "  zip-archive: { kind: command, command: [zip, tutorial.zip] }\n"
+        "  git-status: { kind: command, command: [git, status] }\n"
+        "  cargo-check:",
+    )
+    parsed = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    assert isinstance(parsed, dict), "the mutated manifest no longer parses"
+    validators = parsed.get("validators")
+    assert isinstance(validators, dict), f"validators parsed to {validators!r}"
+    declared: list[str] = []
+    for vdef in validators.values():
+        if not isinstance(vdef, dict) or vdef.get("kind") != "command":
+            continue
+        command = vdef.get("command")
+        assert isinstance(command, list) and command, f"command is {command!r}"
+        if command[0] not in declared:
+            declared.append(str(command[0]))
+    assert declared == ["zip", "git", "cargo"], (
+        f"the distinct programs are declared in the order {declared}, and "
+        f"this fixture is only a sort test while that order is ['zip', "
+        f"'git', 'cargo']"
+    )
+    assert declared == sorted(declared, reverse=True) and declared != sorted(
+        declared
+    ), (
+        f"{declared} is not strictly reverse-alphabetical, so a report that "
+        f"simply echoed the declaration order would pass this fixture"
+    )
+
+
+def m_disclosure_command_validator_no_lesson_uses(root: Path) -> None:
+    """One `command` validator that nothing in the course references.
+
+    Section 5.2: every command validator is disclosed, not only the
+    reachable ones. `curl-fetch` is named by no lesson, by no
+    `setup_validators` entry and by no `failure_modes` signal, and the
+    banner must still say `curl` - which is precisely the case a learner
+    would want to see.
+    """
+    edit(
+        root / "tutorial.yaml",
+        "validators:\n  cargo-check:",
+        "validators:\n"
+        "  curl-fetch: { kind: command, command: [curl, https://example.invalid] }\n"
+        "  cargo-check:",
+    )
+    manifest = (root / "tutorial.yaml").read_text()
+    parsed = vb.load_yaml(manifest, "tutorial.yaml")
+    assert isinstance(parsed, dict) and "curl-fetch" in parsed.get("validators", {}), (
+        "the added validator did not survive the reader, so this fixture "
+        "proves nothing"
+    )
+    for lesson in sorted((root / "lessons").rglob("*.md")):
+        assert "curl-fetch" not in lesson.read_text(), (
+            f"{lesson.name} references curl-fetch, so it is not the "
+            f"unreferenced validator this fixture needs"
+        )
+    assert "curl-fetch" not in manifest.replace(
+        "  curl-fetch: { kind: command, command: [curl, https://example.invalid] }\n",
+        "",
+    ), "tutorial.yaml references curl-fetch somewhere other than its declaration"
+
+
+FOLDERED_COMMAND = "  spell-check: { kind: command, command: [aspell, list] }\n"
+FOLDERED_FILE_EXISTS = "  has-notes: { kind: file-exists, path: notes.md }\n"
+FOLDERED_SETUP_DESCRIBE = "confirms the notes file the course reads is in place"
+
+
+SECOND_SETUP_DESCRIBE = "confirms the library file the first lesson edits is there"
+
+
+def m_disclosure_two_manifest_setup_entries(root: Path) -> None:
+    """Two manifest-scope entries, so the block has a second `unprompted` line.
+
+    The one-entry fixtures cannot see the continuation line, and a format
+    invented for a list of one is a format nobody has read back.
+    """
+    _declare_setup_validators(
+        root,
+        "setup_validators:\n"
+        "  - name: cargo-check\n"
+        f"    describe: {SETUP_DESCRIBE}\n"
+        "  - name: has-lib\n"
+        f"    describe: {SECOND_SETUP_DESCRIBE}\n",
+        [
+            {"name": "cargo-check", "describe": SETUP_DESCRIBE},
+            {"name": "has-lib", "describe": SECOND_SETUP_DESCRIBE},
+        ],
+    )
+
+
+def m_disclosure_manifest_does_not_parse(root: Path) -> None:
+    """tutorial.yaml that yields no mapping at all.
+
+    Check 8 reports it and blocks. The question this fixture asks is what
+    the disclosure section says about a manifest nobody could read, and the
+    answer must not be "nothing to disclose": that is a positive claim about
+    a course this script never examined.
+    """
+    (root / "tutorial.yaml").write_text("- this manifest is a list, not a mapping\n")
+    parsed = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    assert not isinstance(parsed, dict), (
+        f"the manifest still parses to a mapping ({parsed!r}), so this "
+        f"fixture is not exercising the unreadable path"
+    )
+
+
+def m_disclosure_declares_neither(root: Path) -> None:
+    """The nothing-to-disclose fixture, and it asserts it is one.
+
+    `foldered-bundle` declares a `file-contains` validator and a `manual`
+    one, so there is no `command` anywhere in it, and it declares no
+    `setup_validators`. A baseline that quietly gained either would turn
+    every assertion below into a test of something else.
+    """
+    manifest = (root / "tutorial.yaml").read_text()
+    parsed = vb.load_yaml(manifest, "tutorial.yaml")
+    assert isinstance(parsed, dict), "the baseline manifest does not parse"
+    kinds = sorted(
+        str(v.get("kind"))
+        for v in parsed.get("validators", {}).values()
+        if isinstance(v, dict)
+    )
+    assert "command" not in kinds, (
+        f"this baseline declares a command validator ({kinds}), so it cannot "
+        f"show a report with nothing to disclose"
+    )
+    assert "setup_validators" not in parsed, (
+        "this baseline declares setup_validators, so it cannot show a report "
+        "with nothing to disclose"
+    )
+
+
+def m_disclosure_adds_one_command(root: Path) -> None:
+    """The positive control for the fixture above: one `command` validator.
+
+    Same baseline, one line added. If `programs` does not appear now, the
+    `nothing to disclose` line above was proving only that the derivation
+    never ran.
+    """
+    m_disclosure_declares_neither(root)
+    edit(root / "tutorial.yaml", "validators:\n", "validators:\n" + FOLDERED_COMMAND)
+    parsed = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    vdef = parsed.get("validators", {}).get("spell-check")
+    assert isinstance(vdef, dict) and vdef.get("command") == ["aspell", "list"], (
+        f"spell-check parsed to {vdef!r}, so this fixture is not adding a "
+        f"command validator"
+    )
+
+
+def m_disclosure_file_exists_setup_only(root: Path) -> None:
+    """A setup validator that is NOT a command, on a bundle with no commands.
+
+    This is the case that proves the two parts are independently
+    conditional rather than one condition wearing two hats: `unprompted`
+    must appear, `programs` must not.
+    """
+    m_disclosure_declares_neither(root)
+    edit(
+        root / "tutorial.yaml", "validators:\n", "validators:\n" + FOLDERED_FILE_EXISTS
+    )
+    append(
+        root / "tutorial.yaml",
+        f"\nsetup_validators:\n"
+        f"  - name: has-notes\n"
+        f"    describe: {FOLDERED_SETUP_DESCRIBE}\n",
+    )
+    parsed = vb.load_yaml((root / "tutorial.yaml").read_text(), "tutorial.yaml")
+    assert isinstance(parsed, dict), "the mutated manifest no longer parses"
+    assert parsed.get("validators", {}).get("has-notes") == {
+        "kind": "file-exists",
+        "path": "notes.md",
+    }, f"has-notes parsed to {parsed.get('validators', {}).get('has-notes')!r}"
+    assert parsed.get("setup_validators") == [
+        {"name": "has-notes", "describe": FOLDERED_SETUP_DESCRIBE}
+    ], f"setup_validators parsed to {parsed.get('setup_validators')!r}"
 
 
 # --------------------------------------------------------------------------
@@ -6893,6 +7100,416 @@ def test_no_real_bundle_ships_a_stamped_template() -> None:
             )
 
 
+# --------------------------------------------------------------------------
+# The disclosure block (design section 5.4 and 5.5, tutorAIl#45)
+# --------------------------------------------------------------------------
+
+EM_DASH = "—"
+DISCLOSURE_NOTHING = (
+    "disclosure:  nothing to disclose (no command validator, no setup_validators)"
+)
+
+
+def render_report(report) -> str:
+    """The report as a reader sees it, not as the Report object holds it."""
+    stream = io.StringIO()
+    vb.render(report, stream)
+    return stream.getvalue()
+
+
+def disclosure_block(output: str) -> list[str]:
+    """The `disclosure:` section PARSED OUT of a rendered report.
+
+    Every assertion about disclosure reads this and never the raw output.
+    `cargo` appears in validator names, in lesson prose and in the report's
+    own check table, so a substring match on the whole report would pass for
+    reasons that have nothing to do with disclosure - the failure this
+    repository already met once, as a harness matching a message from the
+    wrong file.
+
+    Returns [] when there is no `disclosure:` section, rather than the lines
+    of whatever section comes next; test_disclosure_extraction_helper is the
+    control that proves it, because a helper that silently returned the
+    `checks:` table instead would make several assertions below pass for
+    nothing.
+    """
+    lines = output.splitlines()
+    for index, line in enumerate(lines):
+        if not line.startswith("disclosure:"):
+            continue
+        section = [line]
+        for later in lines[index + 1 :]:
+            if later.startswith(" ") and later.strip():
+                section.append(later)
+                continue
+            break
+        return section
+    return []
+
+
+def disclosure_programs(output: str) -> str | None:
+    """The `programs:` line's value, or None when there is no such line."""
+    for line in disclosure_block(output):
+        stripped = line.strip()
+        if stripped.startswith("programs:"):
+            return stripped[len("programs:") :].strip()
+    return None
+
+
+def disclosure_unprompted(output: str) -> list[str]:
+    """The `unprompted:` entries, one per list item, continuations included."""
+    entries: list[str] = []
+    collecting = False
+    for line in disclosure_block(output)[1:]:
+        stripped = line.strip()
+        if stripped.startswith("unprompted:"):
+            collecting = True
+            entries.append(stripped[len("unprompted:") :].strip())
+        elif stripped.startswith("programs:"):
+            collecting = False
+        elif collecting:
+            entries.append(stripped)
+    return entries
+
+
+def disclosure_run(baseline: str, mode: str, *mutators: Mutator):
+    """Validate a mutated copy of a baseline and render its report."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = fresh(baseline, Path(tmpdir))
+        if mode == "instance" and baseline not in INSTANCE_BASELINES:
+            to_instance(root)
+        for mutate in mutators:
+            mutate(root)
+        report = vb.validate(root, mode)
+        return report, render_report(report)
+
+
+def test_disclosure_extraction_helper() -> None:
+    """The helper's own control, before anything relies on what it extracts.
+
+    A report with no `disclosure:` section must yield NOTHING. The failure
+    it guards is a helper that walks off the end of a missing section and
+    returns the next one - `checks:` and its indented table - which would
+    make an assertion like "cargo is in the block" pass on a report that
+    carries no block at all, because check 8's description mentions a
+    command validator.
+    """
+    print("\nthe disclosure extraction helper, and its control:")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        catalog = Path(tmpdir) / "catalog.yaml"
+        catalog.write_text("catalog_version: 1\n")
+        rendered = render_report(vb.validate_catalog(catalog, False))
+    record(
+        "\nchecks:\n  [ 1]" in rendered,
+        "a catalogue report really does carry an indented section after the "
+        "header - so there is something for a broken helper to return",
+        f"the control is vacuous otherwise:\n{rendered}",
+    )
+    record(
+        "disclosure:" not in rendered,
+        "and a catalogue report carries no disclosure section - a catalogue "
+        "has no validators map to derive one from",
+        rendered,
+    )
+    record(
+        disclosure_block(rendered) == [],
+        "the helper returns nothing for it, not the section that follows",
+        f"it returned {disclosure_block(rendered)!r}",
+    )
+    record(
+        disclosure_programs(rendered) is None
+        and disclosure_unprompted(rendered) == [],
+        "and neither reader invents a value out of the next section",
+        f"programs = {disclosure_programs(rendered)!r}, "
+        f"unprompted = {disclosure_unprompted(rendered)!r}",
+    )
+
+    synthetic = (
+        "tutorAIl validator - mode: bundle\n"
+        "target:      /somewhere\n"
+        "yaml reader: builtin\n"
+        "disclosure:\n"
+        "  programs:    cargo, git\n"
+        f"  unprompted:  cargo-check {EM_DASH} compiles the skeleton\n"
+        f"               has-lib {EM_DASH} the library file is in place\n"
+        "\n"
+        "checks:\n"
+        "  [ 1] ran     cargo is mentioned here too\n"
+    )
+    record(
+        disclosure_block(synthetic)
+        == [
+            "disclosure:",
+            "  programs:    cargo, git",
+            f"  unprompted:  cargo-check {EM_DASH} compiles the skeleton",
+            f"               has-lib {EM_DASH} the library file is in place",
+        ],
+        "and it returns the whole section, continuation lines included, when "
+        "there is one",
+        f"it returned {disclosure_block(synthetic)!r}",
+    )
+    record(
+        disclosure_programs(synthetic) == "cargo, git"
+        and disclosure_unprompted(synthetic)
+        == [
+            f"cargo-check {EM_DASH} compiles the skeleton",
+            f"has-lib {EM_DASH} the library file is in place",
+        ],
+        "both readers see only what the section holds, not the check table "
+        "below it",
+        f"programs = {disclosure_programs(synthetic)!r}, "
+        f"unprompted = {disclosure_unprompted(synthetic)!r}",
+    )
+
+
+def test_disclosure_block() -> None:
+    """Section 5.4's block, in both modes. It is NOT a check.
+
+    It produces no finding, no warning and takes no check number: it is a
+    fact the report carries beside `target:` and `yaml reader:`, so that
+    step 7 of `state-lifecycle.md` section 3 repeats a derived block instead
+    of deriving one. Every assertion reads the section parsed out of the
+    rendered report (disclosure_block), never a substring of the whole.
+    """
+    print("\nthe report's disclosure block, in both modes:")
+    for mode in ("bundle", "instance"):
+        # Both parts, from a bundle that has command validators AND a
+        # manifest-scope setup entry.
+        report, out = disclosure_run("automaton", mode, m_setup_validators_well_formed)
+        record(
+            disclosure_programs(out) == "cargo",
+            f"{mode}: `programs` names argv[0] of the command validators",
+            f"block = {disclosure_block(out)!r}",
+        )
+        record(
+            disclosure_unprompted(out) == [f"cargo-check {EM_DASH} {SETUP_DESCRIBE}"],
+            f"{mode}: `unprompted` names the setup entry with its describe line",
+            f"block = {disclosure_block(out)!r}",
+        )
+        record(
+            not report.findings and not report.warnings,
+            f"{mode}: and the fixture that produced it is a clean bundle",
+            f"findings = {[str(f) for f in report.findings]}, "
+            f"warnings = {[str(w) for w in report.warnings]}",
+        )
+
+        # Only `programs`, when nothing is declared unprompted. The
+        # first control for the case above: the two parts are separate.
+        _, out = disclosure_run("automaton", mode)
+        record(
+            disclosure_programs(out) == "cargo"
+            and disclosure_unprompted(out) == [],
+            f"{mode}: no setup_validators means no `unprompted` line, and "
+            f"`programs` is unaffected",
+            f"block = {disclosure_block(out)!r}",
+        )
+
+        # Neither. The second control, and section 5.4's point that silence
+        # would be ambiguous: the report SAYS there is nothing.
+        report, out = disclosure_run("foldered", mode, m_disclosure_declares_neither)
+        record(
+            disclosure_block(out) == [DISCLOSURE_NOTHING],
+            f"{mode}: a bundle declaring neither says so, in one line",
+            f"block = {disclosure_block(out)!r}",
+        )
+        record(
+            disclosure_block(out) != []
+            and disclosure_programs(out) is None
+            and disclosure_unprompted(out) == []
+            and not report.findings,
+            f"{mode}: and it carries no `programs` and no `unprompted` - a "
+            f"section that IS there and says nothing, not an absent section",
+            f"block = {disclosure_block(out)!r}, findings = "
+            f"{[str(f) for f in report.findings]}",
+        )
+
+        # The positive control for `nothing to disclose`: one command
+        # validator on the same baseline makes `programs` appear.
+        report, out = disclosure_run("foldered", mode, m_disclosure_adds_one_command)
+        record(
+            disclosure_programs(out) == "aspell" and not report.findings,
+            f"{mode}: adding one command validator to that same bundle makes "
+            f"`programs` appear - so the line above is a derivation, not a "
+            f"derivation that never ran",
+            f"block = {disclosure_block(out)!r}, findings = "
+            f"{[str(f) for f in report.findings]}",
+        )
+
+        # Only `unprompted`, when the sole setup validator is `file-exists`.
+        # This is what proves the two parts are independently conditional
+        # rather than one condition wearing two hats.
+        report, out = disclosure_run(
+            "foldered", mode, m_disclosure_file_exists_setup_only
+        )
+        record(
+            disclosure_programs(out) is None
+            and disclosure_unprompted(out)
+            == [f"has-notes {EM_DASH} {FOLDERED_SETUP_DESCRIBE}"],
+            f"{mode}: a `file-exists` setup validator is disclosed although "
+            f"the bundle runs no program at all",
+            f"block = {disclosure_block(out)!r}",
+        )
+        record(
+            not report.findings,
+            f"{mode}: and that bundle is valid - a setup validator need not "
+            f"be a command",
+            f"findings = {[str(f) for f in report.findings]}",
+        )
+
+        # Dedupe and sort. The fixture declares zip, git, cargo IN THAT
+        # ORDER; see the mutator, which asserts the order before this runs.
+        _, out = disclosure_run(
+            "automaton", mode, m_disclosure_reverse_alphabetical_commands
+        )
+        record(
+            disclosure_programs(out) == "cargo, git, zip",
+            f"{mode}: `programs` is sorted and deduplicated - four validators "
+            f"declared zip, git, cargo, cargo, cargo give three programs",
+            f"block = {disclosure_block(out)!r}",
+        )
+
+        # Section 5.2: every command validator, not only the reachable ones.
+        report, out = disclosure_run(
+            "automaton", mode, m_disclosure_command_validator_no_lesson_uses
+        )
+        record(
+            disclosure_programs(out) == "cargo, curl",
+            f"{mode}: a command validator no lesson references is disclosed "
+            f"anyway, beside one that every lesson uses",
+            f"block = {disclosure_block(out)!r}",
+        )
+        record(
+            not report.findings,
+            f"{mode}: and an unreferenced validator is not itself a defect - "
+            f"the over-disclosure is deliberate, not a symptom",
+            f"findings = {[str(f) for f in report.findings]}",
+        )
+
+        # Defensive derivation: a malformed `command` is skipped, and the
+        # check that owns that fault is asserted firing on the same fixture.
+        report, out = disclosure_run("automaton", mode, m_command_is_a_shell_string)
+        record(
+            disclosure_programs(out) == "cargo",
+            f"{mode}: a `command` that is a shell string contributes no "
+            f"program and does not crash the derivation",
+            f"block = {disclosure_block(out)!r}",
+        )
+        record(
+            disclosure_block(out) != []
+            and "curl" not in (disclosure_programs(out) or ""),
+            f"{mode}: and nothing guesses argv[0] out of the string, in a "
+            f"block that was drawn",
+            f"block = {disclosure_block(out)!r}",
+        )
+        record(
+            any(f.check == 8 for f in report.findings),
+            f"{mode}: check 8 reports that same malformed command, so "
+            f"disclosure is silent about it because the fault is already "
+            f"reported, not because nobody looks",
+            f"findings = {[str(f) for f in report.findings]}",
+        )
+
+        # A setup entry naming a validator that does not exist is skipped,
+        # and again the owning check is asserted firing.
+        report, out = disclosure_run(
+            "automaton", mode, m_setup_validator_name_misspelled
+        )
+        record(
+            disclosure_unprompted(out) == []
+            and disclosure_programs(out) == "cargo",
+            f"{mode}: a setup entry naming a missing validator is skipped, "
+            f"and the `programs` beside it proves the block was drawn",
+            f"block = {disclosure_block(out)!r}",
+        )
+        record(
+            any(f.check == 29 for f in report.findings),
+            f"{mode}: check 29 reports that same entry",
+            f"findings = {[str(f) for f in report.findings]}",
+        )
+
+        # Lesson-scope entries are not disclosed at materialization, and a
+        # manifest-scope entry in the same fixture proves the exclusion is
+        # about scope rather than about the derivation failing.
+        report, out = disclosure_run(
+            "automaton",
+            mode,
+            m_setup_validators_well_formed,
+            m_setup_validators_lesson_scope_well_formed,
+        )
+        record(
+            disclosure_unprompted(out) == [f"cargo-check {EM_DASH} {SETUP_DESCRIBE}"],
+            f"{mode}: only the manifest-scope setup entry is disclosed",
+            f"block = {disclosure_block(out)!r}",
+        )
+        record(
+            disclosure_block(out) != []
+            and LESSON_SETUP_DESCRIBE not in "\n".join(disclosure_block(out))
+            and report.status.get(29, ("", ""))[1]
+            == "2 setup_validators entries across 2 declaration sites",
+            f"{mode}: the lesson-scope entry is absent from the block although "
+            f"check 29 saw both of them",
+            f"block = {disclosure_block(out)!r}, check 29 status = "
+            f"{report.status.get(29)!r}",
+        )
+
+        # Two manifest-scope entries. The continuation line is a format this
+        # change invented, and a format only ever exercised with a list of
+        # one is a format nobody has read back.
+        _, out = disclosure_run(
+            "automaton", mode, m_disclosure_two_manifest_setup_entries
+        )
+        record(
+            disclosure_unprompted(out)
+            == [
+                f"cargo-check {EM_DASH} {SETUP_DESCRIBE}",
+                f"has-lib {EM_DASH} {SECOND_SETUP_DESCRIBE}",
+            ],
+            f"{mode}: a second setup entry gets its own line, in declaration "
+            f"order",
+            f"block = {disclosure_block(out)!r}",
+        )
+
+        # An unusable manifest. NOT in section 5.4 as approved: the section
+        # gives two shapes, and over a tutorial.yaml that did not parse the
+        # `nothing to disclose` one would be a claim about a course nobody
+        # examined. This asserts the third shape instead.
+        report, out = disclosure_run(
+            "automaton", mode, m_disclosure_manifest_does_not_parse
+        )
+        record(
+            disclosure_block(out) == []
+            or "nothing to disclose" not in disclosure_block(out)[0],
+            f"{mode}: an unusable tutorial.yaml never yields `nothing to "
+            f"disclose` - the claim would be false",
+            f"block = {disclosure_block(out)!r}",
+        )
+        record(
+            disclosure_block(out) != []
+            and disclosure_block(out)[0].startswith("disclosure:  not derived")
+            and any(f.check == 8 for f in report.findings),
+            f"{mode}: it says it was not derived, and check 8 reports why",
+            f"block = {disclosure_block(out)!r}, findings = "
+            f"{[str(f) for f in report.findings]}",
+        )
+
+    # Emitted in bundle mode as well as instance mode, and identically:
+    # the author validating a bundle sees what their course will tell a
+    # learner it runs, which is the moment to notice `curl` in the list.
+    _, as_bundle = disclosure_run(
+        "automaton", "bundle", m_setup_validators_well_formed
+    )
+    _, as_instance = disclosure_run(
+        "automaton", "instance", m_setup_validators_well_formed
+    )
+    record(
+        disclosure_block(as_bundle) == disclosure_block(as_instance) != [],
+        "the same bundle discloses the same block in bundle mode and in "
+        "instance mode",
+        f"bundle = {disclosure_block(as_bundle)!r}, instance = "
+        f"{disclosure_block(as_instance)!r}",
+    )
+
+
 def test_the_total_is_reproducible_from_this_commit() -> None:
     """The reported total must not depend on what else the machine holds.
 
@@ -7001,6 +7618,8 @@ def main() -> int:
     test_assumes_reviewed_is_bundle_only()
     test_teaching_method_status()
     test_setup_validators_status()
+    test_disclosure_extraction_helper()
+    test_disclosure_block()
     test_manifest_near_miss_distance()
     test_known_manifest_fields_match_the_field_reference()
     test_unknown_top_level_field_warns_and_never_rejects()

