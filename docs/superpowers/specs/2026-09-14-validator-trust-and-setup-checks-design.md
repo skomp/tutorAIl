@@ -484,7 +484,7 @@ All eight fixture bundles in this repository stay clean — none declares
 `TUTORAIL_SWEEP_SIBLING_REPOS=1` (tutorAIl#43).
 
 The bar is one number, and it is the same number on every machine:
-**651 assertions** for `tests/test_validate_bundle.py` and **338** for
+**702 assertions** for `tests/test_validate_bundle.py` and **338** for
 `tests/test_catalogs.py`. Measured in six configurations — default, `HOME` pointed at an
 empty directory, sibling sweep on, and each of those with PyYAML blocked on `PYTHONPATH`.
 All six agree, which is what tutorAIl#29 and tutorAIl#37 together bought.

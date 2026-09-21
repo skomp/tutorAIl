@@ -1,7 +1,7 @@
 # Bundle Relationships and Concept-Based Prerequisites — Design
 
 **Date:** 2026-09-12
-**Last amended:** 2026-09-12
+**Last amended:** 2026-09-21
 **Status:** Approved, not started. **Blocked on the `supplies` branch merging.**
 **Repository:** `tutorAIl`
 

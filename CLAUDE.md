@@ -47,6 +47,13 @@ with any edit to that file.** It is hand-maintained and git already knows the an
 will go stale exactly the way the version number in `README.md` did — check it against
 `git log -1 --format=%ad --date=short -- <file>` when you touch a spec.
 
+**It means the last commit that touched the file, not the last *substantive* amendment.**
+That distinction produced a false alarm on 2026-09-21: the 09-12 spec's header said 09-12
+because its content had not moved, while git said 09-19 because the commit that added these
+headers had touched it. A date whose significance a reader must judge is not checkable, and
+a rule carrying an exception is the kind this repository keeps having to relearn. A typo fix
+moves the line. That is the cost, and it is the right one.
+
 Two related habits, same root: **link to a branch when you want something reviewed, and to a
 sha when you want to cite evidence.** A permalink is frozen by design, so a review request
 pinned to one shows the reviewer whatever was true when you sent it and never what is true

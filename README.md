@@ -385,7 +385,7 @@ One skill body serves both hosts.
 No pytest; two plain scripts, run from a checkout of this repository.
 
 ```
-python3 tests/test_validate_bundle.py     # 651 assertions
+python3 tests/test_validate_bundle.py     # 702 assertions
 python3 tests/test_catalogs.py            # 338 assertions
 ```
 
