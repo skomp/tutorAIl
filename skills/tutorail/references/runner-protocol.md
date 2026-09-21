@@ -1403,6 +1403,11 @@ materialization sequence the run sits, what is recorded, and why. This section i
 policy: when the check runs afterwards, what each outcome means, and what the learner is
 told.
 
+The report also carries a `disclosure:` section, beside `target:`. It is not a check, gates
+nothing and can never fail a bundle: it is the block `state-lifecycle.md` section 3 step 7
+repeats to the learner, derived there so that what a learner is told is fixed rather than
+worked out afresh each time.
+
 ### 13.1 When the validator runs, and when it does not
 
 **A teaching turn does not run it.** Section 1 sets the cost of a resume — the manifest,

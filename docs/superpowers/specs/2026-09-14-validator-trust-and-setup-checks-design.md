@@ -1,9 +1,11 @@
 # Validator trust, and setup checks — Design
 
 **Date:** 2026-09-14
-**Last amended:** 2026-09-16
-**Status:** sections 4 to 7 implemented in `PR: tutorAIl#44`. Section 2.2 - lesson
-content is data, not instructions - is not built; it belongs with tutorAIl#32.
+**Last amended:** 2026-09-21
+**Status:** sections 4 to 7 implemented in `PR: tutorAIl#44`. Sections 5.4 and 5.5 — the
+validator deriving the disclosure block, and its harness — implemented for tutorAIl#45;
+section 7's failure path is conversational behaviour and stays open there. Section 2.2 -
+lesson content is data, not instructions - is not built; it belongs with tutorAIl#32.
 **Issue:** tutorAIl#31
 **Supersedes:** the "Proposed direction" section of tutorAIl#31, which was written before
 the threat model was settled and asks for a capability model this document rejects.
@@ -275,7 +277,9 @@ The banner states what happens. It never states that it is safe. This is stateme
 
 ### 5.4 The block is derived by the validator, not by the tutor
 
-**Added 2026-09-16, closing tutorAIl#45's deterministic half.**
+**Added 2026-09-16, closing tutorAIl#45's deterministic half. Implemented 2026-09-21** in
+`validate_bundle.py` — `derive_disclosure()` and `render_disclosure()` — with one addition
+this section did not foresee, recorded at the end of it.
 
 As written above, §5.1 is an instruction the tutor reasons through: collect every
 `command` validator, take `argv[0]`, deduplicate, decide which of two parts apply. Nothing
@@ -333,7 +337,35 @@ per-check counts, so this is the same kind of line; and it keeps the validator t
 script that reads a manifest authoritatively. No new script, so `SKILL.md`'s "two scripts,
 and a learner's session runs both" stays true.
 
+**A third shape, added while implementing this: an unusable manifest.** This section gives
+two, and neither is honest over a `tutorial.yaml` that did not parse into a mapping. The
+derivation would read no `validators` map and no `setup_validators` there, so it would
+print `nothing to disclose (no command validator, no setup_validators)` — a positive claim
+about a course this script never examined, and exactly the kind of claim §2.1 forbids it to
+make. So the report says it could not derive one instead:
+
+```
+disclosure:  not derived - tutorial.yaml did not parse into a mapping, so the validators map and setup_validators could not be read
+```
+
+Check 8 is what reports *why*, and it blocks; the exit code is unchanged, because
+disclosure is not a check. Also note that the first two shapes' names are the **validator
+name** and not the command — `cargo-check`, as this section's own example prints it, and
+not §5.1's `cargo check`. The derivation rule here, `name — describe`, is the one that is
+implemented; §5.1 predates it and its example is the banner's sentence, not the report's.
+
+Catalogue reports carry no `disclosure:` section at all. A catalogue is a different kind of
+document with its own check table and no `validators` map, so there is nothing there for
+the absence to be ambiguous about.
+
 ### 5.5 How the block is tested
+
+**Implemented 2026-09-21** in `tests/test_validate_bundle.py` —
+`test_disclosure_extraction_helper` and `test_disclosure_block`. All ten cases below, with
+their controls, in both modes; two further cases the table did not ask for, and both of
+them found something this section had not settled: a **second** `unprompted` entry, whose
+continuation line is a format the one-entry cases could never read back, and the unusable
+manifest §5.4 now records. The suite went from 651 assertions to 702.
 
 Every assertion reads the `disclosure:` section **parsed out of the report**, never the raw
 output. `cargo` appears in validator names and lesson prose, so a substring match on the
@@ -521,8 +553,11 @@ This section now follows it as written.
 ## 9. Relationship to other issues
 
 - **tutorAIl#31** — this document supersedes its proposed direction. §4 to §7 are
-  implemented in `PR: tutorAIl#44`; §5's disclosure block is a runner behaviour and no
-  harness exercises it.
+  implemented in `PR: tutorAIl#44`. §5's disclosure block was a runner behaviour no harness
+  could exercise; §5.4 moved its derivation into the validator and §5.5's suite now covers
+  the content, so what is left of it in tutorAIl#45 is §7's failure path alone — the start
+  stopping, the verbatim report and the `not-certified` record, all of which are
+  conversational.
 - **tutorAIl#32** — platform guardrails. §2.1 statement 1 and §2.2 belong to the same
   question that issue asks: what the protocol carries because no host enforces it. The two
   should agree on which layer holds which rule.

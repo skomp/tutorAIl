@@ -172,52 +172,48 @@ Steps, in order:
    `teaching_method` existed, has a banner to draw without an edit.
 
    **Then the disclosure block, below the banner's sentences.** The learner is told at this
-   step and the first command runs at step 9 — *disclose, then act*. Two parts, each drawn
-   only when the manifest gives it something to say:
+   step and the first command runs at step 9 — *disclose, then act*.
+
+   **The validator derived it. Repeat it; do not work it out again.** The run at section
+   3.1 prints a `disclosure:` section in its report, beside `target:` and `yaml reader:`,
+   and that section *is* the block:
+
+   ```
+   disclosure:
+     programs:    cargo, git
+     unprompted:  cargo-check — confirms the placed skeleton compiles
+   ```
+
+   Say it to the learner in the banner's own words, adding nothing and dropping nothing:
 
    ```
    This course runs programs on your machine: cargo, git
 
    Before the first lesson it will run one itself:
-     cargo check — confirms the placed skeleton compiles
+     cargo-check — confirms the placed skeleton compiles
    ```
 
-   - **The distinct programs.** `argv[0]` of every `command` validator in the manifest's
-     `validators` map, de-duplicated, in the order the map declares them. Drawn when the
-     map holds at least one `command` validator. This is the part a learner can judge
-     before reading a single lesson: `cargo, git` is unremarkable, `curl` is a reason to
-     stop. Do not dump the full argument lists here — that is noise a learner cannot
-     evaluate, and the programs are the part they can.
-   - **What you will run unprompted**, in full, each with its `describe` line. Drawn when
-     the manifest declares at least one `setup_validators` entry, **of any kind** — not
-     only `command`. A `file-exists` setup check also happens without the learner asking,
-     and what the disclosure is about is that something is unprompted, never that
-     something is risky.
-
-   The two conditions are independent. A course with command validators and no setup step
-   draws only the first part; a course whose only setup check is `file-exists` draws only
-   the second; a course with neither draws no block at all — the same pattern
+   `programs` is every program this course can run, and it is the part a learner can judge
+   before reading a single lesson: `cargo, git` is unremarkable, `curl` is a reason to
+   stop. `unprompted` is what you will run without being asked, each with the author's own
+   `describe` line. **Draw only the parts the report printed** — the two are independently
+   conditional, so a course with command validators and no setup step has only `programs`,
+   and a course whose only setup check is `file-exists` has only `unprompted`. A report
+   reading `disclosure:  nothing to disclose` means no block at all — the same pattern
    `teaching_method` already uses, where the banner is one sentence shorter and nothing
    warns.
 
-   **Disclose every `command` validator in the map, not only the ones a lesson reaches.**
-   Reachability is computable — a validator is reached by a lesson's `validators`, by
-   either `setup_validators`, or by a `failure_modes` signal — and computing it here is
-   still the wrong answer. It would create a second source of truth for the runner's own
-   dispatch logic, which then has to track it forever and fails silently when it does not.
-   **The accepted cost, stated so it is not rediscovered as a flaw: the block can name a
-   program this course never runs.** That was accepted deliberately, because the two errors
+   **Do not edit the list on the way through.** It deliberately names *every* `command`
+   validator the manifest declares, not only the ones a lesson reaches, so it can name a
+   program this course never runs. That was accepted deliberately, because the two errors
    are not symmetric — over-disclosure makes the block slightly noisy, while
    under-disclosure means a learner consented to something nobody told them about, and no
-   later correction reaches a consent already given.
+   later correction reaches a consent already given. Lesson-scope `setup_validators` are
+   excluded for the same reason they always were: they are announced when the lesson opens,
+   in the same breath as that lesson's supplies placement, using the same `describe` line.
 
-   **Lesson-scope `setup_validators` are not disclosed here.** They are announced when the
-   lesson opens, in the same breath as that lesson's supplies placement, using the same
-   `describe` line. Listing every setup check of every lesson at materialization would
-   restate the course's whole structure on a screen the learner meets before lesson one.
-
-   **The block states what happens. It never states that it is safe.** Nothing here has
-   checked a command, nothing can, and any wording shaped like *"these commands have been
+   **The block states what happens. It never states that it is safe.** Nothing has checked
+   a command, nothing can, and any wording shaped like *"these commands have been
    checked"* is a defect — see `runner-protocol.md` section 14.
 
    Then report what was created — the instance path, the course title, the first lesson.
